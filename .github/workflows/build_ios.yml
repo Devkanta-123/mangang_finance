@@ -1,0 +1,47 @@
+name: Build iOS Release
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    name: Build iOS App (.ipa / .app)
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java SDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS Release (Unsigned IPA / App)
+        run: |
+          flutter build ios --release --no-codesign
+
+      - name: Package iOS App output
+        run: |
+          mkdir -p build/ios/iphoneos_release
+          cp -r build/ios/iphoneos/Runner.app build/ios/iphoneos_release/
+          cd build/ios/iphoneos_release
+          zip -r ../../mangang_finance_ios.zip Runner.app
+
+      - name: Upload iOS App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mangang-finance-ios-release
+          path: build/mangang_finance_ios.zip
