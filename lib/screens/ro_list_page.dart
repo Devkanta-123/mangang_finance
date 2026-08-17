@@ -56,6 +56,7 @@ class _RoListPageState extends State<RoListPage> {
           item.aadharno.toLowerCase().contains(query) ||
           item.guardianname.toLowerCase().contains(query) ||
           item.designation.toLowerCase().contains(query) ||
+          item.route.toLowerCase().contains(query) ||
           item.district.toLowerCase().contains(query);
 
       // 2. District Filter
@@ -355,21 +356,53 @@ class _RoListPageState extends State<RoListPage> {
                                 ),
                               ),
                             ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: Colors.amber.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.amber.shade300),
-                              ),
-                              child: Text(
-                                item.designation.isNotEmpty ? item.designation : 'RO Officer',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.amber.shade900,
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.shade50,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.amber.shade300),
+                                  ),
+                                  child: Text(
+                                    item.designation.isNotEmpty ? item.designation : 'RO Officer',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.amber.shade900,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                if (item.route.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade50,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: Colors.blue.shade200),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.alt_route_rounded,
+                                            size: 10, color: Colors.blue.shade800),
+                                        const SizedBox(width: 2),
+                                        Text(
+                                          item.route,
+                                          style: TextStyle(
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blue.shade900,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ],
                         ),
@@ -451,15 +484,18 @@ class _RoListPageState extends State<RoListPage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const CircleAvatar(
-              radius: 20,
-              backgroundColor: Colors.black,
-              child: Icon(Icons.badge_rounded, color: Colors.white, size: 22),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.person, color: Colors.amber.shade900, size: 20),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -486,14 +522,15 @@ class _RoListPageState extends State<RoListPage> {
               _buildModalRow('3. RO Name', item.roname),
               _buildModalRow('4. W/O, S/O, D/O', item.guardianname),
               _buildModalRow('5. Designation', item.designation),
-              _buildModalRow('6. Mobile No', item.mobileno),
-              _buildModalRow('7. Aadhar No', item.aadharno),
-              _buildModalRow('8. Address', item.address),
-              _buildModalRow('9. Post Office (P/O)', item.postoffice),
-              _buildModalRow('10. Police Station (P/S)', item.policestation),
-              _buildModalRow('11. District', item.district),
-              _buildModalRow('12. PIN Code', item.pincode),
-              _buildModalRow('13. Status', item.status),
+              _buildModalRow('6. Assigned Route', item.route.isNotEmpty ? item.route : 'Not assigned'),
+              _buildModalRow('7. Mobile No', item.mobileno),
+              _buildModalRow('8. Aadhar No', item.aadharno),
+              _buildModalRow('9. Address', item.address),
+              _buildModalRow('10. Post Office (P/O)', item.postoffice),
+              _buildModalRow('11. Police Station (P/S)', item.policestation),
+              _buildModalRow('12. District', item.district),
+              _buildModalRow('13. PIN Code', item.pincode),
+              _buildModalRow('14. Status', item.status),
             ],
           ),
         ),

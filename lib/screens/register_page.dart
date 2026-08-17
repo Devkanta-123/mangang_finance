@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/custom_text_field.dart';
+import '../widgets/app_logo.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -34,56 +35,59 @@ class _RegisterPageState extends State<RegisterPage> {
     UserType.loanee: Icons.person,
   };
 
-  Future<void> _generateAndSendOTP() async {
+  Future<void> _handleRegisterAndCreatePin() async {
     if (_formKey.currentState!.validate()) {
       setState(() {
         _isLoading = true;
       });
 
-      // Simulate API call
-      await Future.delayed(const Duration(seconds: 1));
-      
-      // Generate OTP
-      String otp = (100000 + DateTime.now().millisecondsSinceEpoch % 900000).toString();
-      Provider.of<AuthProvider>(context, listen: false).setOTP(otp);
-      
-      // Register user
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      String userName;
+      if (_selectedUserType == UserType.admin) {
+        userName = _nameController.text.trim();
+      } else if (_selectedUserType == UserType.ro) {
+        userName = _roNameController.text.trim().isNotEmpty
+            ? _roNameController.text.trim()
+            : 'RO Officer';
+      } else {
+        userName = _accountNameController.text.trim().isNotEmpty
+            ? _accountNameController.text.trim()
+            : 'Loanee Account';
+      }
+
+      // Register user in AuthProvider
       User user = User(
-        name: _nameController.text,
-        mobileNo: _mobileController.text,
+        name: userName,
+        mobileNo: _mobileController.text.trim(),
         userType: _selectedUserType,
-        customerId: _selectedUserType != UserType.admin ? _customerIdController.text : null,
-        roName: _selectedUserType == UserType.ro ? _roNameController.text : null,
-        accountName: _selectedUserType == UserType.loanee ? _accountNameController.text : null,
+        customerId: _selectedUserType != UserType.admin ? _customerIdController.text.trim() : null,
+        roName: _selectedUserType == UserType.ro ? _roNameController.text.trim() : null,
+        accountName: _selectedUserType == UserType.loanee ? _accountNameController.text.trim() : null,
       );
-      
-      Provider.of<AuthProvider>(context, listen: false).registerUser(user);
-      
+
+      if (!mounted) return;
+      await Provider.of<AuthProvider>(context, listen: false).registerUser(user);
       setState(() {
         _isLoading = false;
       });
-      
-      // Show OTP sent message
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           content: Row(
             children: [
-              const Icon(Icons.check_circle, color: Colors.white),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text('OTP sent to ${_mobileController.text}'),
-              ),
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 10),
+              Expanded(child: Text('Account registered! Set your 6-digit Security PIN.')),
             ],
           ),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
         ),
       );
-      
-      Navigator.pushNamed(context, '/otp-verify');
+
+      // Directly navigate to Login page for PIN setup
+      Navigator.pushReplacementNamed(context, '/login');
     }
   }
 
@@ -147,34 +151,50 @@ class _RegisterPageState extends State<RegisterPage> {
   Widget _buildHeader() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 40, 24, 30),
+      padding: const EdgeInsets.fromLTRB(24, 44, 24, 30),
       decoration: const BoxDecoration(
-        color: Color(0xFF8B1A1A),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(30),
-          bottomRight: Radius.circular(30),
+        gradient: LinearGradient(
+          colors: [Color(0xFF8B1A1A), Color(0xFF5E0F0F)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(36),
+          bottomRight: Radius.circular(36),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Row(
             children: [
               Container(
-                width: 50,
-                height: 50,
+                padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: const Icon(
-                  Icons.currency_rupee_rounded,
+                  shape: BoxShape.circle,
                   color: Colors.white,
-                  size: 30,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.18),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: const AppLogo(
+                  width: 72,
+                  height: 72,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -184,9 +204,10 @@ class _RegisterPageState extends State<RegisterPage> {
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
-                      letterSpacing: 1,
+                      letterSpacing: 0.8,
                     ),
                   ),
+                  SizedBox(height: 2),
                   Text(
                     'Create your account',
                     style: TextStyle(
@@ -198,27 +219,28 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: Row(
               children: [
                 const Icon(
-                  Icons.security,
+                  Icons.verified_user_rounded,
                   color: Colors.white,
                   size: 20,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Secure registration with OTP verification',
+                    'Direct account registration & security PIN setup',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
-                      fontSize: 13,
+                      color: Colors.white.withOpacity(0.92),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
@@ -247,7 +269,7 @@ class _RegisterPageState extends State<RegisterPage> {
         Container(
           decoration: BoxDecoration(
             color: Colors.grey.shade50,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: Colors.grey.shade200,
               width: 1.5,
@@ -310,21 +332,22 @@ class _RegisterPageState extends State<RegisterPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Name Field
-        _buildFieldLabel('Full Name'),
-        CustomTextField(
-          controller: _nameController,
-          hintText: _selectedUserType == UserType.ro ? 'Enter RO name' : 'Enter your full name',
-          icon: Icons.person_outline,
-          validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'Please enter name';
-            }
-            return null;
-          },
-        ),
-        
-        const SizedBox(height: 18),
+        // Full Name Field (ONLY for Admin)
+        if (_selectedUserType == UserType.admin) ...[
+          _buildFieldLabel('Full Name'),
+          CustomTextField(
+            controller: _nameController,
+            hintText: 'Enter your full name',
+            icon: Icons.person_outline,
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Please enter full name';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 18),
+        ],
         
         // Customer ID (for RO and Loanee)
         if (_selectedUserType != UserType.admin) ...[
@@ -334,7 +357,7 @@ class _RegisterPageState extends State<RegisterPage> {
             hintText: 'Enter customer ID',
             icon: Icons.badge_outlined,
             validator: (value) {
-              if (value == null || value.isEmpty) {
+              if (value == null || value.trim().isEmpty) {
                 return 'Please enter Customer ID';
               }
               return null;
@@ -351,7 +374,7 @@ class _RegisterPageState extends State<RegisterPage> {
             hintText: 'Enter RO name',
             icon: Icons.person_outline,
             validator: (value) {
-              if (value == null || value.isEmpty) {
+              if (value == null || value.trim().isEmpty) {
                 return 'Please enter RO Name';
               }
               return null;
@@ -360,16 +383,16 @@ class _RegisterPageState extends State<RegisterPage> {
           const SizedBox(height: 18),
         ],
         
-        // Account Name (only for Loanee)
+        // Loanee Name (only for Loanee)
         if (_selectedUserType == UserType.loanee) ...[
-          _buildFieldLabel('Account Name'),
+          _buildFieldLabel('Loanee Name'),
           CustomTextField(
             controller: _accountNameController,
-            hintText: 'Enter account name',
-            icon: Icons.account_balance_outlined,
+            hintText: 'Enter loanee name',
+            icon: Icons.person_outline,
             validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'Please enter Account Name';
+              if (_selectedUserType == UserType.loanee && (value == null || value.trim().isEmpty)) {
+                return 'Please enter Loanee Name';
               }
               return null;
             },
@@ -385,10 +408,10 @@ class _RegisterPageState extends State<RegisterPage> {
           icon: Icons.phone_android_outlined,
           keyboardType: TextInputType.phone,
           validator: (value) {
-            if (value == null || value.isEmpty) {
+            if (value == null || value.trim().isEmpty) {
               return 'Please enter mobile number';
             }
-            if (value.length != 10) {
+            if (value.trim().length != 10) {
               return 'Please enter valid 10-digit number';
             }
             return null;
@@ -418,13 +441,13 @@ class _RegisterPageState extends State<RegisterPage> {
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
-        onPressed: _isLoading ? null : _generateAndSendOTP,
+        onPressed: _isLoading ? null : _handleRegisterAndCreatePin,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF8B1A1A),
           foregroundColor: Colors.white,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
           ),
         ),
         child: _isLoading
@@ -440,7 +463,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Text(
-                    'SEND OTP',
+                    'PROCEED TO CREATE PIN',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -448,7 +471,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Icon(
+                  const Icon(
                     Icons.arrow_forward,
                     size: 18,
                     color: Colors.white,
@@ -460,38 +483,71 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Widget _buildLoginLink() {
-    return Center(
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            'Already have an account?',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade600,
-            ),
-          ),
-          const SizedBox(width: 4),
-          TextButton(
-            onPressed: () {
-              Navigator.pushReplacementNamed(context, '/login');
-            },
-            style: TextButton.styleFrom(
-              padding: EdgeInsets.zero,
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: const Text(
-              'Sign In',
-              style: TextStyle(
-                color: Color(0xFF8B1A1A),
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+    return Column(
+      children: [
+        Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                'Already have an account?',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey.shade600,
+                ),
               ),
-            ),
+              const SizedBox(width: 4),
+              TextButton(
+                onPressed: () {
+                  Navigator.pushReplacementNamed(context, '/login');
+                },
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  'Sign In',
+                  style: TextStyle(
+                    color: Color(0xFF8B1A1A),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 18),
+        const Divider(color: Colors.black12),
+        const SizedBox(height: 8),
+        Text(
+          'Version 1.0.0',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey.shade600,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          'Developed by Devkanta Singh',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade700,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          '© 2026 Mangang Finance. All Rights Reserved. • Terms & Conditions',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 9.5,
+            color: Colors.grey.shade500,
+          ),
+        ),
+      ],
     );
   }
 }

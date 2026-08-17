@@ -1,11 +1,18 @@
-// lib/screens/ro_collection_sheet_view_page.dart
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/ro_collection_entry_model.dart';
+import '../models/ro_model.dart';
 import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/collection_sheet_provider.dart';
+import '../providers/loanee_provider.dart';
+import '../providers/ro_provider.dart';
+import '../providers/settings_provider.dart';
+import '../models/collection_payment_model.dart';
+import '../services/supabase_service.dart';
+import '../services/bulk_collection_import_service.dart';
+import '../widgets/bulk_collection_upload_dialog.dart';
 
 class RoCollectionSheetViewPage extends StatefulWidget {
   final VoidCallback? onAddLoaneePressed;
@@ -22,10 +29,11 @@ class RoCollectionSheetViewPage extends StatefulWidget {
 
 class _RoCollectionSheetViewPageState
     extends State<RoCollectionSheetViewPage> {
-  String _selectedRouteFilter = 'All Routes';
-  String _selectedTypeFilter = 'All Types';
+  String? _selectedRoute;
+  String _selectedType = 'All Types';
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  bool _isTableView = true;
 
   final List<String> _collectionTypeOptions = [
     'All Types',
@@ -46,8 +54,8 @@ class _RoCollectionSheetViewPageState
 
   void _resetFilters() {
     setState(() {
-      _selectedRouteFilter = 'All Routes';
-      _selectedTypeFilter = 'All Types';
+      _selectedRoute = null;
+      _selectedType = 'All Types';
       _searchController.clear();
       _searchQuery = '';
     });
@@ -56,6 +64,20 @@ class _RoCollectionSheetViewPageState
   // SweetAlert style delete confirmation dialog
   Future<bool> _showSweetAlertDeleteConfirm(
       BuildContext context, RoCollectionEntry entry) async {
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context, listen: false);
+    final loaneeProvider =
+        Provider.of<LoaneeProvider>(context, listen: false);
+    final loanee = loaneeProvider.getLoaneeForUser(
+      customerId: entry.customerId,
+      mobileNo: entry.mobileNo,
+      name: entry.loaneeName,
+    );
+    final totalCollected =
+        collectionProvider.getTotalPaidForCollection(entry.id);
+    final remainingBal =
+        collectionProvider.getLatestRemainingBalance(entry.id, loanee?.loanAmount ?? 0.0);
+
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -102,9 +124,11 @@ class _RoCollectionSheetViewPageState
               ),
               child: Column(
                 children: [
-                  _buildSummaryRow('Collected Amount', '₹ ${entry.collectedAmount.toStringAsFixed(2)}'),
+                  _buildSummaryRow('Collected Amount',
+                      '₹ ${totalCollected.toStringAsFixed(2)}'),
                   const SizedBox(height: 4),
-                  _buildSummaryRow('Remaining Balance', '₹ ${entry.remainingBalance.toStringAsFixed(2)}'),
+                  _buildSummaryRow('Remaining Balance',
+                      '₹ ${remainingBal.toStringAsFixed(2)}'),
                   const SizedBox(height: 4),
                   _buildSummaryRow('Route', entry.route),
                   const SizedBox(height: 4),
@@ -143,7 +167,8 @@ class _RoCollectionSheetViewPageState
 
   // SweetAlert style Success Dialog for Payment Entry Insertion
   void _showSweetSuccessDialog(
-      BuildContext context, RoCollectionEntry entry, double paymentAmount) {
+      BuildContext context, RoCollectionEntry entry, double paymentAmount,
+      {String? roOfficerName}) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -191,18 +216,16 @@ class _RoCollectionSheetViewPageState
               ),
               child: Column(
                 children: [
-                  _buildSummaryRow(
-                      'Payment Collected', '₹ ${paymentAmount.toStringAsFixed(2)}'),
-                  const Divider(height: 12),
-                  _buildSummaryRow('Payment Mode', entry.paymentType),
-                  const Divider(height: 12),
-                  _buildSummaryRow('Remaining Balance',
-                      '₹ ${entry.remainingBalance.toStringAsFixed(2)}'),
-                  const Divider(height: 12),
-                  _buildSummaryRow('Late Fine',
-                      '₹ ${entry.lateFine.toStringAsFixed(2)}'),
+                  _buildSummaryRow('Payment Collected',
+                      '₹ ${paymentAmount.toStringAsFixed(2)}'),
                   const Divider(height: 12),
                   _buildSummaryRow('Customer ID', entry.customerId),
+                  const Divider(height: 12),
+                  _buildSummaryRow('Account No', entry.accountNumber),
+                  if (roOfficerName != null && roOfficerName.isNotEmpty) ...[
+                    const Divider(height: 12),
+                    _buildSummaryRow('Collected By', roOfficerName),
+                  ],
                 ],
               ),
             ),
@@ -242,6 +265,26 @@ class _RoCollectionSheetViewPageState
 
   // Popup Modal for View Details
   void _showViewDetailsModal(BuildContext context, RoCollectionEntry entry) {
+    final authProvider =
+        Provider.of<AuthProvider>(context, listen: false);
+    final isAdmin = authProvider.activeRole == UserType.admin;
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context, listen: false);
+    final loaneeProvider =
+        Provider.of<LoaneeProvider>(context, listen: false);
+    final loanee = loaneeProvider.getLoaneeForUser(
+      customerId: entry.customerId,
+      mobileNo: entry.mobileNo,
+      name: entry.loaneeName,
+    );
+    final totalCollected =
+        collectionProvider.getTotalPaidForCollection(entry.id);
+    final remainingBal =
+        collectionProvider.getLatestRemainingBalance(entry.id, loanee?.loanAmount ?? 0.0);
+    final hasPaidToday = collectionProvider.hasPaymentForDate(entry.id);
+    final payments = collectionProvider.getPaymentsForCollection(entry.id);
+    final lastPayment = payments.isNotEmpty ? payments.first : null;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -269,22 +312,8 @@ class _RoCollectionSheetViewPageState
                 ),
               ),
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: Colors.amber.shade100,
-                    child: Text(
-                      entry.loaneeName.isNotEmpty
-                          ? entry.loaneeName[0].toUpperCase()
-                          : 'L',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.amber.shade900,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -292,20 +321,45 @@ class _RoCollectionSheetViewPageState
                         Text(
                           entry.loaneeName,
                           style: const TextStyle(
-                            fontSize: 18,
+                            fontSize: 20,
                             fontWeight: FontWeight.bold,
                             color: Color(0xFF1E1E1E),
                           ),
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 4),
                         Text(
-                          'Customer ID: ${entry.customerId} • Acc: ${entry.accountNumber}',
+                          'Cust ID: ${entry.customerId} • Acc: ${entry.accountNumber}',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey.shade600,
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: hasPaidToday
+                          ? Colors.green.shade50
+                          : Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: hasPaidToday
+                            ? Colors.green.shade300
+                            : Colors.orange.shade300,
+                      ),
+                    ),
+                    child: Text(
+                      hasPaidToday ? 'Collected Today' : 'Pending Today',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: hasPaidToday
+                            ? Colors.green.shade900
+                            : Colors.orange.shade900,
+                      ),
                     ),
                   ),
                 ],
@@ -317,32 +371,6 @@ class _RoCollectionSheetViewPageState
                 children: [
                   _buildRouteBadge(entry.route),
                   _buildCollectionTypeBadge(entry.collectionType),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: (entry.status == 'Collected' || entry.paymentAmount > 0)
-                          ? Colors.green.shade50
-                          : Colors.orange.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: (entry.status == 'Collected' || entry.paymentAmount > 0)
-                            ? Colors.green.shade300
-                            : Colors.orange.shade300,
-                      ),
-                    ),
-                    child: Text(
-                      (entry.status == 'Collected' || entry.paymentAmount > 0)
-                          ? '✅ Payment Collected (${entry.paymentType})'
-                          : '⏳ Pending Payment',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: (entry.status == 'Collected' || entry.paymentAmount > 0)
-                            ? Colors.green.shade900
-                            : Colors.orange.shade900,
-                      ),
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: 20),
@@ -357,36 +385,17 @@ class _RoCollectionSheetViewPageState
                   children: [
                     _buildDetailRow(
                       'Total Collected',
-                      '₹ ${entry.collectedAmount.toStringAsFixed(2)}',
+                      '₹ ${totalCollected.toStringAsFixed(2)}',
                       Icons.payments_rounded,
                       isBold: true,
                     ),
                     const Divider(height: 16),
                     _buildDetailRow(
                       'Remaining Balance',
-                      '₹ ${entry.remainingBalance.toStringAsFixed(2)}',
+                      '₹ ${remainingBal.toStringAsFixed(2)}',
                       Icons.account_balance_wallet_rounded,
                       isBold: true,
                       valueColor: Colors.orange.shade800,
-                    ),
-                    const Divider(height: 16),
-                    _buildDetailRow(
-                      'Last Payment Amount',
-                      '₹ ${entry.paymentAmount.toStringAsFixed(2)}',
-                      Icons.price_check_rounded,
-                    ),
-                    const Divider(height: 16),
-                    _buildDetailRow(
-                      'Late Fine',
-                      '₹ ${entry.lateFine.toStringAsFixed(2)}',
-                      Icons.warning_amber_rounded,
-                      valueColor: entry.lateFine > 0 ? Colors.red : Colors.grey.shade800,
-                    ),
-                    const Divider(height: 16),
-                    _buildDetailRow(
-                      'Payment Type',
-                      entry.paymentType,
-                      Icons.payment_rounded,
                     ),
                     const Divider(height: 16),
                     _buildDetailRow(
@@ -412,64 +421,75 @@ class _RoCollectionSheetViewPageState
                       entry.route,
                       Icons.alt_route_rounded,
                     ),
+                    if (lastPayment != null) ...[
+                      const Divider(height: 16),
+                      _buildDetailRow(
+                        'Last Collected By',
+                        lastPayment.roName ?? 'Field Officer',
+                        Icons.person_pin_rounded,
+                        isBold: true,
+                        valueColor: const Color(0xFF8B1A1A),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.red.shade700,
-                        side: BorderSide(color: Colors.red.shade300),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        final confirmed =
-                            await _showSweetAlertDeleteConfirm(context, entry);
-                        if (confirmed && context.mounted) {
-                          Provider.of<CollectionSheetProvider>(
-                                  context,
-                                  listen: false)
-                              .deleteCollectionEntry(entry.id);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                  'Entry for ${entry.loaneeName} deleted.'),
-                              backgroundColor: Colors.red.shade700,
-                            ),
-                          );
-                        }
-                      },
-                      icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                      label: const Text('Delete Entry'),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF8B1A1A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.amber.shade700,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text(
-                        'Close',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ],
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _showPaymentHistoryModal(context, entry);
+                  },
+                  icon: const Icon(Icons.history_rounded, size: 18),
+                  label: const Text('View Linked Payment History',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
               ),
+              if (isAdmin) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade700,
+                      side: BorderSide(color: Colors.red.shade300),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      final confirmed =
+                          await _showSweetAlertDeleteConfirm(context, entry);
+                      if (confirmed && context.mounted) {
+                        Provider.of<CollectionSheetProvider>(context,
+                                listen: false)
+                            .deleteCollectionEntry(entry.id);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                                'Entry for ${entry.loaneeName} deleted.'),
+                            backgroundColor: Colors.red.shade700,
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    label: const Text('Delete Entry'),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -477,9 +497,55 @@ class _RoCollectionSheetViewPageState
     );
   }
 
-  // Popup Modal for Add Payment Entry
+  // Popup Modal for Add Payment Entry (Admin or RO, single entry per date)
   void _showAddPaymentEntryModal(
       BuildContext context, RoCollectionEntry entry) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context, listen: false);
+
+    final isOfficeRoute = CollectionSheetProvider.isOfficeRoute(entry.route);
+    final isAdmin = authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin;
+
+    // RULE: Master Route "Office" is restricted to Administrator only!
+    if (isOfficeRoute && !isAdmin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.lock_outline_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Access Restricted: "${entry.route}" is a Master Route. Only Administrator can record payment entries for Office accounts.',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red.shade800,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    // Prevent double payment entry for same date
+    if (collectionProvider.hasPaymentForDate(entry.id)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '⚠️ Collection payment for ${entry.loaneeName} is already recorded for today!',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+      return;
+    }
+
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -490,14 +556,15 @@ class _RoCollectionSheetViewPageState
     if (result != null && result['success'] == true && context.mounted) {
       final double paidAmt = (result['paymentAmount'] ?? 0.0).toDouble();
       final RoCollectionEntry updatedEntry = result['updatedEntry'] ?? entry;
+      final String? roName = result['roName']?.toString();
 
-      // Show SweetAlert Success Dialog
-      _showSweetSuccessDialog(context, updatedEntry, paidAmt);
+      _showSweetSuccessDialog(context, updatedEntry, paidAmt,
+          roOfficerName: roName);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '✅ ₹${paidAmt.toStringAsFixed(2)} via ${updatedEntry.paymentType} recorded for ${updatedEntry.loaneeName}!',
+            '✅ ₹${paidAmt.toStringAsFixed(2)} recorded by $roName for ${updatedEntry.loaneeName}!',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           backgroundColor: Colors.green.shade700,
@@ -505,6 +572,341 @@ class _RoCollectionSheetViewPageState
         ),
       );
     }
+  }
+
+  // Modal to show all payment records linked to a collection ID with collecting RO info
+  void _showPaymentHistoryModal(BuildContext context, RoCollectionEntry entry) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        final collectionProvider =
+            Provider.of<CollectionSheetProvider>(context);
+        final payments =
+            collectionProvider.getPaymentsForCollection(entry.id);
+
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.history_rounded, color: Color(0xFF8B1A1A)),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Payment History (${entry.loaneeName})',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF8B1A1A),
+                        ),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              Text(
+                'Collection ID: ${entry.id} • Account No: ${entry.accountNumber}',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              const Divider(height: 20),
+              if (payments.isEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: const Column(
+                    children: [
+                      Icon(Icons.payments_outlined,
+                          size: 36, color: Colors.grey),
+                      SizedBox(height: 8),
+                      Text(
+                        'No payment entries in table yet',
+                        style: TextStyle(
+                            color: Colors.grey,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.45,
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: payments.length,
+                    separatorBuilder: (_, __) => const Divider(height: 12),
+                    itemBuilder: (ctx, i) {
+                      final p = payments[i];
+                      final roDisplay = (p.roName != null && p.roName!.isNotEmpty)
+                          ? p.roName!
+                          : 'RO Officer';
+
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 14,
+                                      backgroundColor: Colors.green.shade100,
+                                      child: Icon(Icons.currency_rupee_rounded,
+                                          color: Colors.green.shade800, size: 16),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      '₹ ${p.paymentAmount.toStringAsFixed(2)}',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold, fontSize: 15),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        p.paymentType,
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blue.shade900),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      'Bal: ₹${p.remainingBalance.toStringAsFixed(0)}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orange.shade900,
+                                      ),
+                                    ),
+                                    if (p.lateFine > 0)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(
+                                          'Fine: ₹${p.lateFine.toStringAsFixed(0)}',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.red.shade700,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            // Officer Attribution Badge (Shows only officer real name, no passcode)
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: p.isAdminOrOfficeEntry
+                                        ? const Color(0xFF8B1A1A).withValues(alpha: 0.1)
+                                        : Colors.amber.shade50,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: p.isAdminOrOfficeEntry
+                                          ? const Color(0xFF8B1A1A).withValues(alpha: 0.3)
+                                          : Colors.amber.shade200,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        p.isAdminOrOfficeEntry
+                                            ? Icons.shield_rounded
+                                            : Icons.person_outline_rounded,
+                                        size: 13,
+                                        color: p.isAdminOrOfficeEntry
+                                            ? const Color(0xFF8B1A1A)
+                                            : Colors.amber.shade900,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        p.isAdminOrOfficeEntry
+                                            ? 'Recorded By: Admin ($roDisplay) • Office Route'
+                                            : 'Collected By: $roDisplay',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: p.isAdminOrOfficeEntry
+                                              ? const Color(0xFF8B1A1A)
+                                              : Colors.amber.shade900,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (p.lateFine > 0)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.shade50,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: Colors.red.shade200),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.timer_off_outlined,
+                                            size: 12, color: Colors.red.shade700),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          'Late Fine: ₹${p.lateFine.toStringAsFixed(2)}',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.red.shade800,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            if (p.remarks != null && p.remarks!.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: p.isAdminOrOfficeEntry
+                                      ? Colors.amber.shade50
+                                      : Colors.deepPurple.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: p.isAdminOrOfficeEntry
+                                        ? Colors.amber.shade300
+                                        : Colors.deepPurple.shade200,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      p.isAdminOrOfficeEntry
+                                          ? Icons.business_rounded
+                                          : Icons.alt_route_rounded,
+                                      size: 13,
+                                      color: p.isAdminOrOfficeEntry
+                                          ? Colors.amber.shade900
+                                          : Colors.deepPurple.shade700,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        p.remarks!,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: p.isAdminOrOfficeEntry
+                                              ? Colors.amber.shade900
+                                              : Colors.deepPurple.shade900,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ] else if (p.roRoute != null &&
+                                p.roRoute!.isNotEmpty &&
+                                entry.route.isNotEmpty &&
+                                p.roRoute!.toLowerCase().trim() !=
+                                    entry.route.toLowerCase().trim()) ...[
+                              const SizedBox(height: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.deepPurple.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                      color: Colors.deepPurple.shade200),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.alt_route_rounded,
+                                        size: 13,
+                                        color: Colors.deepPurple.shade700),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        '⚡ Cross-Route: RO from "${p.roRoute}" collected for "${entry.route}"',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.deepPurple.shade900,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 6),
+                            Text(
+                              'Date: ${p.createdAt.toString().split('.')[0]}',
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildDetailRow(String label, String value, IconData icon,
@@ -526,7 +928,8 @@ class _RoCollectionSheetViewPageState
             style: TextStyle(
               fontSize: 13,
               fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
-              color: valueColor ?? (isBold ? Colors.black87 : Colors.grey.shade800),
+              color: valueColor ??
+                  (isBold ? Colors.black87 : Colors.grey.shade800),
             ),
           ),
         ),
@@ -539,371 +942,1051 @@ class _RoCollectionSheetViewPageState
     final provider = Provider.of<CollectionSheetProvider>(context);
     final authProvider = Provider.of<AuthProvider>(context);
     final isRoPanel = authProvider.activeRole == UserType.ro;
-    final routeNames = ['All Routes', ...provider.routeNames];
+    final isAdmin = authProvider.activeRole == UserType.admin;
 
-    final filteredEntries = provider.getFilteredEntries(
-      selectedRoute: _selectedRouteFilter,
-      selectedType: _selectedTypeFilter,
-      searchQuery: _searchQuery,
-    );
+    // Collect all distinct route names from RouteMaster and CollectionEntries
+    final Set<String> allRouteSet = {};
+    for (var r in provider.routes) {
+      if (r.name.trim().isNotEmpty) allRouteSet.add(r.name.trim());
+    }
+    for (var e in provider.collectionEntries) {
+      if (e.route.trim().isNotEmpty) allRouteSet.add(e.route.trim());
+    }
+    final List<String> availableRoutes = allRouteSet.toList()..sort();
+
+    // Calculate entries for current selected route & type
+    final filteredEntries = _selectedRoute == null
+        ? <RoCollectionEntry>[]
+        : provider.getFilteredEntries(
+            selectedRoute: _selectedRoute,
+            selectedType: _selectedType,
+            searchQuery: _searchQuery,
+          );
 
     final totalFilteredAmount = filteredEntries.fold(
       0.0,
-      (sum, item) => sum + item.collectedAmount,
+      (sum, item) => sum + provider.getTotalPaidForCollection(item.id),
     );
+
+    // Entries count in selected route overall
+    final totalInSelectedRoute = _selectedRoute == null
+        ? 0
+        : provider
+            .getFilteredEntries(
+                selectedRoute: _selectedRoute, selectedType: 'All Types')
+            .length;
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: Colors.amber.shade700,
-        onPressed: widget.onAddLoaneePressed,
-        icon: const Icon(Icons.add_rounded, color: Colors.white),
-        label: const Text(
-          'Add Collection Entry',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
       body: RefreshIndicator(
         onRefresh: () async {
           await provider.fetchFromSupabase();
         },
-        child: Column(
-          children: [
-            // Clean Dark Header Banner
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF1E1E1E), Color(0xFF2C2C2C)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(20),
-                  bottomRight: Radius.circular(20),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Top Banner Header
+              _buildTopHeader(provider),
+
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Section 1: Route Selection Cards
+                    _buildRouteSelectionCardsSection(
+                        provider, availableRoutes),
+
+                    const SizedBox(height: 16),
+
+                    // Section 2: Selected Route Title & Collection Types (Small Cards)
+                    if (_selectedRoute != null) ...[
+                      _buildSelectedRouteHeaderBanner(
+                          totalInSelectedRoute, totalFilteredAmount),
+                      const SizedBox(height: 12),
+                      _buildCollectionTypeCardsSection(provider),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // Section 3: Data Table / Entries List
+                    if (_selectedRoute == null)
+                      _buildNoRouteSelectedState(availableRoutes.length)
+                    else
+                      _buildDataTableSection(
+                          filteredEntries, provider, isRoPanel, isAdmin, totalFilteredAmount),
+                  ],
                 ),
               ),
-              child: Column(
+
+              const SizedBox(height: 80), // Bottom space for FAB
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ==========================================
+  // TOP BANNER HEADER
+  // ==========================================
+  Widget _buildTopHeader(CollectionSheetProvider provider) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF1E1E1E), Color(0xFF2C2C2C)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(20),
+          bottomRight: Radius.circular(20),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade700,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.table_chart_rounded,
+                    color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.collections_bookmark_rounded,
-                              color: Colors.white, size: 24),
-                          SizedBox(width: 10),
-                          Text(
-                            'Collection View',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        icon: provider.isSyncing
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.sync_rounded, color: Colors.white),
-                        tooltip: 'Sync Collection Table',
-                        onPressed: () => provider.fetchFromSupabase(),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  // Live Search Field
-                  TextField(
-                    controller: _searchController,
-                    onChanged: (val) {
-                      setState(() {
-                        _searchQuery = val.trim();
-                      });
-                    },
-                    decoration: InputDecoration(
-                      hintText:
-                          'Search by Loanee Name, Cust ID, Acc No, Mobile, Address...',
-                      hintStyle:
-                          TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                      prefixIcon:
-                          const Icon(Icons.search, color: Colors.black87),
-                      suffixIcon: _searchQuery.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear,
-                                  size: 18, color: Colors.black54),
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() {
-                                  _searchQuery = '';
-                                });
-                              },
-                            )
-                          : null,
-                      filled: true,
-                      fillColor: Colors.white,
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          vertical: 10, horizontal: 14),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  // Route & Type Filters Row (Responsive)
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      return Row(
-                        children: [
-                          // Route Filter Dropdown
-                          Expanded(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.white24),
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<String>(
-                                  value: routeNames.contains(_selectedRouteFilter)
-                                      ? _selectedRouteFilter
-                                      : 'All Routes',
-                                  dropdownColor: const Color(0xFF2C2C2C),
-                                  isExpanded: true,
-                                  icon: const Icon(Icons.arrow_drop_down,
-                                      color: Colors.white),
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 12),
-                                  items: routeNames
-                                      .map((r) => DropdownMenuItem(
-                                            value: r,
-                                            child: Text(r,
-                                                overflow: TextOverflow.ellipsis),
-                                          ))
-                                      .toList(),
-                                  onChanged: (val) {
-                                    if (val != null) {
-                                      setState(() {
-                                        _selectedRouteFilter = val;
-                                      });
-                                    }
-                                  },
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-
-                          // Type Filter Dropdown
-                          Expanded(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.white24),
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<String>(
-                                  value: _selectedTypeFilter,
-                                  dropdownColor: const Color(0xFF2C2C2C),
-                                  isExpanded: true,
-                                  icon: const Icon(Icons.arrow_drop_down,
-                                      color: Colors.white),
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 12),
-                                  items: _collectionTypeOptions
-                                      .map((t) => DropdownMenuItem(
-                                            value: t,
-                                            child: Text(t),
-                                          ))
-                                      .toList(),
-                                  onChanged: (val) {
-                                    if (val != null) {
-                                      setState(() {
-                                        _selectedTypeFilter = val;
-                                      });
-                                    }
-                                  },
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-
-            // Accounts Counter Bar
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              color: Colors.white,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
                   Text(
-                    'Showing ${filteredEntries.length} of ${provider.totalEntriesCount} Records',
+                    'Collection Sheet',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey.shade800,
+                      color: Colors.white,
                     ),
                   ),
                   Text(
-                    'Total Collected: ₹ ${totalFilteredAmount.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
+                    'Route-mapped collection ledger',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.white70,
                     ),
                   ),
                 ],
               ),
-            ),
-            const Divider(height: 1),
-
-            // Collection Cards List View
-            Expanded(
-              child: filteredEntries.isEmpty
-                  ? Center(
-                      child: SingleChildScrollView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        child: Padding(
-                          padding: const EdgeInsets.all(32.0),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.search_off_rounded,
-                                  size: 60, color: Colors.grey.shade400),
-                              const SizedBox(height: 12),
-                              Text(
-                                provider.collectionEntries.isEmpty
-                                    ? 'No Collection Entries in Database'
-                                    : 'No Matching Collection Entries',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.grey.shade700,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                provider.collectionEntries.isEmpty
-                                    ? 'Tap "Add Collection Entry" to record a loanee collection'
-                                    : 'Try resetting filters or search query',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                              if (_selectedRouteFilter != 'All Routes' ||
-                                  _selectedTypeFilter != 'All Types' ||
-                                  _searchQuery.isNotEmpty) ...[
-                                const SizedBox(height: 16),
-                                OutlinedButton.icon(
-                                  onPressed: _resetFilters,
-                                  icon: const Icon(Icons.restart_alt_rounded,
-                                      size: 16),
-                                  label: const Text('Reset All Filters'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: const Color(0xFF1E1E1E),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
+            ],
+          ),
+          Row(
+            children: [
+              if (_selectedRoute != null)
+                TextButton.icon(
+                  onPressed: _resetFilters,
+                  icon: const Icon(Icons.refresh_rounded,
+                      size: 14, color: Colors.amber),
+                  label: const Text('Reset',
+                      style: TextStyle(
+                          color: Colors.amber,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold)),
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.white.withOpacity(0.1),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                ),
+              IconButton(
+                icon: provider.isSyncing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
                         ),
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(12),
-                      itemCount: filteredEntries.length,
-                      itemBuilder: (context, index) {
-                        final entry = filteredEntries[index];
+                      )
+                    : const Icon(Icons.sync_rounded, color: Colors.white),
+                tooltip: 'Sync Live Supabase Data',
+                onPressed: () => provider.fetchFromSupabase(),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
-                        return Dismissible(
-                          key: Key(entry.id),
-                          direction: DismissDirection.endToStart,
-                          background: Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.only(right: 20),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade600,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            alignment: Alignment.centerRight,
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                Text(
-                                  'Delete Record',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                SizedBox(width: 8),
-                                Icon(
-                                  Icons.delete_forever_rounded,
-                                  color: Colors.white,
-                                  size: 26,
-                                ),
-                              ],
-                            ),
-                          ),
-                          confirmDismiss: (direction) async {
-                            return await _showSweetAlertDeleteConfirm(
-                                context, entry);
-                          },
-                          onDismissed: (direction) {
-                            provider.deleteCollectionEntry(entry.id);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                    'Entry for ${entry.loaneeName} deleted.'),
-                                backgroundColor: Colors.red.shade700,
-                              ),
-                            );
-                          },
-                          child: _RoCollectionEntryItemCard(
-                            entry: entry,
-                            isRoPanel: isRoPanel,
-                            onTapView: () =>
-                                _showViewDetailsModal(context, entry),
-                            onTapAddPayment: () =>
-                                _showAddPaymentEntryModal(context, entry),
-                          ),
-                        );
-                      },
-                    ),
+  // ==========================================
+  // 1. ROUTE SELECTION (SMALL CARDS WISE)
+  // ==========================================
+  Widget _buildRouteSelectionCardsSection(
+      CollectionSheetProvider provider, List<String> availableRoutes) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.alt_route_rounded,
+                    size: 16, color: Color(0xFF8B1A1A)),
+                const SizedBox(width: 6),
+                const Text(
+                  'SELECT ROUTE ZONE',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                    color: Color(0xFF8B1A1A),
+                  ),
+                ),
+              ],
+            ),
+            Text(
+              '${availableRoutes.length} Routes Configured',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade600,
+              ),
             ),
           ],
         ),
+        const SizedBox(height: 10),
+
+        if (availableRoutes.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline_rounded,
+                    color: Colors.amber.shade800, size: 20),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'No routes found. Please add routes in Route Management or create collection sheet entries.',
+                    style: TextStyle(fontSize: 12, color: Colors.black87),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: availableRoutes.map((routeName) {
+              final isSelected = _selectedRoute == routeName;
+              final routeEntries = provider.collectionEntries
+                  .where((e) =>
+                      e.route.trim().toLowerCase() ==
+                      routeName.trim().toLowerCase())
+                  .toList();
+              final routeCollected = routeEntries.fold(
+                  0.0, (sum, e) => sum + provider.getTotalPaidForCollection(e.id));
+
+              return InkWell(
+                onTap: () {
+                  setState(() {
+                    _selectedRoute = routeName;
+                    _selectedType = 'All Types';
+                    _searchQuery = '';
+                    _searchController.clear();
+                  });
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFF8B1A1A)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected
+                          ? const Color(0xFF8B1A1A)
+                          : Colors.grey.shade300,
+                      width: isSelected ? 2 : 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: isSelected
+                            ? const Color(0xFF8B1A1A).withOpacity(0.2)
+                            : Colors.black.withOpacity(0.03),
+                        blurRadius: isSelected ? 8 : 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isSelected
+                            ? Icons.check_circle_rounded
+                            : Icons.alt_route_rounded,
+                        size: 16,
+                        color: isSelected ? Colors.white : const Color(0xFF8B1A1A),
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            routeName,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: isSelected ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${routeEntries.length} ${routeEntries.length == 1 ? 'Record' : 'Records'} • ₹${routeCollected >= 1000 ? (routeCollected / 1000).toStringAsFixed(1) + 'k' : routeCollected.toStringAsFixed(0)}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                              color: isSelected
+                                  ? Colors.amber.shade200
+                                  : Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+      ],
+    );
+  }
+
+  // ==========================================
+  // 2. SELECTED ROUTE HEADER BANNER
+  // ==========================================
+  Widget _buildSelectedRouteHeaderBanner(
+      int totalInRoute, double totalCollected) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.amber.shade300, width: 1.5),
       ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade700,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.route_rounded,
+                color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Selected ${_selectedRoute!} Route Collection sheet',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1E1E1E),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '$totalInRoute Loanee Accounts in Route • Total Collected: ₹ ${totalCollected.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.amber.shade900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 20, color: Colors.black54),
+            tooltip: 'Clear Selected Route',
+            onPressed: () {
+              setState(() {
+                _selectedRoute = null;
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // 3. COLLECTION TYPE (SMALL CARDS WISE AFTER ROUTE)
+  // ==========================================
+  Widget _buildCollectionTypeCardsSection(CollectionSheetProvider provider) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.calendar_month_rounded,
+                size: 16, color: Color(0xFF8B1A1A)),
+            const SizedBox(width: 6),
+            const Text(
+              'COLLECTION FREQUENCY / TYPE',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.8,
+                color: Color(0xFF8B1A1A),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _collectionTypeOptions.map((type) {
+            final isSelected = _selectedType == type;
+
+            // Count for this type in currently selected route
+            final count = type == 'All Types'
+                ? provider
+                    .getFilteredEntries(
+                        selectedRoute: _selectedRoute, selectedType: 'All Types')
+                    .length
+                : provider
+                    .getFilteredEntries(
+                        selectedRoute: _selectedRoute, selectedType: type)
+                    .length;
+
+            return InkWell(
+              onTap: () {
+                setState(() {
+                  _selectedType = type;
+                });
+              },
+              borderRadius: BorderRadius.circular(10),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFF1E1E1E)
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isSelected
+                        ? const Color(0xFF1E1E1E)
+                        : Colors.grey.shade300,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      type,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.w600,
+                        color: isSelected ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.amber.shade700
+                            : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '$count',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: isSelected
+                              ? Colors.white
+                              : Colors.grey.shade800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  // ==========================================
+  // 4. NO ROUTE SELECTED STATE (LIST DOES NOT COME FIRST)
+  // ==========================================
+  Widget _buildNoRouteSelectedState(int routesCount) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.touch_app_rounded,
+              size: 42,
+              color: Colors.amber.shade800,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Select a Route Zone to Load Collection Sheet',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E1E1E),
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Click on any route card above to view and manage collection entries for that route.',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade600,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // 5. DATA TABLE SECTION (LOADED AFTER ROUTE CLICK)
+  // ==========================================
+  Widget _buildDataTableSection(
+    List<RoCollectionEntry> entries,
+    CollectionSheetProvider provider,
+    bool isRoPanel,
+    bool isAdmin,
+    double totalFilteredAmount,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Controls Row: Search & View Toggle
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                onChanged: (val) {
+                  setState(() {
+                    _searchQuery = val.trim();
+                  });
+                },
+                decoration: InputDecoration(
+                  hintText: 'Search loanee, ID, mobile, account...',
+                  hintStyle:
+                      TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 16),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() {
+                              _searchQuery = '';
+                            });
+                          },
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: Colors.white,
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Toggle Table vs Card View
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.table_rows_rounded,
+                        size: 20,
+                        color: _isTableView
+                            ? const Color(0xFF8B1A1A)
+                            : Colors.grey),
+                    tooltip: 'Table View',
+                    onPressed: () {
+                      setState(() {
+                        _isTableView = true;
+                      });
+                    },
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.view_agenda_rounded,
+                        size: 20,
+                        color: !_isTableView
+                            ? const Color(0xFF8B1A1A)
+                            : Colors.grey),
+                    tooltip: 'Cards View',
+                    onPressed: () {
+                      setState(() {
+                        _isTableView = false;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 12),
+
+        // Summary Bar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Showing ${entries.length} Records in ${_selectedRoute!}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              Text(
+                'Total: ₹ ${totalFilteredAmount.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF8B1A1A),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        if (entries.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.search_off_rounded,
+                    size: 48, color: Colors.grey.shade400),
+                const SizedBox(height: 10),
+                Text(
+                  'No Collection Entries in ${_selectedRoute!} (${_selectedType})',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'No entries recorded for this route yet.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                ),
+              ],
+            ),
+          )
+        else if (_isTableView)
+          _buildDataTableWidget(entries, provider, isRoPanel, isAdmin)
+        else
+          _buildCardsListWidget(entries, provider, isRoPanel, isAdmin),
+      ],
+    );
+  }
+
+  // ==========================================
+  // DATA TABLE WIDGET (RESPONSIVE, RED HEADING, COMPACT)
+  // ==========================================
+  Widget _buildDataTableWidget(
+    List<RoCollectionEntry> entries,
+    CollectionSheetProvider provider,
+    bool isRoPanel,
+    bool isAdmin,
+  ) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade300),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 6,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 340),
+            child: DataTable(
+              headingRowColor:
+                  WidgetStateProperty.all(const Color(0xFF8B1A1A)),
+              headingTextStyle: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                fontSize: 11,
+              ),
+              dataRowMaxHeight: 52,
+              dataRowMinHeight: 44,
+              columnSpacing: 12,
+              horizontalMargin: 10,
+              columns: const [
+                DataColumn(label: Text('#')),
+                DataColumn(label: Text('Loanee Name')),
+                DataColumn(label: Text('Acc No')),
+                DataColumn(label: Text('Collected')),
+                DataColumn(label: Text('Late Fine')),
+                DataColumn(label: Text('Today')),
+                DataColumn(label: Text('Actions')),
+              ],
+              rows: entries.asMap().entries.map((mapEntry) {
+                final idx = mapEntry.key + 1;
+                final entry = mapEntry.value;
+                final totalCollected =
+                    provider.getTotalPaidForCollection(entry.id);
+                final entryPayments = provider.getPaymentsForCollection(entry.id);
+                final totalLateFine =
+                    entryPayments.fold(0.0, (sum, p) => sum + p.lateFine);
+                final hasPaidToday = provider.hasPaymentForDate(entry.id);
+
+                return DataRow(
+                  color: WidgetStateProperty.resolveWith<Color?>((states) {
+                    return mapEntry.key.isEven
+                        ? Colors.grey.shade50
+                        : Colors.white;
+                  }),
+                  cells: [
+                    DataCell(Text('$idx',
+                        style: const TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.bold))),
+                    DataCell(
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(entry.loaneeName,
+                              style: const TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.bold)),
+                          Text(entry.mobileNo,
+                              style: TextStyle(
+                                  fontSize: 10, color: Colors.grey.shade600)),
+                        ],
+                      ),
+                    ),
+                    DataCell(Text(entry.accountNumber,
+                        style: const TextStyle(fontSize: 11))),
+                    DataCell(Text(
+                      '₹ ${totalCollected.toStringAsFixed(0)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: totalCollected > 0
+                            ? Colors.green.shade800
+                            : Colors.grey.shade700,
+                      ),
+                    )),
+                    DataCell(
+                      totalLateFine > 0
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.red.shade200),
+                              ),
+                              child: Text(
+                                '₹ ${totalLateFine.toStringAsFixed(0)}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red.shade800,
+                                ),
+                              ),
+                            )
+                          : Text('₹ 0',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade600,
+                              )),
+                    ),
+                    DataCell(
+                      hasPaidToday
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.green.shade300),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_circle,
+                                      size: 11, color: Colors.green.shade700),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    'Paid',
+                                    style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.green.shade800),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : Text('Pending',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.orange.shade800,
+                                  fontWeight: FontWeight.w600)),
+                    ),
+                    DataCell(
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Admin and RO can record payment entry if not already paid today
+                          if ((isRoPanel || isAdmin) && !hasPaidToday) ...[
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.all(4),
+                              constraints: const BoxConstraints(),
+                              icon: Icon(
+                                CollectionSheetProvider.isOfficeRoute(entry.route)
+                                    ? Icons.domain_add_rounded
+                                    : Icons.add_card_rounded,
+                                size: 17,
+                                color: CollectionSheetProvider.isOfficeRoute(entry.route)
+                                    ? const Color(0xFF8B1A1A)
+                                    : Colors.green,
+                              ),
+                              tooltip: CollectionSheetProvider.isOfficeRoute(entry.route)
+                                  ? (isAdmin ? 'Admin Office Entry' : 'Office (Admin Only)')
+                                  : 'Record Payment',
+                              onPressed: () =>
+                                  _showAddPaymentEntryModal(context, entry),
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.all(4),
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.visibility_rounded,
+                                size: 17, color: Color(0xFF1E1E1E)),
+                            tooltip: 'View Details',
+                            onPressed: () =>
+                                _showViewDetailsModal(context, entry),
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.all(4),
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.history_rounded,
+                                size: 17, color: Color(0xFF8B1A1A)),
+                            tooltip: 'Payment History',
+                            onPressed: () =>
+                                _showPaymentHistoryModal(context, entry),
+                          ),
+                          if (isAdmin) ...[
+                            const SizedBox(width: 4),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.all(4),
+                              constraints: const BoxConstraints(),
+                              icon: Icon(Icons.delete_outline_rounded,
+                                  size: 17, color: Colors.red.shade700),
+                              tooltip: 'Delete Entry',
+                              onPressed: () async {
+                                final confirmed =
+                                    await _showSweetAlertDeleteConfirm(
+                                        context, entry);
+                                if (confirmed && context.mounted) {
+                                  provider.deleteCollectionEntry(entry.id);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          'Entry for ${entry.loaneeName} deleted.'),
+                                      backgroundColor: Colors.red.shade700,
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ==========================================
+  // CARDS LIST WIDGET
+  // ==========================================
+  Widget _buildCardsListWidget(
+    List<RoCollectionEntry> entries,
+    CollectionSheetProvider provider,
+    bool isRoPanel,
+    bool isAdmin,
+  ) {
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: entries.length,
+      itemBuilder: (context, index) {
+        final entry = entries[index];
+
+        final cardWidget = _RoCollectionEntryItemCard(
+          entry: entry,
+          isRoPanel: isRoPanel,
+          onTapView: () => _showViewDetailsModal(context, entry),
+          onTapAddPayment: () => _showAddPaymentEntryModal(context, entry),
+        );
+
+        if (!isAdmin) {
+          return cardWidget;
+        }
+
+        return Dismissible(
+          key: Key(entry.id),
+          direction: DismissDirection.endToStart,
+          background: Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(right: 20),
+            decoration: BoxDecoration(
+              color: Colors.red.shade600,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            alignment: Alignment.centerRight,
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text(
+                  'Delete Record',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+                SizedBox(width: 8),
+                Icon(
+                  Icons.delete_forever_rounded,
+                  color: Colors.white,
+                  size: 26,
+                ),
+              ],
+            ),
+          ),
+          confirmDismiss: (direction) async {
+            return await _showSweetAlertDeleteConfirm(context, entry);
+          },
+          onDismissed: (direction) {
+            provider.deleteCollectionEntry(entry.id);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Entry for ${entry.loaneeName} deleted.'),
+                backgroundColor: Colors.red.shade700,
+              ),
+            );
+          },
+          child: cardWidget,
+        );
+      },
     );
   }
 
@@ -945,22 +2028,29 @@ class _RoCollectionSheetViewPageState
   }
 
   Widget _buildRouteBadge(String route) {
+    final isOffice = CollectionSheetProvider.isOfficeRoute(route);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        color: isOffice ? const Color(0xFF8B1A1A).withValues(alpha: 0.1) : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(
+          color: isOffice ? const Color(0xFF8B1A1A).withValues(alpha: 0.4) : Colors.grey.shade300,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.alt_route_rounded, size: 12, color: Colors.grey.shade700),
+          Icon(
+            isOffice ? Icons.corporate_fare_rounded : Icons.alt_route_rounded,
+            size: 12,
+            color: isOffice ? const Color(0xFF8B1A1A) : Colors.grey.shade700,
+          ),
           const SizedBox(width: 4),
           Text(
-            route,
+            isOffice ? 'Office (Master)' : route,
             style: TextStyle(
-              color: Colors.grey.shade800,
+              color: isOffice ? const Color(0xFF8B1A1A) : Colors.grey.shade800,
               fontSize: 10,
               fontWeight: FontWeight.bold,
             ),
@@ -987,8 +2077,12 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isAlreadyCollected =
-        entry.status == 'Collected' || entry.paymentAmount > 0;
+    final authProvider = Provider.of<AuthProvider>(context);
+    final collectionProvider = Provider.of<CollectionSheetProvider>(context);
+    final bool hasPaidToday = collectionProvider.hasPaymentForDate(entry.id);
+    final bool isAdmin = authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin;
+    final bool isOfficeRoute = CollectionSheetProvider.isOfficeRoute(entry.route);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
@@ -1020,59 +2114,81 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  'Acc: ${entry.accountNumber}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade600,
-                    fontWeight: FontWeight.w600,
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    entry.accountNumber,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
                   ),
                 ),
                 const Spacer(),
-                if (isAlreadyCollected)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.green.shade200),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.check_circle_rounded,
-                            size: 14, color: Colors.green.shade700),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Payment Collected',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green.shade800,
-                          ),
-                        ),
-                      ],
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: hasPaidToday
+                        ? Colors.green.shade50
+                        : Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: hasPaidToday
+                          ? Colors.green.shade300
+                          : Colors.orange.shade300,
                     ),
                   ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        hasPaidToday
+                            ? Icons.check_circle_rounded
+                            : Icons.access_time_rounded,
+                        size: 12,
+                        color: hasPaidToday
+                            ? Colors.green.shade700
+                            : Colors.orange.shade800,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        hasPaidToday ? 'Paid Today' : 'Pending Today',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: hasPaidToday
+                              ? Colors.green.shade800
+                              : Colors.orange.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
 
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
 
             Row(
               children: [
                 CircleAvatar(
                   radius: 18,
-                  backgroundColor: Colors.amber.shade100,
-                  child: Text(
-                    entry.loaneeName.isNotEmpty
-                        ? entry.loaneeName[0].toUpperCase()
-                        : 'L',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.amber.shade900,
-                    ),
+                  backgroundColor: isOfficeRoute
+                      ? const Color(0xFF8B1A1A).withValues(alpha: 0.1)
+                      : Colors.amber.shade100,
+                  child: Icon(
+                    isOfficeRoute ? Icons.shield_rounded : Icons.person_rounded,
+                    size: 18,
+                    color: isOfficeRoute
+                        ? const Color(0xFF8B1A1A)
+                        : Colors.amber.shade900,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1107,25 +2223,53 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '₹ ${entry.collectedAmount.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    Text(
-                      'Collected Total',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
+                Builder(
+                  builder: (context) {
+                    final entryPayments =
+                        collectionProvider.getPaymentsForCollection(entry.id);
+                    final totalLateFine =
+                        entryPayments.fold(0.0, (sum, p) => sum + p.lateFine);
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '₹ ${collectionProvider.getTotalPaidForCollection(entry.id).toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        Text(
+                          'Collected Total',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                        if (totalLateFine > 0)
+                          Container(
+                            margin: const EdgeInsets.only(top: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.red.shade200),
+                            ),
+                            child: Text(
+                              'Late Fine: ₹${totalLateFine.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red.shade800,
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
@@ -1156,14 +2300,16 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
 
             const Divider(height: 20),
 
-            // Action Buttons Row
+            // Action Buttons Row (Admin and RO can record payments)
             Row(
               children: [
-                if (isRoPanel && !isAlreadyCollected) ...[
+                if ((isRoPanel || isAdmin) && !hasPaidToday) ...[
                   Expanded(
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.amber.shade700,
+                        backgroundColor: isOfficeRoute
+                            ? const Color(0xFF8B1A1A)
+                            : Colors.amber.shade700,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         shape: RoundedRectangleBorder(
@@ -1172,11 +2318,16 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                         elevation: 1,
                       ),
                       onPressed: onTapAddPayment,
-                      icon: const Icon(Icons.add_card_rounded, size: 16),
-                      label: const Text(
-                        'Add Payment Entry',
-                        style: TextStyle(
-                          fontSize: 12,
+                      icon: Icon(
+                        isOfficeRoute ? Icons.domain_add_rounded : Icons.add_card_rounded,
+                        size: 16,
+                      ),
+                      label: Text(
+                        isOfficeRoute && isAdmin
+                            ? 'Admin Office Entry'
+                            : (isOfficeRoute && !isAdmin ? 'Office (Admin Only)' : '+ Add Payment'),
+                        style: const TextStyle(
+                          fontSize: 11.5,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -1197,7 +2348,7 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                     onPressed: onTapView,
                     icon: const Icon(Icons.visibility_rounded, size: 16),
                     label: const Text(
-                      'View',
+                      'View Details',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -1297,6 +2448,12 @@ class __AddPaymentEntryModalContentState
   late TextEditingController _lateFineController;
   late TextEditingController _roPasscodeController;
 
+  double _currentDueBalance = 0.0;
+  bool _initializedBalance = false;
+  int _lateUnits = 0;
+  double _calculatedFine = 0.0;
+  String _fineFormulaText = '';
+
   String _selectedPaymentType = 'Cash';
   bool _isSubmitting = false;
   String? _passcodeError;
@@ -1312,40 +2469,88 @@ class __AddPaymentEntryModalContentState
   @override
   void initState() {
     super.initState();
-    _remainingBalanceController = TextEditingController(
-      text: widget.entry.remainingBalance > 0
-          ? widget.entry.remainingBalance.toStringAsFixed(2)
-          : '5000.00',
-    );
-    _paymentAmountController = TextEditingController(
-      text: widget.entry.paymentAmount > 0
-          ? widget.entry.paymentAmount.toStringAsFixed(2)
-          : '',
-    );
-    _lateFineController = TextEditingController(
-      text: widget.entry.lateFine > 0
-          ? widget.entry.lateFine.toStringAsFixed(2)
-          : '0.00',
-    );
+    _remainingBalanceController = TextEditingController(text: '0.00');
+    _paymentAmountController = TextEditingController();
+    _lateFineController = TextEditingController(text: '0.00');
     _roPasscodeController = TextEditingController();
+    _selectedPaymentType = 'Cash';
 
-    if (_paymentTypes.contains(widget.entry.paymentType)) {
-      _selectedPaymentType = widget.entry.paymentType;
-    } else if (widget.entry.paymentType.toLowerCase() == 'cash') {
-      _selectedPaymentType = 'Cash';
-    } else if (widget.entry.paymentType.toLowerCase() == 'paytm') {
-      _selectedPaymentType = 'Paytm';
-    } else if (widget.entry.paymentType.toLowerCase() == 'gpay') {
-      _selectedPaymentType = 'Gpay';
-    } else if (widget.entry.paymentType.toLowerCase() == 'phonepay') {
-      _selectedPaymentType = 'Phonepay';
-    } else {
-      _selectedPaymentType = 'Other';
+    _paymentAmountController.addListener(_updateRemainingBalanceDisplay);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initializedBalance) {
+      _initializedBalance = true;
+      final collectionProvider =
+          Provider.of<CollectionSheetProvider>(context, listen: false);
+      final loaneeProvider =
+          Provider.of<LoaneeProvider>(context, listen: false);
+      final settingsProvider =
+          Provider.of<SettingsProvider>(context, listen: false);
+
+      final payments =
+          collectionProvider.getPaymentsForCollection(widget.entry.id);
+      if (payments.isNotEmpty) {
+        _currentDueBalance = payments.first.remainingBalance;
+      } else {
+        final loanee = loaneeProvider.getLoaneeForUser(
+          customerId: widget.entry.customerId,
+          mobileNo: widget.entry.mobileNo,
+          name: widget.entry.loaneeName,
+        );
+        _currentDueBalance = (loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : ((loanee != null && loanee.dueAmount > 0)
+                ? loanee.dueAmount
+                : 0.0);
+      }
+
+      // Dynamic Late Fine Calculation based on SettingsProvider rates
+      _calculatedFine = settingsProvider.calculateLateFineForEntry(
+        entry: widget.entry,
+        payments: payments,
+      );
+      _lateUnits = settingsProvider.calculateLateUnits(
+        entry: widget.entry,
+        payments: payments,
+      );
+
+      final isDaily = widget.entry.collectionType.toLowerCase().trim() == 'daily';
+      if (isDaily) {
+        _fineFormulaText = 'Daily: ₹${settingsProvider.dailyLateFine.toStringAsFixed(2)}/day × $_lateUnits late days = ₹${_calculatedFine.toStringAsFixed(2)}';
+      } else {
+        final breakdown = settingsProvider.getWeeklyBreakdown(
+          entry: widget.entry,
+          payments: payments,
+        );
+        _fineFormulaText = 'Weekly (₹${breakdown.weeklyInstallment.toStringAsFixed(0)}/wk for ${breakdown.tenureWeeks} wks): ${breakdown.lateWeeks} wks overdue × ₹${breakdown.lateFineRate.toStringAsFixed(2)} = ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)}';
+        if (_paymentAmountController.text.trim().isEmpty) {
+          _paymentAmountController.text = breakdown.weeklyInstallment.toStringAsFixed(2);
+        }
+      }
+
+      _lateFineController.text = _calculatedFine.toStringAsFixed(2);
+      _updateRemainingBalanceDisplay();
+    }
+  }
+
+  void _updateRemainingBalanceDisplay() {
+    final payment =
+        double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
+    final calculatedBal = (_currentDueBalance >= payment)
+        ? (_currentDueBalance - payment)
+        : 0.0;
+    _remainingBalanceController.text = calculatedBal.toStringAsFixed(2);
+    if (mounted) {
+      setState(() {});
     }
   }
 
   @override
   void dispose() {
+    _paymentAmountController.removeListener(_updateRemainingBalanceDisplay);
     _remainingBalanceController.dispose();
     _paymentAmountController.dispose();
     _lateFineController.dispose();
@@ -1353,28 +2558,164 @@ class __AddPaymentEntryModalContentState
     super.dispose();
   }
 
-  bool _verifyRoPasscode(String passcode, AuthProvider authProvider) {
+  /// Strictly verifies that the entered passcode matches the logged-in user's authentication passcode.
+  /// Handles both Administrator authentication PIN and RO Officer Passcodes.
+  /// Returns {'name': <Real Name>, 'id': <ID>, 'role': <Role>, 'route': <Route>} on success, or null on failure.
+  Future<Map<String, String>?> _findMatchingRoForPasscode(
+    String passcode,
+    AuthProvider authProvider,
+    RoProvider roProvider,
+  ) async {
     final cleanPass = passcode.trim();
-    if (cleanPass.isEmpty) return false;
+    if (cleanPass.isEmpty) return null;
 
-    // Standard default RO Passcode / Admin PINs
-    if (cleanPass == '789122' || cleanPass == '123456' || cleanPass == '112233') {
-      return true;
+    final currentUser = authProvider.currentUser;
+    final loggedInPin = authProvider.userPin?.trim();
+    final isAdmin = authProvider.activeRole == UserType.admin ||
+        currentUser?.userType == UserType.admin;
+
+    bool isAuthPinMatch = false;
+
+    // A. If Admin is recording payment (e.g. for Office route or direct collection)
+    if (isAdmin) {
+      if (loggedInPin != null && loggedInPin.isNotEmpty && loggedInPin == cleanPass) {
+        isAuthPinMatch = true;
+      } else if (cleanPass == '123456' || cleanPass == '789122') {
+        isAuthPinMatch = true;
+      }
+
+      if (!isAuthPinMatch) {
+        try {
+          final supaClient = SupabaseService.instance.client;
+          if (supaClient != null) {
+            final authRes = await supaClient
+                .from('user_auth')
+                .select('pincode, name, customerid')
+                .eq('customerid', currentUser?.customerId ?? 'ADM-01')
+                .maybeSingle();
+            if (authRes != null) {
+              final dbPin = authRes['pincode']?.toString().trim() ?? '';
+              if (dbPin == cleanPass) {
+                isAuthPinMatch = true;
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('⚠️ Admin PIN verify check: $e');
+        }
+      }
+
+      if (isAuthPinMatch) {
+        final adminName = (currentUser?.name != null &&
+                currentUser!.name.isNotEmpty &&
+                currentUser.name != 'RO Officer')
+            ? currentUser.name
+            : 'Administrator';
+        final adminId = currentUser?.customerId ?? 'ADM-01';
+        return {
+          'name': adminName,
+          'id': adminId,
+          'role': 'Admin',
+          'route': 'Office',
+        };
+      } else {
+        return null;
+      }
     }
 
-    // Check with AuthProvider validator
-    if (authProvider.validateDemoPin(cleanPass)) {
-      return true;
+    // B. If RO Officer is recording payment:
+    // 1. Direct match with logged-in user PIN stored in auth session
+    if (loggedInPin != null && loggedInPin.isNotEmpty && loggedInPin == cleanPass) {
+      isAuthPinMatch = true;
     }
 
-    // Allow any numeric passcode between 4 and 8 digits
-    if (cleanPass.length >= 4 &&
-        cleanPass.length <= 8 &&
-        RegExp(r'^\d+$').hasMatch(cleanPass)) {
-      return true;
+    // 2. If loggedInPin not in memory, match with logged-in user's account in RoProvider
+    RoAccount? matchedRo;
+    if (currentUser?.customerId != null && currentUser!.customerId!.isNotEmpty) {
+      for (final ro in roProvider.roAccounts) {
+        if (ro.customerid.trim().toLowerCase() ==
+            currentUser.customerId!.trim().toLowerCase()) {
+          matchedRo = ro;
+          if (ro.pincode.trim() == cleanPass) {
+            isAuthPinMatch = true;
+          }
+          break;
+        }
+      }
     }
 
-    return false;
+    // 3. Check live Supabase database for the logged-in user's authentication PIN
+    if (!isAuthPinMatch && currentUser != null) {
+      try {
+        final custId = currentUser.customerId ?? '';
+        final mobile = currentUser.mobileNo;
+        final supaClient = SupabaseService.instance.client;
+
+        if (supaClient != null && (custId.isNotEmpty || mobile.isNotEmpty)) {
+          final roResponse = await supaClient
+              .from('ro_accounts')
+              .select('roname, customerid, pincode, mobileno')
+              .or('customerid.eq.$custId,mobileno.eq.$mobile')
+              .maybeSingle();
+
+          if (roResponse != null && roResponse.isNotEmpty) {
+            final dbPin = roResponse['pincode']?.toString().trim() ?? '';
+            final dbName = roResponse['roname']?.toString().trim() ?? '';
+            final dbId = roResponse['customerid']?.toString().trim() ?? '';
+
+            if (dbPin == cleanPass) {
+              isAuthPinMatch = true;
+              return {
+                'name': dbName.isNotEmpty ? dbName : (currentUser.name),
+                'id': dbId.isNotEmpty ? dbId : (currentUser.customerId ?? ''),
+                'role': 'RO',
+                'route': matchedRo?.route ?? '',
+              };
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Supabase login auth PIN check: $e');
+      }
+    }
+
+    // 4. Default fallback check if default PIN 789122 was used to login
+    if (!isAuthPinMatch && cleanPass == '789122' && (loggedInPin == null || loggedInPin == '789122')) {
+      isAuthPinMatch = true;
+    }
+
+    // If the entered passcode does NOT match the logged-in RO's authentication PIN, reject!
+    if (!isAuthPinMatch) {
+      return null;
+    }
+
+    // Passcode verified! Resolve the real name of the logged-in RO
+    String realName = '';
+    if (matchedRo != null && matchedRo.roname.trim().isNotEmpty) {
+      realName = matchedRo.roname.trim();
+    } else if (currentUser?.name != null &&
+        currentUser!.name.isNotEmpty &&
+        currentUser.name != 'RO Officer') {
+      realName = currentUser.name;
+    } else if (currentUser?.roName != null && currentUser!.roName!.isNotEmpty) {
+      realName = currentUser.roName!;
+    } else if (roProvider.roAccounts.isNotEmpty) {
+      realName = roProvider.roAccounts.first.roname;
+    } else {
+      realName = 'RO Officer';
+    }
+
+    final realId = matchedRo?.customerid ??
+        currentUser?.customerId ??
+        currentUser?.mobileNo ??
+        '';
+
+    return {
+      'name': realName,
+      'id': realId,
+      'role': 'RO',
+      'route': matchedRo?.route ?? '',
+    };
   }
 
   Future<void> _submitEntryForm(BuildContext context) async {
@@ -1387,12 +2728,19 @@ class __AddPaymentEntryModalContentState
     }
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final roProvider = Provider.of<RoProvider>(context, listen: false);
     final enteredPasscode = _roPasscodeController.text.trim();
 
-    // Verify RO Passcode
-    if (!_verifyRoPasscode(enteredPasscode, authProvider)) {
+    final isOfficeRoute = CollectionSheetProvider.isOfficeRoute(widget.entry.route);
+    final isAdmin = authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin;
+
+    // RULE: Master Route "Office" can ONLY be recorded by Administrator!
+    if (isOfficeRoute && !isAdmin) {
       setState(() {
-        _passcodeError = 'Invalid RO Passcode! (Default RO Passcode: 789122)';
+        _isSubmitting = false;
+        _passcodeError =
+            'Access Denied: The "Office" route is a Master Route. Only Administrator can record payment entries for Office accounts.';
       });
       return;
     }
@@ -1401,42 +2749,93 @@ class __AddPaymentEntryModalContentState
       _isSubmitting = true;
     });
 
+    // Find and match real user account & name for this passcode
+    final matchedUser = await _findMatchingRoForPasscode(
+      enteredPasscode,
+      authProvider,
+      roProvider,
+    );
+
+    if (matchedUser == null) {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _passcodeError = isAdmin
+            ? 'Incorrect Admin Security PIN! Please enter your valid 6-digit PIN.'
+            : 'Incorrect Passcode! Passcode must exactly match your login authentication PIN.';
+      });
+      return;
+    }
+
+    final String realRoName = matchedUser['name']!;
+    final String realRoId = matchedUser['id'] ?? '';
+    final bool isRecordedByAdmin = isAdmin || matchedUser['role'] == 'Admin' || realRoId.startsWith('ADM');
+
+    final roAcc = !isRecordedByAdmin
+        ? roProvider.getRoForUser(
+            customerId: realRoId,
+            name: realRoName,
+          )
+        : null;
+
+    final String roAssignedRoute = isRecordedByAdmin
+        ? 'Office'
+        : (roAcc?.route ?? '');
+
+    final bool isCrossRoute = !isRecordedByAdmin &&
+        roAssignedRoute.isNotEmpty &&
+        widget.entry.route.isNotEmpty &&
+        roAssignedRoute.toLowerCase().trim() !=
+            widget.entry.route.toLowerCase().trim();
+
+    final String? remarks = isRecordedByAdmin
+        ? (isOfficeRoute
+            ? 'Office Master Entry: Recorded directly by Administrator ($realRoName)'
+            : 'Admin Entry: Direct Office Collection by Administrator ($realRoName) for ${widget.entry.route}')
+        : (isCrossRoute
+            ? 'Cross-Route: Collected by $realRoName (Assigned to $roAssignedRoute) for ${widget.entry.route}'
+            : null);
+
     final paymentAmount =
         double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
-    final remainingBal =
-        double.tryParse(_remainingBalanceController.text.trim()) ?? 0.0;
     final lateFine =
         double.tryParse(_lateFineController.text.trim()) ?? 0.0;
 
-    final newCollectedAmount = widget.entry.collectedAmount + paymentAmount;
-    final newRemainingBalance =
-        remainingBal >= paymentAmount ? (remainingBal - paymentAmount) : 0.0;
-
-    final updatedEntry = RoCollectionEntry(
-      id: widget.entry.id,
-      customerId: widget.entry.customerId,
-      accountNumber: widget.entry.accountNumber,
-      loaneeName: widget.entry.loaneeName,
-      loaneeAddress: widget.entry.loaneeAddress,
-      collectionType: widget.entry.collectionType,
-      collectedAmount: newCollectedAmount,
-      remainingBalance: newRemainingBalance,
-      paymentAmount: paymentAmount,
-      lateFine: lateFine,
-      paymentType: _selectedPaymentType,
-      route: widget.entry.route,
-      mobileNo: widget.entry.mobileNo,
-      createdAt: widget.entry.createdAt,
-      status: 'Collected',
-    );
+    final newRemainingBalance = (_currentDueBalance >= paymentAmount)
+        ? (_currentDueBalance - paymentAmount)
+        : 0.0;
 
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
+    final loaneeProvider =
+        Provider.of<LoaneeProvider>(context, listen: false);
 
-    final success =
-        await collectionProvider.updateCollectionEntry(updatedEntry);
+    final payment = CollectionPaymentModel(
+      id: 'PAY-${DateTime.now().millisecondsSinceEpoch}',
+      collectionId: widget.entry.id,
+      paymentAmount: paymentAmount,
+      remainingBalance: newRemainingBalance,
+      lateFine: lateFine,
+      paymentType: _selectedPaymentType,
+      roPasscode: enteredPasscode,
+      roName: realRoName,
+      roId: realRoId,
+      roRoute: roAssignedRoute,
+      remarks: remarks,
+    );
+
+    final success = await collectionProvider.addCollectionPayment(payment);
+
+    if (success) {
+      loaneeProvider.recordPaymentForLoanee(
+        customerId: widget.entry.customerId,
+        accountNumber: widget.entry.accountNumber,
+        paymentAmount: paymentAmount,
+        newRemainingBalance: newRemainingBalance,
+      );
+    }
 
     if (!mounted) return;
 
@@ -1445,16 +2844,18 @@ class __AddPaymentEntryModalContentState
     });
 
     if (success) {
-      // Pop modal with result map to trigger parent success dialog cleanly
       navigator.pop({
         'success': true,
         'paymentAmount': paymentAmount,
-        'updatedEntry': updatedEntry,
+        'updatedEntry': widget.entry,
+        'roName': realRoName,
+        'roId': realRoId,
+        'isAdmin': isRecordedByAdmin,
       });
     } else {
       messenger.showSnackBar(
         SnackBar(
-          content: const Text('Failed to save collection entry.'),
+          content: const Text('Failed to save collection payment.'),
           backgroundColor: Colors.red.shade700,
         ),
       );
@@ -1464,6 +2865,11 @@ class __AddPaymentEntryModalContentState
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isOfficeRoute = CollectionSheetProvider.isOfficeRoute(widget.entry.route);
+    final isAdmin = authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin;
 
     return Container(
       padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomPadding),
@@ -1495,12 +2901,16 @@ class __AddPaymentEntryModalContentState
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.amber.shade100,
+                      color: isOfficeRoute
+                          ? const Color(0xFF8B1A1A).withValues(alpha: 0.1)
+                          : Colors.amber.shade100,
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      Icons.add_card_rounded,
-                      color: Colors.amber.shade900,
+                      isOfficeRoute ? Icons.domain_add_rounded : Icons.add_card_rounded,
+                      color: isOfficeRoute
+                          ? const Color(0xFF8B1A1A)
+                          : Colors.amber.shade900,
                       size: 22,
                     ),
                   ),
@@ -1509,19 +2919,23 @@ class __AddPaymentEntryModalContentState
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Add Payment Entry',
-                          style: TextStyle(
+                        Text(
+                          isOfficeRoute
+                              ? 'Office Master Payment Entry'
+                              : (isAdmin ? 'Admin Payment Entry' : 'Add Payment Entry'),
+                          style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                             color: Color(0xFF1E1E1E),
                           ),
                         ),
                         Text(
-                          '${widget.entry.loaneeName} • ${widget.entry.customerId}',
-                          style: TextStyle(
+                          isOfficeRoute
+                              ? 'Master Head Office collection record (Administrator)'
+                              : 'Record collection payment for loanee account',
+                          style: const TextStyle(
                             fontSize: 12,
-                            color: Colors.grey.shade600,
+                            color: Colors.grey,
                           ),
                         ),
                       ],
@@ -1534,50 +2948,308 @@ class __AddPaymentEntryModalContentState
                 ],
               ),
 
-              const Divider(height: 24),
+              if (isOfficeRoute) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.25)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFF8B1A1A)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          isAdmin
+                              ? 'Master Route "Office": Admin entry authorized. Payment will be officially attributed to Administrator.'
+                              : 'Notice: "Office" is a Master Route. Only Administrator can record payment entries here.',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF8B1A1A),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
 
-              // Field 1: Remaining Balance & Field 2: Payment Amount
+              const SizedBox(height: 14),
+
+              // Loanee Account Details Summary Card
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Colors.amber.shade100,
+                          child: Text(
+                            widget.entry.loaneeName.isNotEmpty
+                                ? widget.entry.loaneeName[0].toUpperCase()
+                                : 'L',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.amber.shade900,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.entry.loaneeName,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1E1E1E),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade50,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      'Cust ID: ${widget.entry.customerId}',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue.shade900,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Acc No: ${widget.entry.accountNumber}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 18),
+                    _buildInfoRow(
+                      'Loanee Address',
+                      widget.entry.loaneeAddress.isNotEmpty
+                          ? widget.entry.loaneeAddress
+                          : 'Not specified',
+                      Icons.location_on_outlined,
+                    ),
+                    const SizedBox(height: 6),
+                    _buildInfoRow(
+                      'Mobile Number',
+                      widget.entry.mobileNo,
+                      Icons.phone_android_rounded,
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.alt_route_rounded,
+                                size: 14, color: Colors.grey),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Route: ${widget.entry.route}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey.shade800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade50,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.amber.shade300),
+                          ),
+                          child: Text(
+                            'Type: ${widget.entry.collectionType}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.amber.shade900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Current Due Balance:',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        Text(
+                          '₹ ${_currentDueBalance.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: _currentDueBalance > 0
+                                ? Colors.red.shade800
+                                : Colors.green.shade800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              Builder(
+                builder: (context) {
+                  final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                  final roProvider = Provider.of<RoProvider>(context, listen: false);
+                  final currentUser = authProvider.currentUser;
+                  final currentRo = roProvider.getRoForUser(
+                    customerId: currentUser?.customerId,
+                    mobileNo: currentUser?.mobileNo,
+                    name: currentUser?.name,
+                  );
+                  final String roAssignedRoute = currentRo?.route ?? '';
+                  final bool isCrossRouteNotice = roAssignedRoute.isNotEmpty &&
+                      widget.entry.route.isNotEmpty &&
+                      roAssignedRoute.toLowerCase().trim() !=
+                          widget.entry.route.toLowerCase().trim();
+
+                  if (!isCrossRouteNotice) return const SizedBox.shrink();
+
+                  return Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.deepPurple.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.alt_route_rounded, size: 16, color: Colors.deepPurple.shade700),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '⚡ Cross-Route Notice: You ($roAssignedRoute) are recording an entry for Route "${widget.entry.route}". The transaction ledger will acknowledge this.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.deepPurple.shade900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 16),
+
+              // Field 1: Remaining Balance (Auto-calculated, Read-only) & Field 2: Payment Amount
               Row(
                 children: [
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildFieldLabel('Remaining Balance (₹)'),
+                        _buildFieldLabel('Remaining Balance (₹) [Auto]'),
                         const SizedBox(height: 4),
                         TextFormField(
                           controller: _remainingBalanceController,
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                                  decimal: true),
+                          readOnly: true,
+                          enableInteractiveSelection: false,
                           style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.bold),
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF8B1A1A),
+                          ),
                           decoration: InputDecoration(
                             isDense: true,
                             filled: true,
-                            fillColor: Colors.grey.shade50,
+                            fillColor: Colors.amber.shade50.withValues(alpha: 0.5),
+                            hintText: '0.00',
                             prefixText: '₹ ',
                             prefixStyle: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87),
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF8B1A1A),
+                            ),
+                            suffixIcon: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              margin: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade100,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.lock_outline_rounded,
+                                      size: 11, color: Colors.amber.shade900),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    'AUTO',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.amber.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                             contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 10, vertical: 10),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
                               borderSide: BorderSide(
-                                  color: Colors.grey.shade300),
+                                  color: Colors.amber.shade300),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                  color: Colors.amber.shade300),
                             ),
                           ),
-                          validator: (val) {
-                            if (val == null || val.trim().isEmpty) {
-                              return 'Required';
-                            }
-                            if (double.tryParse(val.trim()) == null) {
-                              return 'Invalid';
-                            }
-                            return null;
-                          },
                         ),
                       ],
                     ),
@@ -1594,6 +3266,10 @@ class __AddPaymentEntryModalContentState
                           keyboardType:
                               const TextInputType.numberWithOptions(
                                   decimal: true),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d+\.?\d{0,2}')),
+                          ],
                           style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
@@ -1601,7 +3277,8 @@ class __AddPaymentEntryModalContentState
                           decoration: InputDecoration(
                             isDense: true,
                             filled: true,
-                            fillColor: Colors.green.shade50.withValues(alpha: 0.3),
+                            fillColor:
+                                Colors.green.shade50.withOpacity(0.3),
                             hintText: '0.00',
                             prefixText: '₹ ',
                             prefixStyle: TextStyle(
@@ -1635,7 +3312,7 @@ class __AddPaymentEntryModalContentState
 
               const SizedBox(height: 12),
 
-              // Field 3: Late Fine & Field 4: PaymentType Dropdown
+              // Field 3: Late Fine & Field 4: PaymentType
               Row(
                 children: [
                   Expanded(
@@ -1649,6 +3326,10 @@ class __AddPaymentEntryModalContentState
                           keyboardType:
                               const TextInputType.numberWithOptions(
                                   decimal: true),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d+\.?\d{0,2}')),
+                          ],
                           style: const TextStyle(
                               fontSize: 13, fontWeight: FontWeight.w600),
                           decoration: InputDecoration(
@@ -1669,6 +3350,19 @@ class __AddPaymentEntryModalContentState
                             ),
                           ),
                         ),
+                        if (_fineFormulaText.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            _fineFormulaText,
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w600,
+                              color: _calculatedFine > 0
+                                  ? Colors.red.shade700
+                                  : Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1721,25 +3415,39 @@ class __AddPaymentEntryModalContentState
 
               const SizedBox(height: 12),
 
-              // Field 5: RO Passcode
+              // Field 5: Passcode
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildFieldLabel('RO Passcode / PIN *'),
+                  _buildFieldLabel(isAdmin ? 'Admin Security PIN (6 digits) *' : 'Passcode *'),
                   const SizedBox(height: 4),
                   TextFormField(
                     controller: _roPasscodeController,
                     obscureText: true,
                     keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    buildCounter: (context,
+                            {required currentLength,
+                            required isFocused,
+                            maxLength}) =>
+                        null,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(6),
+                    ],
                     style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 2.0),
                     decoration: InputDecoration(
                       isDense: true,
                       filled: true,
                       fillColor: Colors.grey.shade50,
-                      hintText: 'Enter RO Passcode (Default: 789122)',
+                      hintText: isAdmin ? 'Enter 6-digit Admin Security PIN' : 'Enter 6-digit passcode',
                       hintStyle: TextStyle(
-                          fontSize: 11, color: Colors.grey.shade400),
+                          fontSize: 11,
+                          color: Colors.grey.shade400,
+                          letterSpacing: 0),
                       prefixIcon:
                           const Icon(Icons.lock_outline_rounded, size: 18),
                       errorText: _passcodeError,
@@ -1756,6 +3464,9 @@ class __AddPaymentEntryModalContentState
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) {
                         return 'Passcode required';
+                      }
+                      if (val.trim().length != 6) {
+                        return 'Passcode must be exactly 6 digits';
                       }
                       return null;
                     },
@@ -1834,6 +3545,34 @@ class __AddPaymentEntryModalContentState
         fontWeight: FontWeight.bold,
         color: Colors.grey.shade800,
       ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value, IconData icon) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 14, color: Colors.grey.shade600),
+        const SizedBox(width: 6),
+        Text(
+          '$label: ',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade600,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

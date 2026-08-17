@@ -82,6 +82,21 @@ class LoaneeProvider extends ChangeNotifier {
     return 'ACC-$nextAcc';
   }
 
+  LoaneeAccount? getLoaneeForUser({String? customerId, String? mobileNo, String? name}) {
+    for (final l in _loanees) {
+      if (customerId != null && customerId.isNotEmpty && l.customerId.trim().toLowerCase() == customerId.trim().toLowerCase()) {
+        return l;
+      }
+      if (mobileNo != null && mobileNo.isNotEmpty && l.mobileNo.trim() == mobileNo.trim()) {
+        return l;
+      }
+      if (name != null && name.isNotEmpty && l.loaneeName.trim().toLowerCase() == name.trim().toLowerCase()) {
+        return l;
+      }
+    }
+    return null;
+  }
+
   List<LoaneeAccount> searchLoanees(String query) {
     if (query.isEmpty) return loanees;
     final lowerQuery = query.toLowerCase();
@@ -95,6 +110,57 @@ class LoaneeProvider extends ChangeNotifier {
           l.witnessMobileNo.contains(lowerQuery) ||
           l.witnessRelationship.toLowerCase().contains(lowerQuery);
     }).toList();
+  }
+
+  void recordPaymentForLoanee({
+    required String customerId,
+    required String accountNumber,
+    required double paymentAmount,
+    required double newRemainingBalance,
+  }) {
+    final cleanCust = customerId.trim().toLowerCase();
+    final cleanAcc = accountNumber.trim().toLowerCase();
+
+    for (int i = 0; i < _loanees.length; i++) {
+      final l = _loanees[i];
+      final matchCust = cleanCust.isNotEmpty && l.customerId.trim().toLowerCase() == cleanCust;
+      final matchAcc = cleanAcc.isNotEmpty && l.accountNumber.trim().toLowerCase() == cleanAcc;
+
+      if (matchCust || matchAcc) {
+        _loanees[i] = LoaneeAccount(
+          customerid: l.customerid,
+          accountnumber: l.accountnumber,
+          loaneename: l.loaneename,
+          guardianname: l.guardianname,
+          address: l.address,
+          businesstype: l.businesstype,
+          postoffice: l.postoffice,
+          policestation: l.policestation,
+          district: l.district,
+          pincode: l.pincode,
+          mobileno: l.mobileno,
+          aadharno: l.aadharno,
+          createdat: l.createdat,
+          status: newRemainingBalance <= 0 ? 'Closed' : l.status,
+          loanamount: l.loanamount,
+          paidamount: l.paidamount + paymentAmount,
+          dueamount: newRemainingBalance,
+          witnessname: l.witnessname,
+          witnessguardianname: l.witnessguardianname,
+          witnessaddress: l.witnessaddress,
+          witnessbusinesstype: l.witnessbusinesstype,
+          witnesspostoffice: l.witnesspostoffice,
+          witnesspolicestation: l.witnesspolicestation,
+          witnessdistrict: l.witnessdistrict,
+          witnesspincode: l.witnesspincode,
+          witnessmobileno: l.witnessmobileno,
+          witnessaadharno: l.witnessaadharno,
+          witnessrelationship: l.witnessrelationship,
+        );
+        notifyListeners();
+        break;
+      }
+    }
   }
 }
 

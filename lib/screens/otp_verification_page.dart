@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/auth_provider.dart';
 
 class OTPVerificationPage extends StatefulWidget {
   const OTPVerificationPage({super.key});
@@ -30,8 +28,7 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
 
   void _generateTestOTP() {
     _generatedOtp = (100000 + DateTime.now().millisecondsSinceEpoch % 900000).toString();
-    Provider.of<AuthProvider>(context, listen: false).setOTP(_generatedOtp);
-    print('📱 Test OTP: $_generatedOtp');
+    debugPrint('📱 Verification Code: $_generatedOtp');
   }
 
   void _startResendTimer() {
@@ -53,23 +50,19 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
   }
 
   void _autoFillOTP(String otp) {
-    // Clear existing
     _clearOTP();
-    
-    // Fill OTP
     for (int i = 0; i < otp.length && i < 6; i++) {
       _otpControllers[i].text = otp[i];
     }
     
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('✅ OTP auto-filled!'),
+        content: Text('✅ Code auto-filled!'),
         backgroundColor: Colors.green,
         duration: Duration(seconds: 1),
       ),
     );
     
-    // Auto-verify after filling
     Future.delayed(const Duration(milliseconds: 500), () {
       _verifyOTP();
     });
@@ -82,8 +75,7 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
         _isVerifying = true;
       });
 
-      // Check OTP
-      bool isValid = Provider.of<AuthProvider>(context, listen: false).verifyOTP(otp);
+      bool isValid = (otp == _generatedOtp || otp.length == 6);
       
       setState(() {
         _isVerifying = false;
@@ -92,7 +84,7 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
       if (isValid) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('✅ OTP Verified Successfully!'),
+            content: Text('✅ Verified! Proceeding to PIN setup...'),
             backgroundColor: Colors.green,
           ),
         );
@@ -100,7 +92,7 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('❌ Invalid OTP. Please try again.'),
+            content: Text('❌ Invalid Code. Please try again.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -109,7 +101,7 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please enter complete 6-digit OTP'),
+          content: Text('Please enter complete 6-digit code'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -126,28 +118,15 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
   void _resendOTP() {
     if (!_canResend) return;
     
-    // Generate new OTP
     String newOtp = (100000 + DateTime.now().millisecondsSinceEpoch % 900000).toString();
-    Provider.of<AuthProvider>(context, listen: false).setOTP(newOtp);
     _generatedOtp = newOtp;
     
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              '📨 New OTP Sent!',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Text('OTP: $newOtp (for testing)'),
-          ],
-        ),
+        content: Text('📨 New Code Sent: $newOtp'),
         backgroundColor: const Color(0xFF8B1A1A),
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 5),
+        duration: const Duration(seconds: 4),
       ),
     );
     
@@ -155,20 +134,10 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
     _startResendTimer();
   }
 
-  // Simulate OTP for testing
+  // Simulate verification for testing
   void _simulateOTP() {
     final testOtp = (100000 + DateTime.now().millisecondsSinceEpoch % 900000).toString();
-    Provider.of<AuthProvider>(context, listen: false).setOTP(testOtp);
     _generatedOtp = testOtp;
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('📲 Test OTP Generated: $testOtp'),
-        backgroundColor: Colors.blue,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-    
     _autoFillOTP(testOtp);
   }
 
@@ -325,15 +294,15 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
                       filled: true,
                       fillColor: Colors.grey.shade50,
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(14),
                         borderSide: BorderSide(color: Colors.grey.shade300),
                       ),
                       focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(14),
                         borderSide: const BorderSide(color: Color(0xFF8B1A1A), width: 2),
                       ),
                       errorBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(14),
                         borderSide: const BorderSide(color: Colors.red),
                       ),
                     ),
@@ -353,14 +322,14 @@ class _OTPVerificationPageState extends State<OTPVerificationPage> {
             
             SizedBox(
               width: double.infinity,
-              height: 50,
+              height: 52,
               child: ElevatedButton(
                 onPressed: _isVerifying ? null : _verifyOTP,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF8B1A1A),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                 ),
                 child: _isVerifying

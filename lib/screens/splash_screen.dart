@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../widgets/app_logo.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -18,61 +18,77 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _checkLoginStatus() async {
     await Future.delayed(const Duration(seconds: 2));
     
-    // FORCE: Always go to register page first
-    // This will show register page regardless of saved data
-    if (mounted) {
-      // Optional: Clear data to ensure fresh start
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.clear();
-      
-      Navigator.pushReplacementNamed(context, '/register');
-    }
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, '/login');
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF8B1A1A),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
+    return const Scaffold(
+      backgroundColor: Color(0xFF8B1A1A),
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Spacer(),
+              AppLogo(
+                width: 175,
+                height: 175,
               ),
-              child: const Icon(
-                Icons.currency_rupee_rounded,
-                size: 80,
-                color: Color(0xFF8B1A1A),
+              SizedBox(height: 28),
+              Text(
+                'Mangang Finance',
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 2,
+                ),
               ),
-            ),
-            const SizedBox(height: 30),
-            const Text(
-              'Mangang Finance',
-              style: TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 2,
+              SizedBox(height: 8),
+              Text(
+                'Your Trusted Financial Partner',
+                style: TextStyle(
+                  fontSize: 15,
+                  color: Colors.white70,
+                  letterSpacing: 0.5,
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Your Trusted Financial Partner',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.white70,
+              SizedBox(height: 36),
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
               ),
-            ),
-            const SizedBox(height: 40),
-            const CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-            ),
-          ],
+              Spacer(),
+              Text(
+                'Version 1.0.0',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Developed by Devkanta Singh',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white70,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                '© 2026 Mangang Finance • Terms & Conditions',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.white54,
+                ),
+              ),
+              SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
     );

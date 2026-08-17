@@ -1,0 +1,814 @@
+// lib/screens/recent_loanees_page.dart
+
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../models/loanee_model.dart';
+import '../providers/loanee_provider.dart';
+
+class RecentLoaneesPage extends StatefulWidget {
+  final VoidCallback? onCreateLoaneePressed;
+
+  const RecentLoaneesPage({
+    super.key,
+    this.onCreateLoaneePressed,
+  });
+
+  @override
+  State<RecentLoaneesPage> createState() => _RecentLoaneesPageState();
+}
+
+class _RecentLoaneesPageState extends State<RecentLoaneesPage> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  String _selectedDateFilter = 'All'; // All, Today, This Week, This Month, Custom
+  DateTime? _selectedCustomDate;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  bool _matchesDateFilter(DateTime createdAt) {
+    final now = DateTime.now();
+    switch (_selectedDateFilter) {
+      case 'Today':
+        return createdAt.year == now.year &&
+            createdAt.month == now.month &&
+            createdAt.day == now.day;
+      case 'This Week':
+        final weekAgo = now.subtract(const Duration(days: 7));
+        return createdAt.isAfter(weekAgo);
+      case 'This Month':
+        return createdAt.year == now.year && createdAt.month == now.month;
+      case 'Custom':
+        if (_selectedCustomDate == null) return true;
+        return createdAt.year == _selectedCustomDate!.year &&
+            createdAt.month == _selectedCustomDate!.month &&
+            createdAt.day == _selectedCustomDate!.day;
+      case 'All':
+      default:
+        return true;
+    }
+  }
+
+  List<LoaneeAccount> _getFilteredLoanees(List<LoaneeAccount> allLoanees) {
+    return allLoanees.where((l) {
+      // 1. Search Query Filter
+      final query = _searchQuery.trim().toLowerCase();
+      final matchesSearch = query.isEmpty ||
+          l.loaneeName.toLowerCase().contains(query) ||
+          l.customerId.toLowerCase().contains(query) ||
+          l.accountNumber.toLowerCase().contains(query) ||
+          l.mobileNo.contains(query) ||
+          l.district.toLowerCase().contains(query) ||
+          l.businesstype.toLowerCase().contains(query) ||
+          l.witnessName.toLowerCase().contains(query);
+
+      // 2. Date Filter
+      final matchesDate = _matchesDateFilter(l.createdAt);
+
+      return matchesSearch && matchesDate;
+    }).toList();
+  }
+
+  Future<void> _pickCustomDate(BuildContext context) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedCustomDate ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: const Color(0xFF8B1A1A),
+              onPrimary: Colors.white,
+              onSurface: Colors.grey.shade900,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedCustomDate = picked;
+        _selectedDateFilter = 'Custom';
+      });
+    }
+  }
+
+  void _showLoaneeDetailsDialog(BuildContext context, LoaneeAccount account) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        titlePadding: EdgeInsets.zero,
+        title: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF1E1E1E), Color(0xFF2C2C2C)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: Colors.amber.shade700,
+                child: Text(
+                  account.loaneeName.isNotEmpty
+                      ? account.loaneeName[0].toUpperCase()
+                      : 'L',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      account.loaneeName,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      '${account.customerId} • ${account.accountNumber}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.white.withValues(alpha: 0.75),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ],
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildModalSectionTitle('LOANEE PARTICULARS'),
+              _buildModalRow('Customer ID', account.customerId, Icons.badge_outlined),
+              _buildModalRow('Account Number', account.accountNumber, Icons.account_balance_wallet_outlined),
+              _buildModalRow('Mobile Number', account.mobileNo, Icons.phone_android_rounded),
+              _buildModalRow('W/O, S/O, D/O', account.guardianName.isNotEmpty ? account.guardianName : 'N/A', Icons.people_outline_rounded),
+              _buildModalRow('Aadhar Number', account.aadharNo.isNotEmpty ? account.aadharNo : 'N/A', Icons.credit_card_rounded),
+              _buildModalRow('Business Type', account.businesstype.isNotEmpty ? account.businesstype : 'N/A', Icons.storefront_outlined),
+              _buildModalRow('Address', '${account.address}, ${account.district}', Icons.location_on_outlined),
+              _buildModalRow('Police Station', account.policeStation.isNotEmpty ? account.policeStation : 'N/A', Icons.local_police_outlined),
+              _buildModalRow('Post Office', account.postOffice.isNotEmpty ? account.postOffice : 'N/A', Icons.markunread_mailbox_outlined),
+              _buildModalRow('PIN Code', account.pinCode.isNotEmpty ? account.pinCode : 'N/A', Icons.pin_drop_outlined),
+
+              const Divider(height: 20),
+              _buildModalSectionTitle('LOAN & FINANCIAL STATS'),
+              _buildModalRow('Sanctioned Amount', '₹ ${account.loanAmount.toStringAsFixed(2)}', Icons.currency_rupee_rounded, valueColor: Colors.black87),
+              _buildModalRow('Total Paid Amount', '₹ ${account.paidAmount.toStringAsFixed(2)}', Icons.payments_outlined, valueColor: Colors.green.shade800),
+              _buildModalRow('Remaining Due Balance', '₹ ${account.dueAmount.toStringAsFixed(2)}', Icons.money_off_rounded, valueColor: Colors.orange.shade900),
+
+              const Divider(height: 20),
+              _buildModalSectionTitle('WITNESS & REGISTRATION'),
+              _buildModalRow('Witness Name', account.witnessName.isNotEmpty ? account.witnessName : 'N/A', Icons.person_outline_rounded),
+              _buildModalRow('Witness Mobile', account.witnessMobileNo.isNotEmpty ? account.witnessMobileNo : 'N/A', Icons.phone_outlined),
+              _buildModalRow('Registration Date', account.createdAt.toString().split('.')[0], Icons.calendar_today_outlined),
+              _buildModalRow('Account Status', account.status, Icons.verified_user_outlined, valueColor: Colors.green.shade700),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8B1A1A),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModalSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, top: 4),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF8B1A1A),
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModalRow(String label, String value, IconData icon, {Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 15, color: Colors.grey.shade600),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 120,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+            ),
+          ),
+          const Text(': ', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: valueColor ?? const Color(0xFF1E1E1E),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final loaneeProvider = Provider.of<LoaneeProvider>(context);
+    final allLoanees = loaneeProvider.loanees;
+    final filteredLoanees = _getFilteredLoanees(allLoanees);
+
+    return Scaffold(
+      backgroundColor: Colors.grey.shade100,
+      body: Column(
+        children: [
+          // Header Banner
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF1E1E1E), Color(0xFF2C2C2C)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.only(
+                bottomLeft: Radius.circular(20),
+                bottomRight: Radius.circular(20),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.recent_actors_rounded, color: Colors.amber, size: 24),
+                        SizedBox(width: 10),
+                        Text(
+                          'Recent Registered Loanees',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh from Supabase',
+                      icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                      onPressed: () {
+                        loaneeProvider.fetchFromSupabase();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Syncing loanee accounts from Supabase...'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Newly registered loanee customer profiles, loan sanction details & witness info',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.75),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Content Area
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Analytics Summary Cards
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildSummaryMetric(
+                          title: 'Total Registered',
+                          value: '${allLoanees.length} Accounts',
+                          subtitle: 'All Live Profiles',
+                          icon: Icons.people_alt_rounded,
+                          color: Colors.blue.shade700,
+                          backgroundColor: Colors.blue.shade50,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _buildSummaryMetric(
+                          title: 'Total Loan Disbursed',
+                          value: '₹ ${(loaneeProvider.totalLoanAmount / 1000).toStringAsFixed(1)}k',
+                          subtitle: 'Portfolio Sanctioned',
+                          icon: Icons.account_balance_wallet_rounded,
+                          color: Colors.green.shade700,
+                          backgroundColor: Colors.green.shade50,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Search and Date Filter Bar
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.grey.shade200),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withValues(alpha: 0.05),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Search Box
+                        TextField(
+                          controller: _searchController,
+                          decoration: InputDecoration(
+                            hintText: 'Search by Name, Cust ID, Acc No, Mobile, District...',
+                            hintStyle: TextStyle(fontSize: 12.5, color: Colors.grey.shade500),
+                            prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                            suffixIcon: _searchQuery.isNotEmpty
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear_rounded, size: 18),
+                                    onPressed: () {
+                                      setState(() {
+                                        _searchController.clear();
+                                        _searchQuery = '';
+                                      });
+                                    },
+                                  )
+                                : null,
+                            filled: true,
+                            fillColor: Colors.grey.shade50,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(color: Colors.grey.shade300),
+                            ),
+                          ),
+                          onChanged: (val) {
+                            setState(() {
+                              _searchQuery = val;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Date Filter Chips
+                        Row(
+                          children: [
+                            const Text(
+                              'Filter by Date: ',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1E1E1E),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    _buildDateFilterChip('All'),
+                                    const SizedBox(width: 6),
+                                    _buildDateFilterChip('Today'),
+                                    const SizedBox(width: 6),
+                                    _buildDateFilterChip('This Week'),
+                                    const SizedBox(width: 6),
+                                    _buildDateFilterChip('This Month'),
+                                    const SizedBox(width: 6),
+                                    InkWell(
+                                      onTap: () => _pickCustomDate(context),
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                        decoration: BoxDecoration(
+                                          color: _selectedDateFilter == 'Custom'
+                                              ? const Color(0xFF8B1A1A)
+                                              : Colors.grey.shade100,
+                                          borderRadius: BorderRadius.circular(16),
+                                          border: Border.all(
+                                            color: _selectedDateFilter == 'Custom'
+                                                ? const Color(0xFF8B1A1A)
+                                                : Colors.grey.shade300,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.calendar_month_rounded,
+                                              size: 13,
+                                              color: _selectedDateFilter == 'Custom'
+                                                  ? Colors.white
+                                                  : Colors.grey.shade700,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              _selectedDateFilter == 'Custom' && _selectedCustomDate != null
+                                                  ? '${_selectedCustomDate!.day}/${_selectedCustomDate!.month}/${_selectedCustomDate!.year}'
+                                                  : 'Pick Date',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                                color: _selectedDateFilter == 'Custom'
+                                                    ? Colors.white
+                                                    : Colors.grey.shade800,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Result Count & Register Button Row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Showing ${filteredLoanees.length} of ${allLoanees.length} Loanees',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey.shade800,
+                        ),
+                      ),
+                      if (widget.onCreateLoaneePressed != null)
+                        TextButton.icon(
+                          onPressed: widget.onCreateLoaneePressed,
+                          icon: const Icon(Icons.person_add_alt_1_rounded, size: 15),
+                          label: const Text('Create New Loanee', style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFF8B1A1A),
+                          ),
+                        ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Loanees List
+                  if (filteredLoanees.isEmpty) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(Icons.person_search_outlined, size: 48, color: Colors.grey.shade400),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No Registered Loanees Found',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Try changing your search query or date filter.',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else ...[
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: filteredLoanees.length,
+                      itemBuilder: (ctx, index) {
+                        final account = filteredLoanees[index];
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.grey.shade200),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.grey.withValues(alpha: 0.04),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 20,
+                                    backgroundColor: const Color(0xFF1E1E1E),
+                                    child: Text(
+                                      account.loaneeName.isNotEmpty
+                                          ? account.loaneeName[0].toUpperCase()
+                                          : 'L',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                account.loaneeName,
+                                                style: const TextStyle(
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Color(0xFF1E1E1E),
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            Text(
+                                              '₹ ${account.loanAmount.toStringAsFixed(0)}',
+                                              style: const TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.bold,
+                                                color: Color(0xFF8B1A1A),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          '${account.customerId} • ${account.accountNumber}',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey.shade700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                children: [
+                                  _buildTagChip('📞 ${account.mobileNo}', Colors.blue.shade50, Colors.blue.shade900),
+                                  if (account.district.isNotEmpty)
+                                    _buildTagChip('📍 ${account.district}', Colors.grey.shade100, Colors.black87),
+                                  if (account.businesstype.isNotEmpty)
+                                    _buildTagChip('🏢 ${account.businesstype}', Colors.amber.shade50, Colors.amber.shade900),
+                                ],
+                              ),
+                              const Divider(height: 18),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey.shade600),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Reg: ${account.createdAt.toString().split(' ')[0]}',
+                                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                      ),
+                                    ],
+                                  ),
+                                  InkWell(
+                                    onTap: () => _showLoaneeDetailsDialog(context, account),
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.visibility_outlined, size: 13, color: Color(0xFF8B1A1A)),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'View Details',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF8B1A1A),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDateFilterChip(String label) {
+    final isSelected = _selectedDateFilter == label;
+
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _selectedDateFilter = label;
+          if (label != 'Custom') _selectedCustomDate = null;
+        });
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF8B1A1A) : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF8B1A1A) : Colors.grey.shade300,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: isSelected ? Colors.white : Colors.grey.shade800,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTagChip(String text, Color bg, Color textColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: textColor),
+      ),
+    );
+  }
+
+  Widget _buildSummaryMetric({
+    required String title,
+    required String value,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required Color backgroundColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: color, size: 16),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color),
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            subtitle,
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}

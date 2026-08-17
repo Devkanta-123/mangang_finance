@@ -7,6 +7,7 @@ class RoAccount {
   final String guardianname; // W/O, S/O, D/O
   final String address;
   final String designation; // Text input, NOT dropdown
+  final String route; // Mapped Route from Master Table
   final String postoffice; // P/O
   final String policestation; // P/S
   final String district;
@@ -23,6 +24,7 @@ class RoAccount {
     required this.guardianname,
     required this.address,
     required this.designation,
+    this.route = '',
     required this.postoffice,
     required this.policestation,
     required this.district,
@@ -53,6 +55,7 @@ class RoAccount {
       'guardianname': guardianname,
       'address': address,
       'designation': designation,
+      'route': route,
       'postoffice': postoffice,
       'policestation': policestation,
       'district': district,
@@ -72,6 +75,7 @@ class RoAccount {
       guardianname: json['guardianname'] ?? json['guardianName'] ?? '',
       address: json['address'] ?? '',
       designation: json['designation'] ?? '',
+      route: json['route'] ?? json['routename'] ?? json['routeName'] ?? '',
       postoffice: json['postoffice'] ?? json['postOffice'] ?? '',
       policestation: json['policestation'] ?? json['policeStation'] ?? '',
       district: json['district'] ?? '',

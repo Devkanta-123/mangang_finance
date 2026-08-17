@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
+import 'app_logo.dart';
 
 class DrawerMenuItemData {
   final int index;
@@ -37,7 +38,6 @@ class AppDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    final user = authProvider.currentUser;
     final activeRole = authProvider.activeRole;
     final menuItems = _getMenuItemsForRole(activeRole);
 
@@ -46,8 +46,8 @@ class AppDrawer extends StatelessWidget {
         color: Colors.white,
         child: Column(
           children: [
-            // Drawer Header (Clean, without active role dropdown display)
-            _buildDrawerHeader(context, user, activeRole),
+            // Drawer Header
+            _buildDrawerHeader(context),
 
             // Role-Specific Navigation Menus
             Expanded(
@@ -65,61 +65,75 @@ class AppDrawer extends StatelessWidget {
                         badgeColor: item.badgeColor,
                         isHighlighted: item.isHighlighted,
                       )),
-
-                  const Divider(height: 24, indent: 16, endIndent: 16),
-                  _buildSectionHeader('SYSTEM ACTIONS'),
-
-                  _buildDrawerItem(
-                    index: 12,
-                    icon: Icons.settings_rounded,
-                    title: 'Settings & Security',
-                    subtitle: 'PIN & App Security',
-                  ),
                 ],
               ),
             ),
 
-            // Footer (Logout)
+            // Footer (Logout, Version, Developer Credit & Copyright)
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: Colors.grey.shade50,
                 border: Border(top: BorderSide(color: Colors.grey.shade200)),
               ),
-              child: InkWell(
-                onTap: () async {
-                  Navigator.pop(context); // Close drawer
-                  await authProvider.logout();
-                  if (context.mounted) {
-                    Navigator.pushReplacementNamed(context, '/login');
-                  }
-                },
-                borderRadius: BorderRadius.circular(10),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                  child: Row(
-                    children: [
-                      Icon(Icons.logout_rounded, color: Colors.red.shade700),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Sign Out',
-                        style: TextStyle(
-                          color: Colors.red.shade700,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    onTap: () async {
+                      Navigator.pop(context); // Close drawer
+                      await authProvider.logout();
+                      if (context.mounted) {
+                        Navigator.pushReplacementNamed(context, '/login');
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(10),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.logout_rounded, color: Colors.red.shade700, size: 20),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Sign Out',
+                            style: TextStyle(
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            'v1.0.0',
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
                       ),
-                      const Spacer(),
-                      Text(
-                        'v1.2.0',
-                        style: TextStyle(
-                          color: Colors.grey.shade500,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Developed by Devkanta Singh',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '© 2026 Mangang Finance • Terms & Conditions',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      color: Colors.grey.shade500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             ),
           ],
@@ -134,7 +148,7 @@ class AppDrawer extends StatelessWidget {
         DrawerMenuItemData(
           index: 0,
           icon: Icons.dashboard_rounded,
-          title: 'Admin Dashboard',
+          title: 'My Dashboard',
           subtitle: 'Financial overview & portfolio',
           badge: 'ADMIN',
         ),
@@ -162,56 +176,51 @@ class AppDrawer extends StatelessWidget {
           title: 'RO Accounts List',
           subtitle: 'Fetch & filter RO officer details',
         ),
-        // Positioned right after RO Accounts List
         DrawerMenuItemData(
           index: 5,
           icon: Icons.post_add_rounded,
-          title: 'Loanee Collection Sheet',
+          title: 'Add Loanee on R.O. Collection Sheet',
           subtitle: 'Record entry by Route & Collection Type',
-          isHighlighted: true,
-          badge: 'NEW',
-          badgeColor: Colors.amber.shade800,
         ),
         DrawerMenuItemData(
           index: 6,
           icon: Icons.table_chart_rounded,
-          title: 'Collection View',
+          title: 'Collection Sheet',
           subtitle: 'Table view with Route & Type filters',
-          isHighlighted: true,
         ),
         DrawerMenuItemData(
           index: 7,
           icon: Icons.alt_route_rounded,
           title: 'Route Management',
           subtitle: 'Create & manage route masters',
-          isHighlighted: true,
-          badge: 'MASTER',
+        ),
+        DrawerMenuItemData(
+          index: 9,
+          icon: Icons.recent_actors_rounded,
+          title: 'Recent Registered Loanees',
+          subtitle: 'New customer registrations & loans',
+          badge: 'NEW',
+          badgeColor: Colors.green.shade700,
+        ),
+        DrawerMenuItemData(
+          index: 11,
+          icon: Icons.timer_off_rounded,
+          title: 'Late Fines & Penalties',
+          subtitle: 'Live overdue tracking & penalty calculations',
+        ),
+        DrawerMenuItemData(
+          index: 10,
+          icon: Icons.settings_rounded,
+          title: 'Settings',
+          subtitle: 'Late payment penalty & defaults',
+          badge: 'ADMIN',
           badgeColor: const Color(0xFF8B1A1A),
         ),
         DrawerMenuItemData(
           index: 8,
-          icon: Icons.receipt_long_rounded,
-          title: 'Transactions & Collections',
-          subtitle: 'System payment records',
-        ),
-        DrawerMenuItemData(
-          index: 9,
-          icon: Icons.warning_amber_rounded,
-          title: 'Late Fines & Dues Audit',
-          subtitle: 'Overdue tracking & waivers',
-          badgeColor: Colors.orange.shade700,
-        ),
-        DrawerMenuItemData(
-          index: 10,
-          icon: Icons.bar_chart_rounded,
-          title: 'Executive Reports & Stats',
-          subtitle: 'Collection insights & PDF',
-        ),
-        DrawerMenuItemData(
-          index: 11,
           icon: Icons.account_circle_rounded,
-          title: 'Admin Account & Profile',
-          subtitle: 'User details & identity',
+          title: 'Admin Profile',
+          subtitle: 'Account details & security PIN',
         ),
       ];
     } else if (role == UserType.ro) {
@@ -220,34 +229,21 @@ class AppDrawer extends StatelessWidget {
         DrawerMenuItemData(
           index: 0,
           icon: Icons.space_dashboard_rounded,
-          title: 'RO Dashboard',
+          title: 'My Dashboard',
           subtitle: "Daily collection summary",
           badge: 'RO',
         ),
         DrawerMenuItemData(
-          index: 5,
-          icon: Icons.post_add_rounded,
-          title: 'Add Loanee Collection Entry',
-          subtitle: 'Record route collection sheet entry',
-          isHighlighted: true,
-        ),
-        DrawerMenuItemData(
           index: 6,
           icon: Icons.table_chart_rounded,
-          title: 'R.O. Collection Sheet Table',
-          subtitle: 'View & filter collection entries',
+          title: 'Collection Sheet',
+          subtitle: 'View routes & record payments',
         ),
         DrawerMenuItemData(
           index: 8,
-          icon: Icons.payments_rounded,
-          title: 'Payment Collection Entry',
-          subtitle: 'Record field payment receipt',
-        ),
-        DrawerMenuItemData(
-          index: 11,
           icon: Icons.badge_rounded,
           title: 'RO Officer Profile',
-          subtitle: 'Officer credentials & zone',
+          subtitle: 'Officer credentials & details',
         ),
       ];
     } else {
@@ -256,32 +252,26 @@ class AppDrawer extends StatelessWidget {
         DrawerMenuItemData(
           index: 0,
           icon: Icons.home_rounded,
-          title: 'Loanee Dashboard',
-          subtitle: 'Loan card & next EMI date',
-          badge: 'LOANEE',
-        ),
-        DrawerMenuItemData(
-          index: 8,
-          icon: Icons.receipt_long_rounded,
-          title: 'Payment Transactions (View Only)',
-          subtitle: 'Read-only payment history & ledger',
-          isHighlighted: true,
+          title: 'My Dashboard',
+          subtitle: 'Loan card & repayment overview',
         ),
         DrawerMenuItemData(
           index: 11,
+          icon: Icons.gavel_rounded,
+          title: 'Late Fine & Overdue Notice',
+          subtitle: 'Overdue assessment & acknowledgment',
+        ),
+        DrawerMenuItemData(
+          index: 8,
           icon: Icons.badge_outlined,
-          title: 'My Profile',
-          subtitle: 'Personal details & Aadhar info',
+          title: 'Loanee Profile',
+          subtitle: 'Account details & customer info',
         ),
       ];
     }
   }
 
-  Widget _buildDrawerHeader(
-    BuildContext context,
-    User? user,
-    UserType activeRole,
-  ) {
+  Widget _buildDrawerHeader(BuildContext context) {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(
@@ -297,74 +287,33 @@ class AppDrawer extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          const Row(
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.account_balance_wallet,
-                      color: Colors.amber, size: 24),
-                  SizedBox(width: 8),
-                  Text(
-                    'MANGANG FINANCE',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
+              AppLogo(
+                width: 44,
+                height: 44,
+                fallbackIcon: Icons.account_balance_wallet,
+                fallbackIconColor: Colors.amber,
               ),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white70),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: Colors.white,
-                child: Icon(
-                  _getRoleIcon(activeRole),
-                  color: const Color(0xFF8B1A1A),
-                  size: 26,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      user?.name ?? 'Finance User',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      user?.mobileNo ?? '9862145890',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.8),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
+              SizedBox(width: 10),
+              Text(
+                'MANGANG FINANCE',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  letterSpacing: 0.5,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, color: Colors.white70),
+            onPressed: () => Navigator.pop(context),
+          ),
         ],
       ),
     );
@@ -483,17 +432,6 @@ class AppDrawer extends StatelessWidget {
         return 'RO';
       case UserType.loanee:
         return 'LOANEE';
-    }
-  }
-
-  IconData _getRoleIcon(UserType role) {
-    switch (role) {
-      case UserType.admin:
-        return Icons.admin_panel_settings_rounded;
-      case UserType.ro:
-        return Icons.badge_rounded;
-      case UserType.loanee:
-        return Icons.person_rounded;
     }
   }
 }

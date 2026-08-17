@@ -31,7 +31,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
   final TextEditingController _pinController = TextEditingController(); // PIN
   final TextEditingController _mobileController = TextEditingController();
   final TextEditingController _aadharController = TextEditingController();
-  final TextEditingController _loanAmountController = TextEditingController(text: '50000');
+  final TextEditingController _loanAmountController = TextEditingController();
 
   // Witness Controllers (11 Witness Details)
   final TextEditingController _witnessNameController = TextEditingController();
@@ -185,7 +185,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
         _isSubmitting = true;
       });
 
-      final loanAmount = double.tryParse(_loanAmountController.text) ?? 50000.0;
+      final loanAmount = double.tryParse(_loanAmountController.text.trim()) ?? 0.0;
 
       final newLoanee = LoaneeAccount(
         customerid: _customerIdController.text.trim(),
@@ -275,7 +275,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
     _pinController.clear();
     _mobileController.clear();
     _aadharController.clear();
-    _loanAmountController.text = '50000';
+    _loanAmountController.clear();
 
     // Clear witness fields
     _witnessNameController.clear();

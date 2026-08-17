@@ -47,9 +47,9 @@ class LoaneeAccount {
     required this.aadharno,
     DateTime? createdat,
     this.status = 'Active',
-    this.loanamount = 50000.0,
-    this.paidamount = 15000.0,
-    this.dueamount = 35000.0,
+    this.loanamount = 0.0,
+    this.paidamount = 0.0,
+    this.dueamount = 0.0,
     this.witnessname = '',
     this.witnessguardianname = '',
     this.witnessaddress = '',
@@ -125,40 +125,47 @@ class LoaneeAccount {
     };
   }
 
+  static double _parseDouble(dynamic val) {
+    if (val == null) return 0.0;
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val) ?? 0.0;
+    return 0.0;
+  }
+
   factory LoaneeAccount.fromJson(Map<String, dynamic> json) {
     return LoaneeAccount(
-      customerid: json['customerid'] ?? json['customerId'] ?? '',
-      accountnumber: json['accountnumber'] ?? json['accountNumber'] ?? '',
-      loaneename: json['loaneename'] ?? json['loaneeName'] ?? '',
-      guardianname: json['guardianname'] ?? json['guardianName'] ?? '',
-      address: json['address'] ?? '',
-      businesstype: json['businesstype'] ?? json['businessType'] ?? '',
-      postoffice: json['postoffice'] ?? json['postOffice'] ?? '',
-      policestation: json['policestation'] ?? json['policeStation'] ?? '',
-      district: json['district'] ?? '',
-      pincode: json['pincode'] ?? json['pinCode'] ?? '',
-      mobileno: json['mobileno'] ?? json['mobileNo'] ?? '',
-      aadharno: json['aadharno'] ?? json['aadharNo'] ?? '',
+      customerid: json['customerid']?.toString() ?? json['customerId']?.toString() ?? '',
+      accountnumber: json['accountnumber']?.toString() ?? json['accountNumber']?.toString() ?? '',
+      loaneename: json['loaneename']?.toString() ?? json['loaneeName']?.toString() ?? '',
+      guardianname: json['guardianname']?.toString() ?? json['guardianName']?.toString() ?? '',
+      address: json['address']?.toString() ?? '',
+      businesstype: json['businesstype']?.toString() ?? json['businessType']?.toString() ?? '',
+      postoffice: json['postoffice']?.toString() ?? json['postOffice']?.toString() ?? '',
+      policestation: json['policestation']?.toString() ?? json['policeStation']?.toString() ?? '',
+      district: json['district']?.toString() ?? '',
+      pincode: json['pincode']?.toString() ?? json['pinCode']?.toString() ?? '',
+      mobileno: json['mobileno']?.toString() ?? json['mobileNo']?.toString() ?? '',
+      aadharno: json['aadharno']?.toString() ?? json['aadharNo']?.toString() ?? '',
       createdat: json['createdat'] != null
-          ? DateTime.parse(json['createdat'])
+          ? (DateTime.tryParse(json['createdat'].toString()) ?? DateTime.now())
           : (json['createdAt'] != null
-              ? DateTime.parse(json['createdAt'])
+              ? (DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now())
               : DateTime.now()),
-      status: json['status'] ?? 'Active',
-      loanamount: (json['loanamount'] ?? json['loanAmount'] ?? 50000.0).toDouble(),
-      paidamount: (json['paidamount'] ?? json['paidAmount'] ?? 15000.0).toDouble(),
-      dueamount: (json['dueamount'] ?? json['dueAmount'] ?? 35000.0).toDouble(),
-      witnessname: json['witnessname'] ?? json['witnessName'] ?? '',
-      witnessguardianname: json['witnessguardianname'] ?? json['witnessGuardianName'] ?? '',
-      witnessaddress: json['witnessaddress'] ?? json['witnessAddress'] ?? '',
-      witnessbusinesstype: json['witnessbusinesstype'] ?? json['witnessBusinessType'] ?? '',
-      witnesspostoffice: json['witnesspostoffice'] ?? json['witnessPostOffice'] ?? '',
-      witnesspolicestation: json['witnesspolicestation'] ?? json['witnessPoliceStation'] ?? '',
-      witnessdistrict: json['witnessdistrict'] ?? json['witnessDistrict'] ?? '',
-      witnesspincode: json['witnesspincode'] ?? json['witnessPinCode'] ?? '',
-      witnessmobileno: json['witnessmobileno'] ?? json['witnessMobileNo'] ?? '',
-      witnessaadharno: json['witnessaadharno'] ?? json['witnessAadharNo'] ?? '',
-      witnessrelationship: json['witnessrelationship'] ?? json['witnessRelationship'] ?? '',
+      status: json['status']?.toString() ?? 'Active',
+      loanamount: _parseDouble(json['loanamount'] ?? json['loanAmount'] ?? json['loan_amount']),
+      paidamount: _parseDouble(json['paidamount'] ?? json['paidAmount'] ?? json['paid_amount']),
+      dueamount: _parseDouble(json['dueamount'] ?? json['dueAmount'] ?? json['due_amount']),
+      witnessname: json['witnessname']?.toString() ?? json['witnessName']?.toString() ?? '',
+      witnessguardianname: json['witnessguardianname']?.toString() ?? json['witnessGuardianName']?.toString() ?? '',
+      witnessaddress: json['witnessaddress']?.toString() ?? json['witnessAddress']?.toString() ?? '',
+      witnessbusinesstype: json['witnessbusinesstype']?.toString() ?? json['witnessBusinessType']?.toString() ?? '',
+      witnesspostoffice: json['witnesspostoffice']?.toString() ?? json['witnessPostOffice']?.toString() ?? '',
+      witnesspolicestation: json['witnesspolicestation']?.toString() ?? json['witnessPoliceStation']?.toString() ?? '',
+      witnessdistrict: json['witnessdistrict']?.toString() ?? json['witnessDistrict']?.toString() ?? '',
+      witnesspincode: json['witnesspincode']?.toString() ?? json['witnessPinCode']?.toString() ?? '',
+      witnessmobileno: json['witnessmobileno']?.toString() ?? json['witnessMobileNo']?.toString() ?? '',
+      witnessaadharno: json['witnessaadharno']?.toString() ?? json['witnessAadharNo']?.toString() ?? '',
+      witnessrelationship: json['witnessrelationship']?.toString() ?? json['witnessRelationship']?.toString() ?? '',
     );
   }
 }

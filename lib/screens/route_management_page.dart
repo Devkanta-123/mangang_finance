@@ -509,7 +509,7 @@ class _RouteManagementPageState extends State<RouteManagementPage> {
                           .where((e) => e.route.toLowerCase() == route.name.toLowerCase())
                           .toList();
                       final totalRouteAmount = entriesForRoute.fold(
-                          0.0, (sum, item) => sum + item.collectedAmount);
+                          0.0, (sum, item) => sum + provider.getTotalPaidForCollection(item.id));
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),

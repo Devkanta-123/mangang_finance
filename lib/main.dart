@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'models/user_model.dart';
 import 'screens/splash_screen.dart';
 import 'screens/register_page.dart';
 import 'screens/otp_verification_page.dart';
@@ -12,15 +13,15 @@ import 'screens/create_loanee_page.dart';
 import 'screens/loanee_list_page.dart';
 import 'screens/create_ro_page.dart';
 import 'screens/ro_list_page.dart';
-import 'screens/transaction_page.dart';
-import 'screens/late_fines_page.dart';
-import 'screens/reports_page.dart';
 import 'screens/account_page.dart';
+import 'screens/recent_loanees_page.dart';
 import 'screens/settings_page.dart';
+import 'screens/late_fines_page.dart';
 import 'providers/auth_provider.dart';
 import 'providers/loanee_provider.dart';
 import 'providers/ro_provider.dart';
 import 'providers/collection_sheet_provider.dart';
+import 'providers/settings_provider.dart';
 import 'services/supabase_service.dart';
 import 'widgets/app_drawer.dart';
 
@@ -41,6 +42,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => LoaneeProvider()),
         ChangeNotifierProvider(create: (_) => RoProvider()),
         ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
+        ChangeNotifierProvider(create: (_) => SettingsProvider()),
       ],
       child: MaterialApp(
         title: 'Mangang Finance',
@@ -173,23 +175,28 @@ class _MainPageState extends State<MainPage> {
       // Index 7: Route Management Master
       const RouteManagementPage(),
 
-      // Index 8: Transactions & Collections
-      const TransactionPage(),
-      // Index 9: Late Fines & Dues
-      const LateFinesPage(),
-      // Index 10: Reports & Analytics
-      const ReportsPage(),
-      // Index 11: Account & Profile
+      // Index 8: Simple Profile Page
       const AccountPage(),
-      // Index 12: Settings & Security
+
+      // Index 9: Recent Registered Loanees Page
+      RecentLoaneesPage(
+        onCreateLoaneePressed: () {
+          setState(() {
+            _selectedIndex = 1; // Navigate to Create Loanee Page
+          });
+        },
+      ),
+      // Index 10: System Settings (Late Payment Settings, etc.)
       const SettingsPage(),
+      // Index 11: Late Fines & Overdue Tracking
+      const LateFinesPage(),
     ];
 
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
         title: Text(
-          _getMenuTitle(_selectedIndex),
+          _getMenuTitle(_selectedIndex, authProvider.activeRole),
           style: const TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 18,
@@ -203,36 +210,37 @@ class _MainPageState extends State<MainPage> {
           },
         ),
         actions: [
-          // Active Role Level Badge in AppBar
-          Container(
-            margin: const EdgeInsets.only(right: 14),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.amber.shade700,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.15),
-                  blurRadius: 4,
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.shield_rounded, size: 14, color: Colors.white),
-                const SizedBox(width: 4),
-                Text(
-                  authProvider.activeRole.toString().split('.').last.toUpperCase(),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 0.5,
+          // Active Role Level Badge in AppBar (Hidden for Loanee or when on Profile)
+          if (authProvider.activeRole != UserType.loanee && _selectedIndex != 8)
+            Container(
+              margin: const EdgeInsets.only(right: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade700,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 4,
                   ),
-                ),
-              ],
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.shield_rounded, size: 14, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text(
+                    authProvider.activeRole.toString().split('.').last.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
       // Toggle Navigation Drawer
@@ -245,11 +253,11 @@ class _MainPageState extends State<MainPage> {
           Navigator.pop(context); // Close drawer after selection
         },
       ),
-      body: pages[_selectedIndex],
+      body: pages[_selectedIndex < pages.length ? _selectedIndex : 0],
     );
   }
 
-  String _getMenuTitle(int index) {
+  String _getMenuTitle(int index, UserType role) {
     switch (index) {
       case 0:
         return 'Mangang Finance';
@@ -262,21 +270,26 @@ class _MainPageState extends State<MainPage> {
       case 4:
         return 'RO Accounts List';
       case 5:
-        return 'Loanee Collection Sheet';
+        return 'Add Loanee on R.O. Collection Sheet';
       case 6:
-        return 'Collection View';
+        return 'Collection Sheet';
       case 7:
         return 'Route Management';
       case 8:
-        return 'Transactions & Collections';
+        switch (role) {
+          case UserType.admin:
+            return 'Admin Profile';
+          case UserType.ro:
+            return 'RO Officer Profile';
+          case UserType.loanee:
+            return 'Loanee Profile';
+        }
       case 9:
-        return 'Late Fines & Dues';
+        return 'Recent Registered Loanees';
       case 10:
-        return 'Reports & Analytics';
+        return 'Settings';
       case 11:
-        return 'Account & Profile';
-      case 12:
-        return 'Settings & Role Switcher';
+        return 'Late Fines & Overdue Tracking';
       default:
         return 'Mangang Finance';
     }

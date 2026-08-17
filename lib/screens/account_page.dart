@@ -1,8 +1,11 @@
+// lib/screens/account_page.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/loanee_provider.dart';
+import '../providers/ro_provider.dart';
+import '../providers/collection_sheet_provider.dart';
 
 class AccountPage extends StatelessWidget {
   const AccountPage({super.key});
@@ -11,77 +14,243 @@ class AccountPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final loaneeProvider = Provider.of<LoaneeProvider>(context);
+    final roProvider = Provider.of<RoProvider>(context);
+    final collectionProvider = Provider.of<CollectionSheetProvider>(context);
+
     final user = authProvider.currentUser;
     final role = authProvider.activeRole;
+
+    // Pull real loanee data if role is Loanee
+    final loaneeAccount = loaneeProvider.getLoaneeForUser(
+      customerId: user?.customerId,
+      mobileNo: user?.mobileNo,
+      name: user?.name,
+    );
+
+    // Pull real RO data if role is RO
+    final roAccount = roProvider.getRoForUser(
+      customerId: user?.customerId,
+      mobileNo: user?.mobileNo,
+      name: user?.name,
+    );
+
+    final loaneeEntries = collectionProvider.getEntriesForLoanee(
+      user?.mobileNo ?? '',
+      user?.name ?? '',
+      user?.customerId ?? '',
+    );
+
+    final String displayName;
+    final String customerIdVal;
+    final String accountNameVal;
+    final String accountNoVal;
+
+    if (role == UserType.loanee) {
+      displayName = loaneeAccount?.loaneeName.isNotEmpty == true
+          ? loaneeAccount!.loaneeName
+          : (user?.name != null && user!.name.isNotEmpty
+              ? user.name
+              : (loaneeEntries.isNotEmpty ? loaneeEntries.first.loaneeName : 'Loanee Account'));
+
+      customerIdVal = loaneeAccount?.customerId.isNotEmpty == true
+          ? loaneeAccount!.customerId
+          : ((user?.customerId != null && user!.customerId!.isNotEmpty)
+              ? user.customerId!
+              : (loaneeEntries.isNotEmpty ? loaneeEntries.first.customerId : 'N/A'));
+
+      accountNameVal = (user?.accountName != null && user!.accountName!.isNotEmpty)
+          ? user.accountName!
+          : (loaneeAccount?.loaneeName.isNotEmpty == true
+              ? loaneeAccount!.loaneeName
+              : displayName);
+
+      accountNoVal = loaneeAccount?.accountNumber.isNotEmpty == true
+          ? loaneeAccount!.accountNumber
+          : (user?.accountName != null && user!.accountName!.isNotEmpty
+              ? user.accountName!
+              : (loaneeEntries.isNotEmpty
+                  ? loaneeEntries.map((e) => e.accountNumber).toSet().join(', ')
+                  : 'N/A'));
+    } else if (role == UserType.ro) {
+      displayName = (user?.name != null && user!.name.isNotEmpty)
+          ? user.name
+          : 'RO Officer';
+      customerIdVal = (user?.customerId != null && user!.customerId!.isNotEmpty)
+          ? user.customerId!
+          : 'RO-OFFICER';
+      accountNameVal = 'N/A';
+      accountNoVal = 'N/A';
+    } else {
+      displayName = (user?.name != null && user!.name.isNotEmpty)
+          ? user.name
+          : 'Administrator';
+      customerIdVal = (user?.customerId != null && user!.customerId!.isNotEmpty)
+          ? user.customerId!
+          : 'ADMIN-01';
+      accountNameVal = 'N/A';
+      accountNoVal = 'N/A';
+    }
+
+    final displayMobile = (user?.mobileNo != null && user!.mobileNo.isNotEmpty)
+        ? user.mobileNo
+        : (loaneeAccount?.mobileNo.isNotEmpty == true
+            ? loaneeAccount!.mobileNo
+            : 'Not Set');
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
       body: SingleChildScrollView(
         child: Column(
           children: [
-            // Top Executive Profile Header Card
-            _buildProfileHeader(context, user, role),
+            // Profile Header Card
+            _buildProfileHeader(context, displayName, role),
 
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Portfolio / Account Summary Banner
-                  _buildRoleSummaryCard(role, loaneeProvider, user),
-
-                  const SizedBox(height: 24),
-
-                  // Section 1: Official Identification & Profile
-                  _buildSectionHeader('OFFICIAL IDENTIFICATION & CREDS', Icons.badge_rounded),
+                  // Profile Details Card
+                  _buildSectionHeader('PROFILE INFORMATION', Icons.person_outline_rounded),
                   const SizedBox(height: 10),
                   _buildInfoCard([
+                    // Loanee / RO / Admin Name
                     _buildDetailRow(
                       icon: Icons.person_rounded,
-                      label: 'Account Holder Name',
-                      value: user?.name ?? 'User',
+                      label: role == UserType.loanee ? 'Loanee Name' : (role == UserType.ro ? 'RO Officer Name' : 'Administrator Name'),
+                      value: displayName,
                       valueColor: const Color(0xFF8B1A1A),
                     ),
                     const Divider(height: 20),
+
+                    // Customer ID and Account Name for Loanee
+                    if (role == UserType.loanee) ...[
+                      _buildDetailRow(
+                        icon: Icons.badge_rounded,
+                        label: 'Customer ID',
+                        value: customerIdVal,
+                      ),
+                      const Divider(height: 20),
+                      _buildDetailRow(
+                        icon: Icons.account_balance_rounded,
+                        label: 'Account Name',
+                        value: accountNameVal,
+                      ),
+                      const Divider(height: 20),
+                      if (accountNoVal != 'N/A' && accountNoVal != accountNameVal) ...[
+                        _buildDetailRow(
+                          icon: Icons.account_balance_wallet_rounded,
+                          label: 'Account No',
+                          value: accountNoVal,
+                        ),
+                        const Divider(height: 20),
+                      ],
+                    ],
+
                     _buildDetailRow(
                       icon: Icons.phone_android_rounded,
-                      label: 'Registered Mobile Number',
-                      value: user?.mobileNo ?? '+91 9862145890',
-                      badge: 'VERIFIED',
+                      label: 'Mobile Number',
+                      value: displayMobile,
+                    ),
+
+                    // Additional Loanee Details if available
+                    if (role == UserType.loanee && loaneeAccount != null) ...[
+                      if (loaneeAccount.guardianName.isNotEmpty) ...[
+                        const Divider(height: 20),
+                        _buildDetailRow(
+                          icon: Icons.family_restroom_rounded,
+                          label: 'W/O, S/O, D/O',
+                          value: loaneeAccount.guardianName,
+                        ),
+                      ],
+                      if (loaneeAccount.address.isNotEmpty) ...[
+                        const Divider(height: 20),
+                        _buildDetailRow(
+                          icon: Icons.location_on_rounded,
+                          label: 'Address',
+                          value: loaneeAccount.district.isNotEmpty
+                              ? '${loaneeAccount.address}, ${loaneeAccount.district}'
+                              : loaneeAccount.address,
+                        ),
+                      ],
+                      if (loaneeAccount.businesstype.isNotEmpty) ...[
+                        const Divider(height: 20),
+                        _buildDetailRow(
+                          icon: Icons.storefront_rounded,
+                          label: 'Business Type',
+                          value: loaneeAccount.businesstype,
+                        ),
+                      ],
+                      if (loaneeAccount.loanamount > 0) ...[
+                        const Divider(height: 20),
+                        _buildDetailRow(
+                          icon: Icons.currency_rupee_rounded,
+                          label: 'Sanctioned Loan Amount',
+                          value: '₹ ${loaneeAccount.loanamount.toStringAsFixed(2)}',
+                        ),
+                      ],
+                    ],
+
+                    // For Admin and RO, show role info
+                    if (role != UserType.loanee) ...[
+                      const Divider(height: 20),
+                      _buildDetailRow(
+                        icon: Icons.shield_rounded,
+                        label: 'Role / Access Level',
+                        value: _getRoleLabel(role),
+                        badge: _getRoleBadge(role),
+                        badgeColor: const Color(0xFF8B1A1A),
+                      ),
+                      const Divider(height: 20),
+                      _buildDetailRow(
+                        icon: Icons.badge_rounded,
+                        label: 'Account ID',
+                        value: customerIdVal,
+                      ),
+                    ],
+
+                    // If RO, show Assigned Route Map & Designation
+                    if (role == UserType.ro) ...[
+                      const Divider(height: 20),
+                      _buildDetailRow(
+                        icon: Icons.alt_route_rounded,
+                        label: 'Assigned Route',
+                        value: roAccount?.route.isNotEmpty == true ? roAccount!.route : 'All Routes / Flexible',
+                        badge: roAccount?.route.isNotEmpty == true ? 'ASSIGNED' : 'FLEXIBLE',
+                        badgeColor: Colors.blue.shade700,
+                      ),
+                      if (roAccount?.designation.isNotEmpty == true) ...[
+                        const Divider(height: 20),
+                        _buildDetailRow(
+                          icon: Icons.work_outline_rounded,
+                          label: 'Designation',
+                          value: roAccount!.designation,
+                        ),
+                      ],
+                    ],
+
+                    const Divider(height: 20),
+                    _buildDetailRow(
+                      icon: Icons.verified_user_rounded,
+                      label: 'Account Status',
+                      value: loaneeAccount?.status.isNotEmpty == true
+                          ? loaneeAccount!.status
+                          : 'Active & Verified',
+                      badge: 'ACTIVE',
                       badgeColor: Colors.green.shade700,
-                    ),
-                    const Divider(height: 20),
-                    _buildDetailRow(
-                      icon: Icons.shield_rounded,
-                      label: 'Assigned Portal Role',
-                      value: _getRoleLabel(role),
-                      badge: 'LEVEL 1',
-                      badgeColor: Colors.amber.shade800,
-                    ),
-                    const Divider(height: 20),
-                    _buildDetailRow(
-                      icon: Icons.numbers_rounded,
-                      label: 'Account / Customer ID',
-                      value: user?.customerId ?? 'ADM-0192',
-                    ),
-                    const Divider(height: 20),
-                    _buildDetailRow(
-                      icon: Icons.location_city_rounded,
-                      label: 'Primary Operating Branch',
-                      value: 'Imphal Head Office (Zone 1)',
                     ),
                   ]),
 
                   const SizedBox(height: 24),
 
-                  // Section 2: Security & App Access Settings
-                  _buildSectionHeader('SECURITY & PORTAL ACCESS', Icons.lock_person_rounded),
+                  // Security Section
+                  _buildSectionHeader('SECURITY & ACCESS', Icons.lock_outline_rounded),
                   const SizedBox(height: 10),
                   _buildActionGroup([
                     _buildActionItem(
                       icon: Icons.pin_rounded,
-                      title: 'App Security PIN',
-                      subtitle: '6-digit PIN protection enabled',
+                      title: 'Change Security PIN',
+                      subtitle: 'Update your 6-digit app login PIN',
                       trailingWidget: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
@@ -90,7 +259,7 @@ class AccountPage extends StatelessWidget {
                           border: Border.all(color: Colors.green.shade200),
                         ),
                         child: Text(
-                          'ACTIVE',
+                          'CHANGE',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
@@ -98,61 +267,7 @@ class AccountPage extends StatelessWidget {
                           ),
                         ),
                       ),
-                      onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('PIN Security is active. Use Settings to change PIN.'),
-                            backgroundColor: Color(0xFF8B1A1A),
-                          ),
-                        );
-                      },
-                    ),
-                    const Divider(height: 1),
-                    _buildActionItem(
-                      icon: Icons.fingerprint_rounded,
-                      title: 'Biometric Access',
-                      subtitle: 'Fingerprint & Face ID login',
-                      trailingWidget: Switch(
-                        value: true,
-                        activeColor: const Color(0xFF8B1A1A),
-                        onChanged: (val) {},
-                      ),
-                      onTap: () {},
-                    ),
-                    const Divider(height: 1),
-                    _buildActionItem(
-                      icon: Icons.verified_user_rounded,
-                      title: 'Device Authorization',
-                      subtitle: 'Current Device: Android Mobile (Logged in)',
-                      onTap: () {},
-                    ),
-                  ]),
-
-                  const SizedBox(height: 24),
-
-                  // Section 3: Preferences & Support
-                  _buildSectionHeader('PREFERENCES & SUPPORT DESK', Icons.headset_mic_rounded),
-                  const SizedBox(height: 10),
-                  _buildActionGroup([
-                    _buildActionItem(
-                      icon: Icons.receipt_long_rounded,
-                      title: 'Account Passbook & Reports',
-                      subtitle: 'View payment statements & ledger',
-                      onTap: () {},
-                    ),
-                    const Divider(height: 1),
-                    _buildActionItem(
-                      icon: Icons.notifications_active_rounded,
-                      title: 'Push Notifications & Alerts',
-                      subtitle: 'Collection updates & payment reminders',
-                      onTap: () {},
-                    ),
-                    const Divider(height: 1),
-                    _buildActionItem(
-                      icon: Icons.contact_support_rounded,
-                      title: 'Mangang Help Desk & Support',
-                      subtitle: 'Toll Free: 1800-419-8800 • support@mangang.in',
-                      onTap: () {},
+                      onTap: () => _showChangePinDialog(context, authProvider),
                     ),
                   ]),
 
@@ -176,7 +291,7 @@ class AccountPage extends StatelessWidget {
                           Icon(Icons.logout_rounded, color: Colors.red.shade700, size: 20),
                           const SizedBox(width: 8),
                           Text(
-                            'SIGN OUT OF PORTAL',
+                            'SIGN OUT',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
@@ -196,19 +311,37 @@ class AccountPage extends StatelessWidget {
                     child: Column(
                       children: [
                         Text(
-                          'MANGANG FINANCE ENTERPRISE',
+                          'MANGANG FINANCE',
                           style: TextStyle(
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                             letterSpacing: 1.2,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Version 1.0.0',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
                             color: Colors.grey.shade600,
                           ),
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          'Version 1.2.0 • Secured by 256-bit Encryption',
+                          'Developed by Devkanta Singh',
                           style: TextStyle(
-                            fontSize: 10,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '© 2026 Mangang Finance • Terms & Conditions',
+                          style: TextStyle(
+                            fontSize: 9.5,
                             color: Colors.grey.shade500,
                           ),
                         ),
@@ -226,8 +359,7 @@ class AccountPage extends StatelessWidget {
     );
   }
 
-  // Modern Executive Header Design
-  Widget _buildProfileHeader(BuildContext context, User? user, UserType role) {
+  Widget _buildProfileHeader(BuildContext context, String name, UserType role) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
@@ -255,184 +387,83 @@ class AccountPage extends StatelessWidget {
             alignment: Alignment.bottomRight,
             children: [
               Container(
-                width: 90,
-                height: 90,
+                width: 84,
+                height: 84,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: Colors.white,
                   border: Border.all(color: Colors.amber.shade400, width: 3),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
-                      blurRadius: 10,
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 8,
                     ),
                   ],
                 ),
                 child: Center(
                   child: Text(
-                    _getInitials(user?.name ?? 'User'),
+                    _getInitials(name),
                     style: const TextStyle(
-                      fontSize: 32,
+                      fontSize: 30,
                       fontWeight: FontWeight.bold,
                       color: Color(0xFF8B1A1A),
                     ),
                   ),
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade700,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
+          if (role != UserType.loanee)
+            Container(
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade700,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(_getRoleIcon(role), size: 14, color: Colors.white),
+            ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      Text(
+        name,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+          letterSpacing: 0.3,
+        ),
+      ),
+      if (role != UserType.loanee) ...[
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white30),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.shield_rounded, size: 13, color: Colors.amber.shade300),
+              const SizedBox(width: 5),
+              Text(
+                _getRoleLabel(role).toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 0.8,
                 ),
-                child: Icon(_getRoleIcon(role), size: 16, color: Colors.white),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Text(
-            user?.name ?? 'User Profile',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white30),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.stars_rounded, size: 14, color: Colors.amber.shade300),
-                const SizedBox(width: 6),
-                Text(
-                  _getRoleLabel(role).toUpperCase(),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Summary Metrics Banner card tailored to active role
-  Widget _buildRoleSummaryCard(UserType role, LoaneeProvider loaneeProvider, User? user) {
-    if (role == UserType.admin) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.2)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.08),
-              blurRadius: 10,
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildStatItem('Total Portfolio', '₹ ${(loaneeProvider.totalLoanAmount / 100000).toStringAsFixed(1)} L'),
-            Container(height: 30, width: 1, color: Colors.grey.shade300),
-            _buildStatItem('Loanees', '${loaneeProvider.totalLoanees} Total'),
-            Container(height: 30, width: 1, color: Colors.grey.shade300),
-            _buildStatItem('Security', 'Encrypted'),
-          ],
-        ),
-      );
-    } else if (role == UserType.ro) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.indigo.shade200),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.08),
-              blurRadius: 10,
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildStatItem('Assigned Zone', 'Imphal West'),
-            Container(height: 30, width: 1, color: Colors.grey.shade300),
-            _buildStatItem('Target Status', '73.5% Done'),
-            Container(height: 30, width: 1, color: Colors.grey.shade300),
-            _buildStatItem('Officer PIN', '789122'),
-          ],
-        ),
-      );
-    } else {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.teal.shade200),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.08),
-              blurRadius: 10,
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildStatItem('Sanctioned Loan', '₹ 1,00,000'),
-            Container(height: 30, width: 1, color: Colors.grey.shade300),
-            _buildStatItem('Due Balance', '₹ 55,000'),
-            Container(height: 30, width: 1, color: Colors.grey.shade300),
-            _buildStatItem('Next EMI', '10 Aug'),
-          ],
-        ),
-      );
-    }
-  }
-
-  Widget _buildStatItem(String label, String value) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey.shade600,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF8B1A1A),
-          ),
         ),
       ],
-    );
+    ],
+  ),
+);
   }
 
   Widget _buildSectionHeader(String title, IconData icon) {
@@ -462,7 +493,7 @@ class AccountPage extends StatelessWidget {
         border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: Colors.black.withOpacity(0.02),
             blurRadius: 8,
           ),
         ],
@@ -484,7 +515,7 @@ class AccountPage extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
+            color: const Color(0xFF8B1A1A).withOpacity(0.08),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, size: 18, color: const Color(0xFF8B1A1A)),
@@ -518,9 +549,9 @@ class AccountPage extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: badgeColor?.withValues(alpha: 0.1) ?? Colors.grey.shade100,
+              color: badgeColor?.withOpacity(0.1) ?? Colors.grey.shade100,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: badgeColor?.withValues(alpha: 0.3) ?? Colors.grey.shade300),
+              border: Border.all(color: badgeColor?.withOpacity(0.3) ?? Colors.grey.shade300),
             ),
             child: Text(
               badge,
@@ -543,7 +574,7 @@ class AccountPage extends StatelessWidget {
         border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: Colors.black.withOpacity(0.02),
             blurRadius: 8,
           ),
         ],
@@ -566,7 +597,7 @@ class AccountPage extends StatelessWidget {
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
+          color: const Color(0xFF8B1A1A).withOpacity(0.08),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(icon, size: 18, color: const Color(0xFF8B1A1A)),
@@ -592,6 +623,100 @@ class AccountPage extends StatelessWidget {
             size: 20,
             color: Colors.grey.shade400,
           ),
+    );
+  }
+
+  void _showChangePinDialog(BuildContext context, AuthProvider authProvider) {
+    final pinController = TextEditingController();
+    final confirmController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.lock_reset_rounded, color: Color(0xFF8B1A1A)),
+            SizedBox(width: 8),
+            Text(
+              'Change Security PIN',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: pinController,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'New 6-Digit PIN',
+                  counterText: '',
+                  prefixIcon: Icon(Icons.pin_rounded),
+                ),
+                validator: (val) {
+                  if (val == null || val.length != 6) {
+                    return 'Enter exactly 6 digits';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: confirmController,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Confirm New PIN',
+                  counterText: '',
+                  prefixIcon: Icon(Icons.pin_rounded),
+                ),
+                validator: (val) {
+                  if (val != pinController.text) {
+                    return 'PINs do not match';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (formKey.currentState?.validate() == true) {
+                await authProvider.setPin(pinController.text.trim());
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Security PIN updated successfully!'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8B1A1A),
+              foregroundColor: Colors.white,
+              minimumSize: const Size(100, 42),
+            ),
+            child: const Text('Save PIN'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -626,13 +751,17 @@ class AccountPage extends StatelessWidget {
               ),
             ),
             ElevatedButton(
-              onPressed: () {
-                Provider.of<AuthProvider>(context, listen: false).logout();
-                Navigator.pushReplacementNamed(context, '/register');
+              onPressed: () async {
+                Navigator.pop(context);
+                await Provider.of<AuthProvider>(context, listen: false).logout();
+                if (context.mounted) {
+                  Navigator.pushReplacementNamed(context, '/login');
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF8B1A1A),
                 foregroundColor: Colors.white,
+                minimumSize: const Size(100, 42),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -663,6 +792,17 @@ class AccountPage extends StatelessWidget {
         return 'RO Field Officer';
       case UserType.loanee:
         return 'Loanee Account Holder';
+    }
+  }
+
+  String _getRoleBadge(UserType role) {
+    switch (role) {
+      case UserType.admin:
+        return 'ADMIN';
+      case UserType.ro:
+        return 'RO';
+      case UserType.loanee:
+        return 'LOANEE';
     }
   }
 

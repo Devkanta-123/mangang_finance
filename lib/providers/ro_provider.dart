@@ -16,6 +16,7 @@ class RoProvider extends ChangeNotifier {
   List<RoAccount> get roAccounts => List.unmodifiable(_roAccounts);
 
   int get totalRoAccounts => _roAccounts.length;
+  int get totalRos => _roAccounts.length;
 
   Future<Map<String, dynamic>> addRoWithConnectionCheck(RoAccount ro) async {
     final isConnected = await SupabaseService.instance.checkConnection();
@@ -68,6 +69,21 @@ class RoProvider extends ChangeNotifier {
     return 'RO-ACC-$nextAcc';
   }
 
+  RoAccount? getRoForUser({String? customerId, String? mobileNo, String? name}) {
+    for (final r in _roAccounts) {
+      if (customerId != null && customerId.isNotEmpty && r.customerId.trim().toLowerCase() == customerId.trim().toLowerCase()) {
+        return r;
+      }
+      if (mobileNo != null && mobileNo.isNotEmpty && r.mobileNo.trim() == mobileNo.trim()) {
+        return r;
+      }
+      if (name != null && name.isNotEmpty && r.roName.trim().toLowerCase() == name.trim().toLowerCase()) {
+        return r;
+      }
+    }
+    return null;
+  }
+
   List<RoAccount> searchRoAccounts(String query) {
     if (query.isEmpty) return roAccounts;
     final lowerQuery = query.toLowerCase();
@@ -78,6 +94,7 @@ class RoProvider extends ChangeNotifier {
           r.mobileNo.contains(lowerQuery) ||
           r.aadharNo.contains(lowerQuery) ||
           r.designation.toLowerCase().contains(lowerQuery) ||
+          r.route.toLowerCase().contains(lowerQuery) ||
           r.district.toLowerCase().contains(lowerQuery) ||
           r.guardianName.toLowerCase().contains(lowerQuery);
     }).toList();

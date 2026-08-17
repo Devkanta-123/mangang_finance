@@ -1,39 +1,39 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
+import '../services/supabase_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   User? _currentUser;
   bool _isLoggedIn = false;
-  String? _otp;
   String? _userPin;
   UserType _activeRole = UserType.admin; // Default role
 
   User? get currentUser => _currentUser ?? User(
         name: _activeRole == UserType.admin
             ? 'Administrator'
-            : (_activeRole == UserType.ro ? 'Rajesh Sharma (RO)' : 'Nongthombam Ibomcha'),
-        mobileNo: _activeRole == UserType.ro ? '9774123890' : '9862145890',
+            : (_activeRole == UserType.ro ? 'RO Officer' : 'Loanee Account'),
+        mobileNo: '',
         userType: _activeRole,
-        customerId: _activeRole == UserType.loanee ? 'CUST-1001' : 'ADM-01',
-        roName: _activeRole == UserType.ro ? 'Rajesh Sharma' : null,
+        customerId: _activeRole == UserType.admin ? 'ADM-01' : null,
+        roName: null,
       );
 
   UserType get activeRole => _currentUser?.userType ?? _activeRole;
-
   bool get isLoggedIn => _isLoggedIn;
-  String? get otp => _otp;
+  String? get userPin => _userPin;
 
   void switchRole(UserType newRole) {
     _activeRole = newRole;
     _currentUser = User(
       name: newRole == UserType.admin
           ? 'Administrator'
-          : (newRole == UserType.ro ? 'Rajesh Sharma (RO)' : 'Nongthombam Ibomcha'),
-      mobileNo: newRole == UserType.ro ? '9774123890' : '9862145890',
+          : (newRole == UserType.ro ? 'RO Officer' : 'Loanee Account'),
+      mobileNo: '',
       userType: newRole,
-      customerId: newRole == UserType.loanee ? 'CUST-1001' : 'ADM-01',
-      roName: newRole == UserType.ro ? 'Rajesh Sharma' : null,
+      customerId: newRole == UserType.admin ? 'ADM-01' : null,
+      roName: null,
     );
     notifyListeners();
   }
@@ -42,17 +42,8 @@ class AuthProvider extends ChangeNotifier {
     _currentUser = user;
     _activeRole = user.userType;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_data', user.toJson().toString());
+    await prefs.setString('user_data', jsonEncode(user.toJson()));
     notifyListeners();
-  }
-
-  void setOTP(String otp) {
-    _otp = otp;
-    notifyListeners();
-  }
-
-  bool verifyOTP(String enteredOTP) {
-    return enteredOTP == _otp;
   }
 
   Future<void> setPin(String pin) async {
@@ -60,66 +51,102 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('user_pin', pin);
     _isLoggedIn = true;
+
+    // Save & sync User Auth Record directly to Supabase table
+    if (_currentUser != null) {
+      final authRecord = UserAuthRecord(
+        id: (_currentUser!.customerId != null && _currentUser!.customerId!.isNotEmpty)
+            ? _currentUser!.customerId!
+            : _currentUser!.mobileNo,
+        mobileNo: _currentUser!.mobileNo,
+        customerId: _currentUser!.customerId,
+        userType: _currentUser!.userType,
+        pin: pin,
+        name: _currentUser!.name,
+        roName: _currentUser!.roName,
+        accountName: _currentUser!.accountName,
+      );
+
+      await SupabaseService.instance.saveUserAuthRecord(authRecord);
+    }
+
     notifyListeners();
   }
 
+  /// Login exclusively using real Supabase Table PIN (with local saved PIN backup)
   Future<bool> loginWithPin(String pin) async {
+    // 1. Query live Supabase database tables (user_auth, ro_accounts, loanee_accounts)
+    try {
+      final supaUser = await SupabaseService.instance.fetchUserAuthByPin(pin);
+      if (supaUser != null) {
+        _currentUser = supaUser.toUser();
+        _activeRole = supaUser.userType;
+        _isLoggedIn = true;
+        _userPin = pin;
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_pin', pin);
+        await prefs.setString('user_role', supaUser.userType.name);
+
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Supabase PIN lookup error: $e');
+    }
+
+    // 2. Local saved PIN check (offline backup for created user)
     final prefs = await SharedPreferences.getInstance();
     final savedPin = prefs.getString('user_pin');
-
-    if (pin == '123456') {
-      _activeRole = UserType.admin;
-      _currentUser = User(
-        name: 'Administrator',
-        mobileNo: '9862145890',
-        userType: UserType.admin,
-        customerId: 'ADM-01',
-      );
-      _isLoggedIn = true;
-      _userPin = pin;
-      notifyListeners();
-      return true;
-    } else if (pin == '789122') {
-      _activeRole = UserType.ro;
-      _currentUser = User(
-        name: 'Rajesh Sharma (RO)',
-        mobileNo: '9774123890',
-        userType: UserType.ro,
-        roName: 'Rajesh Sharma',
-      );
-      _isLoggedIn = true;
-      _userPin = pin;
-      notifyListeners();
-      return true;
-    } else if (pin == '112233') {
-      _activeRole = UserType.loanee;
-      _currentUser = User(
-        name: 'Nongthombam Ibomcha',
-        mobileNo: '9862145890',
-        userType: UserType.loanee,
-        customerId: 'CUST-1001',
-        accountName: 'ACC-88239101',
-      );
-      _isLoggedIn = true;
-      _userPin = pin;
-      notifyListeners();
-      return true;
-    } else if (savedPin == pin && savedPin != null) {
+    if (savedPin == pin && savedPin != null) {
       _isLoggedIn = true;
       _userPin = pin;
       notifyListeners();
       return true;
     }
+
     return false;
+  }
+
+  /// Reset Security PIN for any Role (Admin, RO, Loanee) with live Supabase update
+  Future<bool> resetPinForRole({
+    required UserType role,
+    required String mobileNo,
+    String? customerId,
+    required String newPin,
+  }) async {
+    // 1. Sync with Supabase table
+    await SupabaseService.instance.resetUserPinInSupabase(
+      userType: role,
+      mobileNo: mobileNo,
+      customerId: customerId,
+      newPin: newPin,
+    );
+
+    // 2. Update local state & SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_pin', newPin);
+    _userPin = newPin;
+
+    if (_currentUser == null || _currentUser!.userType == role) {
+      _activeRole = role;
+      _currentUser = User(
+        name: role == UserType.admin
+            ? 'Administrator'
+            : (role == UserType.ro ? 'RO Officer' : 'Loanee Account'),
+        mobileNo: mobileNo,
+        userType: role,
+        customerId: customerId,
+      );
+    }
+
+    notifyListeners();
+    return true;
   }
 
   Future<void> logout() async {
     _isLoggedIn = false;
     _currentUser = null;
     notifyListeners();
-  }
-
-  bool validateDemoPin(String pin) {
-    return pin == '123456' || pin == '789122' || pin == '112233';
   }
 }

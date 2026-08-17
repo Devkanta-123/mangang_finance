@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/ro_model.dart';
 import '../providers/ro_provider.dart';
+import '../providers/collection_sheet_provider.dart';
 
 class CreateRoPage extends StatefulWidget {
   final VoidCallback? onAccountCreated;
@@ -24,6 +25,7 @@ class _CreateRoPageState extends State<CreateRoPage> {
   final TextEditingController _guardianNameController = TextEditingController(); // W/O, S/O, D/O
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _designationController = TextEditingController(); // Text input, NOT dropdown
+  String? _selectedRoute; // Master table route dropdown
   final TextEditingController _poController = TextEditingController(); // P/O
   final TextEditingController _psController = TextEditingController(); // P/S
   final TextEditingController _districtController = TextEditingController();
@@ -94,6 +96,7 @@ class _CreateRoPageState extends State<CreateRoPage> {
         guardianname: _guardianNameController.text.trim(),
         address: _addressController.text.trim(),
         designation: _designationController.text.trim(),
+        route: _selectedRoute ?? '',
         postoffice: _poController.text.trim(),
         policestation: _psController.text.trim(),
         district: _districtController.text.trim(),
@@ -145,6 +148,7 @@ class _CreateRoPageState extends State<CreateRoPage> {
     _guardianNameController.clear();
     _addressController.clear();
     _designationController.text = 'Recovery Officer';
+    _selectedRoute = null;
     _poController.clear();
     _psController.clear();
     _pinController.clear();
@@ -282,6 +286,7 @@ class _CreateRoPageState extends State<CreateRoPage> {
               _buildDetailRow('RO Name:', ro.roName),
               _buildDetailRow('Guardian (W/O, S/O, D/O):', ro.guardianName),
               _buildDetailRow('Designation:', ro.designation),
+              _buildDetailRow('Assigned Route:', ro.route.isNotEmpty ? ro.route : 'Not assigned'),
               _buildDetailRow('Mobile:', ro.mobileNo),
               _buildDetailRow('District:', ro.district),
             ],
@@ -347,6 +352,21 @@ class _CreateRoPageState extends State<CreateRoPage> {
 
   @override
   Widget build(BuildContext context) {
+    final collectionProvider = Provider.of<CollectionSheetProvider>(context);
+    final activeRoutes = collectionProvider.routes
+        .where((r) => r.isActive)
+        .map((r) => r.name)
+        .toList();
+    if (activeRoutes.isEmpty) {
+      activeRoutes.addAll(collectionProvider.routeNames);
+    }
+    if (activeRoutes.isEmpty) {
+      activeRoutes.addAll(['Route 1', 'Route 2', 'Route 3']);
+    }
+    if (_selectedRoute == null || !activeRoutes.contains(_selectedRoute)) {
+      _selectedRoute = activeRoutes.first;
+    }
+
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
       body: SafeArea(
@@ -547,9 +567,9 @@ class _CreateRoPageState extends State<CreateRoPage> {
 
                           const SizedBox(height: 16),
 
-                          // Section 3: Official Position / Designation (TEXT INPUT)
+                          // Section 3: Official Position / Designation (TEXT INPUT) & Assigned Route (MASTER TABLE DROPDOWN)
                           _buildFormCard(
-                            title: '3. Official Designation Details',
+                            title: '3. Official Designation & Route Details',
                             icon: Icons.work_outline_rounded,
                             children: [
                               _buildFormField(
@@ -563,6 +583,67 @@ class _CreateRoPageState extends State<CreateRoPage> {
                                   }
                                   return null;
                                 },
+                              ),
+                              const SizedBox(height: 14),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'ASSIGNED ROUTE * (From Master Table)',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  DropdownButtonFormField<String>(
+                                    value: _selectedRoute != null &&
+                                            activeRoutes.contains(_selectedRoute)
+                                        ? _selectedRoute
+                                        : (activeRoutes.isNotEmpty
+                                            ? activeRoutes.first
+                                            : null),
+                                    decoration: _getInputDecoration(
+                                      hint: 'Select Assigned Route',
+                                      icon: Icons.alt_route_rounded,
+                                    ),
+                                    items: activeRoutes
+                                        .map((r) => DropdownMenuItem(
+                                              value: r,
+                                              child: Row(
+                                                children: [
+                                                  Icon(Icons.alt_route_rounded,
+                                                      size: 15,
+                                                      color: Colors.amber.shade900),
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                    r,
+                                                    style: const TextStyle(
+                                                      fontSize: 13,
+                                                      fontWeight: FontWeight.w600,
+                                                      color: Colors.black87,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ))
+                                        .toList(),
+                                    onChanged: (val) {
+                                      if (val != null) {
+                                        setState(() {
+                                          _selectedRoute = val;
+                                        });
+                                      }
+                                    },
+                                    validator: (val) {
+                                      if (val == null || val.isEmpty) {
+                                        return 'Please select an assigned route';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ],
                               ),
                             ],
                           ),
