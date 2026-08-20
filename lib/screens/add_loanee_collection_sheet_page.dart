@@ -7,6 +7,7 @@ import '../models/loanee_model.dart';
 import '../models/ro_collection_entry_model.dart';
 import '../providers/collection_sheet_provider.dart';
 import '../providers/loanee_provider.dart';
+import '../providers/settings_provider.dart';
 import '../services/bulk_collection_import_service.dart';
 import '../widgets/bulk_collection_upload_dialog.dart';
 
@@ -141,6 +142,23 @@ class _AddLoaneeCollectionSheetPageState
       _isSubmitting = true;
     });
 
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    final double rawLoan = (_selectedLoaneeAccount != null && _selectedLoaneeAccount!.loanAmount > 0)
+        ? _selectedLoaneeAccount!.loanAmount
+        : 11500.0;
+
+    final breakdown = LoanPrincipalBreakdown.calculate(
+      loanAmount: rawLoan,
+      interestRate: settingsProvider.investmentInterestRate,
+      basePrincipal: settingsProvider.investmentBaseAmount,
+      baseDailyAmount: settingsProvider.baseDailyAmount,
+      baseWeeklyAmount: settingsProvider.weeklyInstallmentAmount,
+    );
+
+    final bool isDaily = _selectedCollectionType.toLowerCase().trim() == 'daily';
+    final double payableAmt = isDaily ? breakdown.dailyPayable : breakdown.weeklyPayable;
+    final String freq = isDaily ? 'Day' : 'Week';
+
     final entry = RoCollectionEntry(
       id: 'COL-${DateTime.now().millisecondsSinceEpoch}',
       customerId: _customerIdController.text.trim(),
@@ -150,6 +168,12 @@ class _AddLoaneeCollectionSheetPageState
       collectionType: _selectedCollectionType,
       route: _selectedRoute!,
       mobileNo: _mobileNoController.text.trim(),
+      payableAmount: payableAmt,
+      loanAmount: breakdown.loanAmount,
+      actualPrincipal: breakdown.actualPrincipal,
+      interestAmount: breakdown.interestAmount,
+      interestRate: breakdown.interestRate,
+      frequency: freq,
     );
 
     final success = await collectionProvider.addCollectionEntry(entry);
@@ -174,6 +198,22 @@ class _AddLoaneeCollectionSheetPageState
 
   // SweetAlert style success modal
   void _showSweetSuccessModal(RoCollectionEntry entry) {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    final breakdown = entry.getLoanBreakdown(
+      loaneeLoanAmount: _selectedLoaneeAccount?.loanAmount,
+      configuredInterestRate: settingsProvider.investmentInterestRate,
+      configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+      configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+      configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+    );
+    final payableText = entry.getFormattedPayableAmount(
+      loaneeLoanAmount: _selectedLoaneeAccount?.loanAmount,
+      configuredInterestRate: settingsProvider.investmentInterestRate,
+      configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+      configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+      configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+    );
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -219,6 +259,14 @@ class _AddLoaneeCollectionSheetPageState
               child: Column(
                 children: [
                   _buildReceiptRow('Loanee Name', entry.loaneeName),
+                  const Divider(height: 12),
+                  _buildReceiptRow('Loan Amount (incl. interest)', '₹ ${breakdown.loanAmount.toStringAsFixed(2)}'),
+                  const Divider(height: 12),
+                  _buildReceiptRow('Actual Principal', '₹ ${breakdown.actualPrincipal.toStringAsFixed(2)}'),
+                  const Divider(height: 12),
+                  _buildReceiptRow('Interest Amount', '₹ ${breakdown.interestAmount.toStringAsFixed(2)} (${breakdown.interestRate.toStringAsFixed(0)}%)'),
+                  const Divider(height: 12),
+                  _buildReceiptRow('Payable Amount', payableText),
                   const Divider(height: 12),
                   _buildReceiptRow('Collection Type', entry.collectionType),
                   const Divider(height: 12),
@@ -528,6 +576,83 @@ class _AddLoaneeCollectionSheetPageState
                                 ),
                               ],
                             ),
+                          ),
+                          const SizedBox(height: 10),
+                          Builder(
+                            builder: (context) {
+                              final settingsProvider = Provider.of<SettingsProvider>(context);
+                              final bool isDaily = _selectedCollectionType.toLowerCase().trim() == 'daily';
+                              final double rawLoan = _selectedLoaneeAccount!.loanAmount > 0
+                                  ? _selectedLoaneeAccount!.loanAmount
+                                  : 11500.0;
+                              final breakdown = LoanPrincipalBreakdown.calculate(
+                                loanAmount: rawLoan,
+                                interestRate: settingsProvider.investmentInterestRate,
+                                basePrincipal: settingsProvider.investmentBaseAmount,
+                                baseDailyAmount: settingsProvider.baseDailyAmount,
+                                baseWeeklyAmount: settingsProvider.weeklyInstallmentAmount,
+                              );
+                              final double payable = isDaily ? breakdown.dailyPayable : breakdown.weeklyPayable;
+                              final String freq = isDaily ? 'Day' : 'Week';
+
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.shade50.withValues(alpha: 0.6),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.amber.shade300),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text('Loan Amount (incl. interest)', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+                                            const SizedBox(height: 2),
+                                            Text('₹ ${breakdown.loanAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
+                                          ],
+                                        ),
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          children: [
+                                            Text('Payable Amount', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+                                            const SizedBox(height: 2),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: isDaily ? Colors.blue.shade100 : Colors.purple.shade100,
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: Text(
+                                                '₹ ${payable.toStringAsFixed(0)} / $freq',
+                                                style: TextStyle(
+                                                  fontSize: 11.5,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: isDaily ? Colors.blue.shade900 : Colors.purple.shade900,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                    const Divider(height: 12),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text('Actual Principal: ₹ ${breakdown.actualPrincipal.toStringAsFixed(2)}',
+                                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
+                                        Text('Interest (${breakdown.interestRate.toStringAsFixed(0)}%): ₹ ${breakdown.interestAmount.toStringAsFixed(2)}',
+                                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green.shade800)),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
                           ),
                           const SizedBox(height: 16),
                         ],

@@ -78,6 +78,7 @@ class LoaneeAccount {
   double get loanAmount => loanamount;
   double get paidAmount => paidamount;
   double get dueAmount => dueamount;
+  bool get isActive => status.toLowerCase() != 'inactive';
 
   // Witness getters
   String get witnessName => witnessname;
@@ -91,6 +92,68 @@ class LoaneeAccount {
   String get witnessMobileNo => witnessmobileno;
   String get witnessAadharNo => witnessaadharno;
   String get witnessRelationship => witnessrelationship;
+
+  LoaneeAccount copyWith({
+    String? customerid,
+    String? accountnumber,
+    String? loaneename,
+    String? guardianname,
+    String? address,
+    String? businesstype,
+    String? postoffice,
+    String? policestation,
+    String? district,
+    String? pincode,
+    String? mobileno,
+    String? aadharno,
+    DateTime? createdat,
+    String? status,
+    double? loanamount,
+    double? paidamount,
+    double? dueamount,
+    String? witnessname,
+    String? witnessguardianname,
+    String? witnessaddress,
+    String? witnessbusinesstype,
+    String? witnesspostoffice,
+    String? witnesspolicestation,
+    String? witnessdistrict,
+    String? witnesspincode,
+    String? witnessmobileno,
+    String? witnessaadharno,
+    String? witnessrelationship,
+  }) {
+    return LoaneeAccount(
+      customerid: customerid ?? this.customerid,
+      accountnumber: accountnumber ?? this.accountnumber,
+      loaneename: loaneename ?? this.loaneename,
+      guardianname: guardianname ?? this.guardianname,
+      address: address ?? this.address,
+      businesstype: businesstype ?? this.businesstype,
+      postoffice: postoffice ?? this.postoffice,
+      policestation: policestation ?? this.policestation,
+      district: district ?? this.district,
+      pincode: pincode ?? this.pincode,
+      mobileno: mobileno ?? this.mobileno,
+      aadharno: aadharno ?? this.aadharno,
+      createdat: createdat ?? this.createdat,
+      status: status ?? this.status,
+      loanamount: loanamount ?? this.loanamount,
+      paidamount: paidamount ?? this.paidamount,
+      dueamount: dueamount ?? this.dueamount,
+      witnessname: witnessname ?? this.witnessname,
+      witnessguardianname: witnessguardianname ?? this.witnessguardianname,
+      witnessaddress: witnessaddress ?? this.witnessaddress,
+      witnessbusinesstype: witnessbusinesstype ?? this.witnessbusinesstype,
+      witnesspostoffice: witnesspostoffice ?? this.witnesspostoffice,
+      witnesspolicestation: witnesspolicestation ?? this.witnesspolicestation,
+      witnessdistrict: witnessdistrict ?? this.witnessdistrict,
+      witnesspincode: witnesspincode ?? this.witnesspincode,
+      witnessmobileno: witnessmobileno ?? this.witnessmobileno,
+      witnessaadharno: witnessaadharno ?? this.witnessaadharno,
+      witnessrelationship: witnessrelationship ?? this.witnessrelationship,
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -169,4 +232,3 @@ class LoaneeAccount {
     );
   }
 }
-

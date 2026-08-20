@@ -71,6 +71,15 @@ class AccountPage extends StatelessWidget {
               : (loaneeEntries.isNotEmpty
                   ? loaneeEntries.map((e) => e.accountNumber).toSet().join(', ')
                   : 'N/A'));
+    } else if (role == UserType.manager) {
+      displayName = (user?.name != null && user!.name.isNotEmpty)
+          ? user.name
+          : 'Branch Manager';
+      customerIdVal = (user?.customerId != null && user!.customerId!.isNotEmpty)
+          ? user.customerId!
+          : 'MGR-01';
+      accountNameVal = 'N/A';
+      accountNoVal = 'N/A';
     } else if (role == UserType.ro) {
       displayName = (user?.name != null && user!.name.isNotEmpty)
           ? user.name
@@ -230,14 +239,29 @@ class AccountPage extends StatelessWidget {
                     ],
 
                     const Divider(height: 20),
-                    _buildDetailRow(
-                      icon: Icons.verified_user_rounded,
-                      label: 'Account Status',
-                      value: loaneeAccount?.status.isNotEmpty == true
-                          ? loaneeAccount!.status
-                          : 'Active & Verified',
-                      badge: 'ACTIVE',
-                      badgeColor: Colors.green.shade700,
+                    Builder(
+                      builder: (context) {
+                        final String effectiveStatus = (role == UserType.loanee
+                                ? loaneeAccount?.status
+                                : (role == UserType.ro ? roAccount?.status : user?.status)) ??
+                            'Active';
+                        final bool isAccountActive =
+                            effectiveStatus.toLowerCase() != 'inactive';
+
+                        return _buildDetailRow(
+                          icon: isAccountActive
+                              ? Icons.verified_user_rounded
+                              : Icons.person_off_rounded,
+                          label: 'Account Status',
+                          value: isAccountActive
+                              ? (effectiveStatus.isNotEmpty ? effectiveStatus : 'Active & Verified')
+                              : 'Inactive (Disabled)',
+                          badge: isAccountActive ? 'ACTIVE' : 'INACTIVE',
+                          badgeColor: isAccountActive
+                              ? Colors.green.shade700
+                              : Colors.red.shade700,
+                        );
+                      },
                     ),
                   ]),
 
@@ -788,6 +812,8 @@ class AccountPage extends StatelessWidget {
     switch (role) {
       case UserType.admin:
         return 'Executive Administrator';
+      case UserType.manager:
+        return 'Branch Manager';
       case UserType.ro:
         return 'RO Field Officer';
       case UserType.loanee:
@@ -799,6 +825,8 @@ class AccountPage extends StatelessWidget {
     switch (role) {
       case UserType.admin:
         return 'ADMIN';
+      case UserType.manager:
+        return 'MANAGER';
       case UserType.ro:
         return 'RO';
       case UserType.loanee:
@@ -810,6 +838,8 @@ class AccountPage extends StatelessWidget {
     switch (role) {
       case UserType.admin:
         return Icons.admin_panel_settings_rounded;
+      case UserType.manager:
+        return Icons.supervisor_account_rounded;
       case UserType.ro:
         return Icons.badge_rounded;
       case UserType.loanee:

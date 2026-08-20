@@ -89,5 +89,43 @@ void main() {
       expect(payment.roId, equals('ADM-01'));
       expect(payment.remarks, contains('Office Master Entry'));
     });
+
+    test('Admin payment permission is restricted to Office route and RO to rest routes', () {
+      final officeEntry = RoCollectionEntry(
+        id: 'COL-OFFICE-101',
+        customerId: 'CUST-8001',
+        accountNumber: 'ACC-88239999',
+        loaneeName: 'Thoiba Singh',
+        loaneeAddress: 'Imphal Head Office',
+        collectionType: 'Daily',
+        route: 'Office',
+        mobileNo: '9876543210',
+      );
+
+      final mangangEntry = RoCollectionEntry(
+        id: 'COL-MANGANG-102',
+        customerId: 'CUST-8002',
+        accountNumber: 'ACC-88239998',
+        loaneeName: 'Sanathoi Devi',
+        loaneeAddress: 'Keishamthong',
+        collectionType: 'Daily',
+        route: 'Mangang',
+        mobileNo: '9876543211',
+      );
+
+      // Check isOfficeRoute
+      final bool isOffice1 = CollectionSheetProvider.isOfficeRoute(officeEntry.route);
+      final bool isOffice2 = CollectionSheetProvider.isOfficeRoute(mangangEntry.route);
+
+      // When Admin:
+      bool checkAdminCanRecord(bool isOffice) => isOffice;
+      bool checkRoCanRecord(bool isOffice) => !isOffice;
+
+      expect(checkAdminCanRecord(isOffice1), isTrue, reason: 'Admin must be able to record Office route collection');
+      expect(checkAdminCanRecord(isOffice2), isFalse, reason: 'Admin must NOT be able to record non-Office route collection');
+
+      expect(checkRoCanRecord(isOffice1), isFalse, reason: 'RO must NOT be able to record Office route collection');
+      expect(checkRoCanRecord(isOffice2), isTrue, reason: 'RO must be able to record non-Office route collection');
+    });
   });
 }

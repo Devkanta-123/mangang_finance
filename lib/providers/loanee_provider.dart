@@ -72,6 +72,33 @@ class LoaneeProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Update account status for a Loanee in-memory & in Supabase table
+  Future<bool> updateStatus(String customerId, String newStatus) async {
+    final cleanCust = customerId.trim().toLowerCase();
+    int foundIndex = -1;
+    for (int i = 0; i < _loanees.length; i++) {
+      if (_loanees[i].customerId.trim().toLowerCase() == cleanCust) {
+        foundIndex = i;
+        break;
+      }
+    }
+
+    if (foundIndex != -1) {
+      _loanees[foundIndex] = _loanees[foundIndex].copyWith(status: newStatus);
+      notifyListeners();
+    }
+
+    // Persist live to Supabase
+    final success = await SupabaseService.instance.updateLoaneeStatus(customerId, newStatus);
+    return success;
+  }
+
+  /// Toggle status between Active and Inactive
+  Future<bool> toggleStatus(LoaneeAccount loanee) async {
+    final nextStatus = loanee.isActive ? 'Inactive' : 'Active';
+    return await updateStatus(loanee.customerId, nextStatus);
+  }
+
   String generateNextCustomerId() {
     int nextId = 1001 + _loanees.length;
     return 'CUST-$nextId';
@@ -163,4 +190,3 @@ class LoaneeProvider extends ChangeNotifier {
     }
   }
 }
-

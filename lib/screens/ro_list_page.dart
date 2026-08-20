@@ -1,7 +1,9 @@
 // lib/screens/ro_list_page.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/user_model.dart';
 import '../models/ro_model.dart';
+import '../providers/auth_provider.dart';
 import '../providers/ro_provider.dart';
 
 class RoListPage extends StatefulWidget {
@@ -17,6 +19,13 @@ class _RoListPageState extends State<RoListPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _selectedDistrictFilter = 'All Districts';
+  String _selectedStatusFilter = 'All Status';
+
+  final List<String> _statusOptions = [
+    'All Status',
+    'Active Only',
+    'Inactive Only',
+  ];
 
   final List<String> _districtOptions = [
     'All Districts',
@@ -39,6 +48,16 @@ class _RoListPageState extends State<RoListPage> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Provider.of<RoProvider>(context, listen: false).fetchFromSupabase();
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
@@ -46,7 +65,7 @@ class _RoListPageState extends State<RoListPage> {
 
   List<RoAccount> _filterRoAccounts(List<RoAccount> allRos) {
     return allRos.where((item) {
-      // 1. Text Search Filter (RO Name, Cust ID, Acc No, Mobile, Aadhar, Designation, District)
+      // 1. Text Search Filter (RO Name, Cust ID, Acc No, Mobile, Aadhar, Designation, Route, District)
       final query = _searchQuery.toLowerCase();
       final matchesSearch = query.isEmpty ||
           item.roname.toLowerCase().contains(query) ||
@@ -63,14 +82,62 @@ class _RoListPageState extends State<RoListPage> {
       final matchesDistrict = _selectedDistrictFilter == 'All Districts' ||
           item.district.toLowerCase() == _selectedDistrictFilter.toLowerCase();
 
-      return matchesSearch && matchesDistrict;
+      // 3. Status Filter
+      final matchesStatus = _selectedStatusFilter == 'All Status' ||
+          (_selectedStatusFilter == 'Active Only' && item.isActive) ||
+          (_selectedStatusFilter == 'Inactive Only' && !item.isActive);
+
+      return matchesSearch && matchesDistrict && matchesStatus;
     }).toList();
+  }
+
+  Future<void> _handleToggleStatus(
+    BuildContext context,
+    RoProvider provider,
+    RoAccount ro,
+  ) async {
+    final willBeActive = !ro.isActive;
+    final newStatus = willBeActive ? 'Active' : 'Inactive';
+
+    await provider.updateStatus(ro.customerId, newStatus);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                willBeActive ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  willBeActive
+                      ? 'RO Account for ${ro.roName} is now ACTIVE (Login Enabled)'
+                      : 'RO Account for ${ro.roName} is now INACTIVE (Login Disabled)',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: willBeActive ? Colors.green.shade800 : Colors.red.shade800,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final bool isAdmin = authProvider.activeRole == UserType.admin;
+
     final roProvider = Provider.of<RoProvider>(context);
-    final filteredRos = _filterRoAccounts(roProvider.roAccounts);
+    final allRos = roProvider.roAccounts;
+    final filteredRos = _filterRoAccounts(allRos);
+    final activeCount = allRos.where((r) => r.isActive).length;
+    final inactiveCount = allRos.where((r) => !r.isActive).length;
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
@@ -102,7 +169,7 @@ class _RoListPageState extends State<RoListPage> {
                     children: [
                       const Row(
                         children: [
-                          Icon(Icons.badge_rounded, color: Colors.white, size: 24),
+                          Icon(Icons.manage_accounts_rounded, color: Colors.white, size: 24),
                           SizedBox(width: 10),
                           Text(
                             'RO Accounts',
@@ -132,25 +199,27 @@ class _RoListPageState extends State<RoListPage> {
                               roProvider.fetchFromSupabase();
                             },
                           ),
-                          const SizedBox(width: 4),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.amber.shade700,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 8),
-                              minimumSize: Size.zero,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                          if (widget.onCreateRoPressed != null) ...[
+                            const SizedBox(width: 4),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.amber.shade700,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                minimumSize: Size.zero,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              onPressed: widget.onCreateRoPressed,
+                              icon: const Icon(Icons.add_rounded, size: 18),
+                              label: const Text(
+                                'New RO Account',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                               ),
                             ),
-                            onPressed: widget.onCreateRoPressed,
-                            icon: const Icon(Icons.add_rounded, size: 18),
-                            label: const Text(
-                              'New RO Account',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                            ),
-                          ),
+                          ],
                         ],
                       ),
                     ],
@@ -166,7 +235,7 @@ class _RoListPageState extends State<RoListPage> {
                       });
                     },
                     decoration: InputDecoration(
-                      hintText: 'Search by RO Name, Cust ID, Acc No, Designation, Mobile...',
+                      hintText: 'Search by RO Name, Cust ID, Acc No, Route, Mobile...',
                       hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
                       prefixIcon: const Icon(Icons.search, color: Colors.black87),
                       suffixIcon: _searchQuery.isNotEmpty
@@ -193,21 +262,15 @@ class _RoListPageState extends State<RoListPage> {
 
                   const SizedBox(height: 10),
 
-                  // District Search Filter Dropdown
+                  // Filter Row (District & Status)
                   Row(
                     children: [
-                      const Icon(Icons.filter_list_rounded, color: Colors.white70, size: 18),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'Filter District:',
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                      const SizedBox(width: 8),
+                      // District Filter Dropdown
                       Expanded(
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
+                            color: Colors.white.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(color: Colors.white24),
                           ),
@@ -216,12 +279,12 @@ class _RoListPageState extends State<RoListPage> {
                               value: _selectedDistrictFilter,
                               dropdownColor: const Color(0xFF2C2C2C),
                               isExpanded: true,
-                              icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
-                              style: const TextStyle(color: Colors.white, fontSize: 12),
+                              icon: const Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
+                              style: const TextStyle(color: Colors.white, fontSize: 11),
                               items: _districtOptions
                                   .map((d) => DropdownMenuItem(
                                         value: d,
-                                        child: Text(d),
+                                        child: Text(d, overflow: TextOverflow.ellipsis),
                                       ))
                                   .toList(),
                               onChanged: (val) {
@@ -235,13 +298,48 @@ class _RoListPageState extends State<RoListPage> {
                           ),
                         ),
                       ),
+                      const SizedBox(width: 8),
+
+                      // Status Filter Dropdown
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _selectedStatusFilter,
+                              dropdownColor: const Color(0xFF2C2C2C),
+                              isExpanded: true,
+                              icon: const Icon(Icons.tune_rounded, color: Colors.amberAccent, size: 16),
+                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                              items: _statusOptions
+                                  .map((s) => DropdownMenuItem(
+                                        value: s,
+                                        child: Text(s, overflow: TextOverflow.ellipsis),
+                                      ))
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() {
+                                    _selectedStatusFilter = val;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ],
               ),
             ),
 
-            // Accounts Counter Bar
+            // Accounts Counter Bar with Active/Inactive counts
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: Colors.white,
@@ -249,20 +347,49 @@ class _RoListPageState extends State<RoListPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Showing ${filteredRos.length} of ${roProvider.totalRoAccounts} RO Accounts',
+                    'Showing ${filteredRos.length} of ${allRos.length} RO Accounts',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                       color: Colors.grey.shade800,
                     ),
                   ),
-                  Text(
-                    'Active Officers: ${filteredRos.length}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
-                    ),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.green.shade300),
+                        ),
+                        child: Text(
+                          'Active: $activeCount',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Text(
+                          'Inactive: $inactiveCount',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade800,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -272,9 +399,12 @@ class _RoListPageState extends State<RoListPage> {
             // RO Accounts List Area
             Expanded(
               child: filteredRos.isEmpty
-                  ? Center(
-                      child: SingleChildScrollView(
-                        physics: const AlwaysScrollableScrollPhysics(),
+                  ? SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: Container(
+                        height: 350,
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.all(20),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -282,7 +412,7 @@ class _RoListPageState extends State<RoListPage> {
                                 size: 60, color: Colors.grey.shade400),
                             const SizedBox(height: 12),
                             Text(
-                              roProvider.roAccounts.isEmpty
+                              allRos.isEmpty
                                   ? 'No RO Accounts in Database'
                                   : 'No Matching RO Accounts',
                               style: TextStyle(
@@ -292,9 +422,9 @@ class _RoListPageState extends State<RoListPage> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              roProvider.roAccounts.isEmpty
+                              allRos.isEmpty
                                   ? 'Click "New RO Account" above to create & insert records directly into Supabase'
-                                  : 'Try adjusting your search filters',
+                                  : 'Try adjusting your search or status filters',
                               textAlign: TextAlign.center,
                               style: const TextStyle(fontSize: 12, color: Colors.grey),
                             ),
@@ -307,7 +437,7 @@ class _RoListPageState extends State<RoListPage> {
                       itemCount: filteredRos.length,
                       itemBuilder: (context, index) {
                         final item = filteredRos[index];
-                        return _buildRoCard(context, item);
+                        return _buildRoCard(context, item, roProvider, isAdmin);
                       },
                     ),
             ),
@@ -317,13 +447,26 @@ class _RoListPageState extends State<RoListPage> {
     );
   }
 
-  Widget _buildRoCard(BuildContext context, RoAccount item) {
+  Widget _buildRoCard(
+    BuildContext context,
+    RoAccount item,
+    RoProvider roProvider,
+    bool isAdmin,
+  ) {
+    final bool isActive = item.isActive;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: isActive ? Colors.transparent : Colors.red.shade300,
+          width: isActive ? 0 : 1.2,
+        ),
+      ),
       child: InkWell(
-        onTap: () => _showRoDetailsDialog(context, item),
+        onTap: () => _showRoDetailsDialog(context, item, roProvider, isAdmin),
         borderRadius: BorderRadius.circular(14),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -335,8 +478,14 @@ class _RoListPageState extends State<RoListPage> {
                 children: [
                   CircleAvatar(
                     radius: 22,
-                    backgroundColor: Colors.black.withOpacity(0.08),
-                    child: const Icon(Icons.badge_rounded, color: Colors.black, size: 24),
+                    backgroundColor: isActive
+                        ? Colors.black.withValues(alpha: 0.08)
+                        : Colors.red.shade50,
+                    child: Icon(
+                      isActive ? Icons.badge_rounded : Icons.person_off_rounded,
+                      color: isActive ? Colors.black : Colors.red.shade700,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -349,60 +498,67 @@ class _RoListPageState extends State<RoListPage> {
                             Expanded(
                               child: Text(
                                 item.roname,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.black,
+                                  color: isActive ? Colors.black : Colors.grey.shade800,
                                 ),
                               ),
                             ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: Colors.amber.shade50,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.amber.shade300),
-                                  ),
-                                  child: Text(
-                                    item.designation.isNotEmpty ? item.designation : 'RO Officer',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.amber.shade900,
-                                    ),
-                                  ),
+                            // Interactive Status Toggle Pill & Switch (Admin Only)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: isActive ? Colors.green.shade50 : Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: isActive ? Colors.green.shade300 : Colors.red.shade300,
                                 ),
-                                if (item.route.isNotEmpty) ...[
-                                  const SizedBox(height: 3),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    width: 5,
+                                    height: 5,
                                     decoration: BoxDecoration(
-                                      color: Colors.blue.shade50,
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: Colors.blue.shade200),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.alt_route_rounded,
-                                            size: 10, color: Colors.blue.shade800),
-                                        const SizedBox(width: 2),
-                                        Text(
-                                          item.route,
-                                          style: TextStyle(
-                                            fontSize: 9.5,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.blue.shade900,
-                                          ),
-                                        ),
-                                      ],
+                                      shape: BoxShape.circle,
+                                      color: isActive ? Colors.green.shade700 : Colors.red.shade700,
                                     ),
                                   ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    isActive ? 'ACTIVE' : 'INACTIVE',
+                                    style: TextStyle(
+                                      fontSize: 8.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: isActive ? Colors.green.shade800 : Colors.red.shade800,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                  if (isAdmin) ...[
+                                    const SizedBox(width: 4),
+                                    Transform.scale(
+                                      scale: 0.65,
+                                      child: SizedBox(
+                                        width: 36,
+                                        height: 20,
+                                        child: Switch(
+                                          value: isActive,
+                                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          activeColor: Colors.green.shade700,
+                                          activeTrackColor: Colors.green.shade200,
+                                          inactiveThumbColor: Colors.red.shade700,
+                                          inactiveTrackColor: Colors.red.shade200,
+                                          onChanged: (val) {
+                                            _handleToggleStatus(context, roProvider, item);
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
                           ],
                         ),
@@ -445,13 +601,63 @@ class _RoListPageState extends State<RoListPage> {
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              // Route & Designation Row
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber.shade300),
+                    ),
+                    child: Text(
+                      item.designation.isNotEmpty ? item.designation : 'RO Officer',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.amber.shade900,
+                      ),
+                    ),
+                  ),
+                  if (item.route.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.alt_route_rounded, size: 10, color: Colors.blue.shade800),
+                          const SizedBox(width: 2),
+                          Text(
+                            item.route,
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
               const Divider(height: 20),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   _buildMiniStat('Mobile', item.mobileno, Icons.phone),
+                  const SizedBox(width: 4),
                   _buildMiniStat('District', item.district, Icons.map_outlined),
-                  _buildMiniStat('Status', item.status, Icons.verified_user_rounded),
+                  const SizedBox(width: 4),
+                  _buildMiniStat('Post Office', item.postoffice.isNotEmpty ? item.postoffice : 'N/A', Icons.local_post_office_outlined),
                 ],
               ),
             ],
@@ -462,88 +668,178 @@ class _RoListPageState extends State<RoListPage> {
   }
 
   Widget _buildMiniStat(String label, String value, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: Colors.black54),
-        const SizedBox(width: 4),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
-            Text(
-              value,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black87),
+    return Expanded(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.black54),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  value,
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black87),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
-          ],
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 
-  void _showRoDetailsDialog(BuildContext context, RoAccount item) {
+  void _showRoDetailsDialog(
+    BuildContext context,
+    RoAccount item,
+    RoProvider roProvider,
+    bool isAdmin,
+  ) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade100,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.person, color: Colors.amber.shade900, size: 20),
+      builder: (ctx) => Consumer<RoProvider>(
+        builder: (dialogContext, liveRoProvider, _) {
+          final currentRo = liveRoProvider.roAccounts.firstWhere(
+            (r) => r.customerId == item.customerId,
+            orElse: () => item,
+          );
+          final bool isCurrentActive = currentRo.isActive;
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isCurrentActive ? Colors.amber.shade100 : Colors.red.shade100,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    isCurrentActive ? Icons.person : Icons.person_off_rounded,
+                    color: isCurrentActive ? Colors.amber.shade900 : Colors.red.shade900,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        currentRo.roname,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        '${currentRo.customerid} | ${currentRo.accountnumber}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 10),
-            Expanded(
+            content: SingleChildScrollView(
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    item.roname,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  // Admin Account Status Toggle Box in Modal
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isCurrentActive ? Colors.green.shade50 : Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isCurrentActive ? Colors.green.shade300 : Colors.red.shade300,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Account Status (Admin)',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isCurrentActive ? Colors.green.shade900 : Colors.red.shade900,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isCurrentActive
+                                  ? 'ACTIVE (Login Allowed)'
+                                  : 'INACTIVE (Login Blocked)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: isCurrentActive ? Colors.green.shade900 : Colors.red.shade900,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (isAdmin)
+                          Transform.scale(
+                            scale: 0.85,
+                            child: Switch(
+                              value: isCurrentActive,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              activeThumbColor: Colors.green.shade700,
+                              activeTrackColor: Colors.green.shade200,
+                              inactiveThumbColor: Colors.red.shade700,
+                              inactiveTrackColor: Colors.red.shade200,
+                              onChanged: (val) async {
+                                await _handleToggleStatus(context, liveRoProvider, currentRo);
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                  Text(
-                    '${item.customerid} | ${item.accountnumber}',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                  ),
+
+                  _buildModalRow('1. Customer ID', currentRo.customerid),
+                  _buildModalRow('2. Account Number', currentRo.accountnumber),
+                  _buildModalRow('3. RO Name', currentRo.roname),
+                  _buildModalRow('4. W/O, S/O, D/O', currentRo.guardianname),
+                  _buildModalRow('5. Designation', currentRo.designation),
+                  _buildModalRow('6. Assigned Route', currentRo.route.isNotEmpty ? currentRo.route : 'Not assigned'),
+                  _buildModalRow('7. Mobile No', currentRo.mobileno),
+                  _buildModalRow('8. Aadhar No', currentRo.aadharno),
+                  _buildModalRow('9. Address', currentRo.address),
+                  _buildModalRow('10. Post Office (P/O)', currentRo.postoffice),
+                  _buildModalRow('11. Police Station (P/S)', currentRo.policestation),
+                  _buildModalRow('12. District', currentRo.district),
+                  _buildModalRow('13. PIN Code', currentRo.pincode),
+                  _buildModalRow('14. Status', currentRo.status),
                 ],
               ),
             ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildModalRow('1. Customer ID', item.customerid),
-              _buildModalRow('2. Account Number', item.accountnumber),
-              _buildModalRow('3. RO Name', item.roname),
-              _buildModalRow('4. W/O, S/O, D/O', item.guardianname),
-              _buildModalRow('5. Designation', item.designation),
-              _buildModalRow('6. Assigned Route', item.route.isNotEmpty ? item.route : 'Not assigned'),
-              _buildModalRow('7. Mobile No', item.mobileno),
-              _buildModalRow('8. Aadhar No', item.aadharno),
-              _buildModalRow('9. Address', item.address),
-              _buildModalRow('10. Post Office (P/O)', item.postoffice),
-              _buildModalRow('11. Police Station (P/S)', item.policestation),
-              _buildModalRow('12. District', item.district),
-              _buildModalRow('13. PIN Code', item.pincode),
-              _buildModalRow('14. Status', item.status),
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close', style: TextStyle(color: Colors.white)),
+              ),
             ],
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.black,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close', style: TextStyle(color: Colors.white)),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

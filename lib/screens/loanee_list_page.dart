@@ -1,7 +1,8 @@
-// lib/screens/loanee_list_page.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/user_model.dart';
 import '../models/loanee_model.dart';
+import '../providers/auth_provider.dart';
 import '../providers/loanee_provider.dart';
 
 class LoaneeListPage extends StatefulWidget {
@@ -17,6 +18,13 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _selectedDistrictFilter = 'All Districts';
+  String _selectedStatusFilter = 'All Status';
+
+  final List<String> _statusOptions = [
+    'All Status',
+    'Active Only',
+    'Inactive Only',
+  ];
 
   final List<String> _districtOptions = [
     'All Districts',
@@ -69,14 +77,62 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
           item.district.toLowerCase() == _selectedDistrictFilter.toLowerCase() ||
           item.witnessdistrict.toLowerCase() == _selectedDistrictFilter.toLowerCase();
 
-      return matchesSearch && matchesDistrict;
+      // 3. Status Filter
+      final matchesStatus = _selectedStatusFilter == 'All Status' ||
+          (_selectedStatusFilter == 'Active Only' && item.isActive) ||
+          (_selectedStatusFilter == 'Inactive Only' && !item.isActive);
+
+      return matchesSearch && matchesDistrict && matchesStatus;
     }).toList();
+  }
+
+  Future<void> _handleToggleStatus(
+    BuildContext context,
+    LoaneeProvider provider,
+    LoaneeAccount loanee,
+  ) async {
+    final willBeActive = !loanee.isActive;
+    final newStatus = willBeActive ? 'Active' : 'Inactive';
+
+    await provider.updateStatus(loanee.customerId, newStatus);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                willBeActive ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  willBeActive
+                      ? 'Account for ${loanee.loaneeName} is now ACTIVE (Login Enabled)'
+                      : 'Account for ${loanee.loaneeName} is now INACTIVE (Login Disabled)',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: willBeActive ? Colors.green.shade800 : Colors.red.shade800,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final bool isAdmin = authProvider.activeRole == UserType.admin;
+
     final loaneeProvider = Provider.of<LoaneeProvider>(context);
-    final filteredLoanees = _filterLoanees(loaneeProvider.loanees);
+    final allLoanees = loaneeProvider.loanees;
+    final filteredLoanees = _filterLoanees(allLoanees);
+    final activeCount = allLoanees.where((l) => l.isActive).length;
+    final inactiveCount = allLoanees.where((l) => !l.isActive).length;
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
@@ -199,21 +255,15 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
 
                   const SizedBox(height: 10),
 
-                  // District Search Filter Dropdown
+                  // Filter Row (District & Status)
                   Row(
                     children: [
-                      const Icon(Icons.filter_list_rounded, color: Colors.white70, size: 18),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'Filter District:',
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                      const SizedBox(width: 8),
+                      // District Filter Dropdown
                       Expanded(
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
+                            color: Colors.white.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(color: Colors.white24),
                           ),
@@ -222,12 +272,12 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                               value: _selectedDistrictFilter,
                               dropdownColor: const Color(0xFF2C2C2C),
                               isExpanded: true,
-                              icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
-                              style: const TextStyle(color: Colors.white, fontSize: 12),
+                              icon: const Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
+                              style: const TextStyle(color: Colors.white, fontSize: 11),
                               items: _districtOptions
                                   .map((d) => DropdownMenuItem(
                                         value: d,
-                                        child: Text(d),
+                                        child: Text(d, overflow: TextOverflow.ellipsis),
                                       ))
                                   .toList(),
                               onChanged: (val) {
@@ -241,13 +291,48 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                           ),
                         ),
                       ),
+                      const SizedBox(width: 8),
+
+                      // Status Filter Dropdown
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _selectedStatusFilter,
+                              dropdownColor: const Color(0xFF2C2C2C),
+                              isExpanded: true,
+                              icon: const Icon(Icons.tune_rounded, color: Colors.amberAccent, size: 16),
+                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                              items: _statusOptions
+                                  .map((s) => DropdownMenuItem(
+                                        value: s,
+                                        child: Text(s, overflow: TextOverflow.ellipsis),
+                                      ))
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() {
+                                    _selectedStatusFilter = val;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ],
               ),
             ),
 
-            // Accounts Counter Bar
+            // Accounts Counter Bar with Active/Inactive counts
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: Colors.white,
@@ -262,13 +347,42 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                       color: Colors.grey.shade800,
                     ),
                   ),
-                  Text(
-                    'Sanctioned: ₹ ${(loaneeProvider.totalLoanAmount / 100000).toStringAsFixed(2)} L',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
-                    ),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.green.shade300),
+                        ),
+                        child: Text(
+                          'Active: $activeCount',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Text(
+                          'Inactive: $inactiveCount',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade800,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -278,9 +392,12 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
             // Loanee Accounts List Area
             Expanded(
               child: filteredLoanees.isEmpty
-                  ? Center(
-                      child: SingleChildScrollView(
-                        physics: const AlwaysScrollableScrollPhysics(),
+                  ? SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: Container(
+                        height: 350,
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.all(20),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -300,7 +417,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                             Text(
                               loaneeProvider.loanees.isEmpty
                                   ? 'Click "New Account" above to create & insert records directly into Supabase'
-                                  : 'Try adjusting your search filters',
+                                  : 'Try adjusting your search or status filters',
                               textAlign: TextAlign.center,
                               style: const TextStyle(fontSize: 12, color: Colors.grey),
                             ),
@@ -313,7 +430,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                       itemCount: filteredLoanees.length,
                       itemBuilder: (context, index) {
                         final item = filteredLoanees[index];
-                        return _buildLoaneeCard(context, item);
+                        return _buildLoaneeCard(context, item, loaneeProvider, isAdmin);
                       },
                     ),
             ),
@@ -323,13 +440,26 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
     );
   }
 
-  Widget _buildLoaneeCard(BuildContext context, LoaneeAccount item) {
+  Widget _buildLoaneeCard(
+    BuildContext context,
+    LoaneeAccount item,
+    LoaneeProvider loaneeProvider,
+    bool isAdmin,
+  ) {
+    final bool isActive = item.isActive;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: isActive ? Colors.transparent : Colors.red.shade300,
+          width: isActive ? 0 : 1.2,
+        ),
+      ),
       child: InkWell(
-        onTap: () => _showLoaneeDetailsDialog(context, item),
+        onTap: () => _showLoaneeDetailsDialog(context, item, loaneeProvider, isAdmin),
         borderRadius: BorderRadius.circular(14),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -341,8 +471,14 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                 children: [
                   CircleAvatar(
                     radius: 22,
-                    backgroundColor: Colors.black.withOpacity(0.08),
-                    child: const Icon(Icons.person, color: Colors.black, size: 24),
+                    backgroundColor: isActive
+                        ? Colors.black.withValues(alpha: 0.08)
+                        : Colors.red.shade50,
+                    child: Icon(
+                      isActive ? Icons.person : Icons.person_off_rounded,
+                      color: isActive ? Colors.black : Colors.red.shade700,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -355,27 +491,66 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                             Expanded(
                               child: Text(
                                 item.loaneename,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.black,
+                                  color: isActive ? Colors.black : Colors.grey.shade800,
                                 ),
                               ),
                             ),
+                            // Interactive Status Toggle Pill & Switch
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                               decoration: BoxDecoration(
-                                color: Colors.green.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.green.shade300),
-                              ),
-                              child: Text(
-                                item.status,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green.shade800,
+                                color: isActive ? Colors.green.shade50 : Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: isActive ? Colors.green.shade300 : Colors.red.shade300,
                                 ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 5,
+                                    height: 5,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: isActive ? Colors.green.shade700 : Colors.red.shade700,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    isActive ? 'ACTIVE' : 'INACTIVE',
+                                    style: TextStyle(
+                                      fontSize: 8.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: isActive ? Colors.green.shade800 : Colors.red.shade800,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                  if (isAdmin) ...[
+                                    const SizedBox(width: 4),
+                                    Transform.scale(
+                                      scale: 0.65,
+                                      child: SizedBox(
+                                        width: 36,
+                                        height: 20,
+                                        child: Switch(
+                                          value: isActive,
+                                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          activeColor: Colors.green.shade700,
+                                          activeTrackColor: Colors.green.shade200,
+                                          inactiveThumbColor: Colors.red.shade700,
+                                          inactiveTrackColor: Colors.red.shade200,
+                                          onChanged: (val) {
+                                            _handleToggleStatus(context, loaneeProvider, item);
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
                           ],
@@ -512,138 +687,218 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
     );
   }
 
-  void _showLoaneeDetailsDialog(BuildContext context, LoaneeAccount item) {
+  void _showLoaneeDetailsDialog(
+    BuildContext context,
+    LoaneeAccount item,
+    LoaneeProvider loaneeProvider,
+    bool isAdmin,
+  ) {
     showDialog(
       context: context,
-      builder: (ctx) => DefaultTabController(
-        length: 2,
-        child: AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          title: Column(
-            children: [
-              Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Colors.black,
-                    child: Icon(Icons.badge_rounded, color: Colors.white, size: 22),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item.loaneename,
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          '${item.customerid} | ${item.accountnumber}',
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TabBar(
-                labelColor: Colors.black,
-                unselectedLabelColor: Colors.grey,
-                indicatorColor: Colors.black,
-                indicatorWeight: 2.5,
-                tabs: const [
-                  Tab(
-                    icon: Icon(Icons.person_rounded, size: 18),
-                    text: 'Loanee Details',
-                  ),
-                  Tab(
-                    icon: Icon(Icons.handshake_outlined, size: 18),
-                    text: 'Witness Details',
-                  ),
-                ],
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 380,
-            child: TabBarView(
-              children: [
-                // Tab 1: Loanee Details
-                SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 8),
-                      _buildModalRow('1. Customer ID', item.customerid),
-                      _buildModalRow('2. Account Number', item.accountnumber),
-                      _buildModalRow('3. Loanee Name', item.loaneename),
-                      _buildModalRow('4. W/O, S/O, D/O', item.guardianname),
-                      _buildModalRow('5. Mobile No', item.mobileno),
-                      _buildModalRow('6. Aadhar No', item.aadharno),
-                      _buildModalRow('7. Address', item.address),
-                      _buildModalRow('8. Post Office (P/O)', item.postoffice),
-                      _buildModalRow('9. Police Station (P/S)', item.policestation),
-                      _buildModalRow('10. District', item.district),
-                      _buildModalRow('11. PIN Code', item.pincode),
-                      _buildModalRow('12. Business Type', item.businesstype),
-                      _buildModalRow('13. Sanctioned Amount', '₹ ${item.loanamount.toStringAsFixed(0)}'),
-                      _buildModalRow('14. Account Status', item.status),
-                    ],
-                  ),
-                ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          // Re-lookup live account from provider
+          final currentLoanee = loaneeProvider.loanees.firstWhere(
+            (l) => l.customerId.toLowerCase() == item.customerId.toLowerCase(),
+            orElse: () => item,
+          );
+          final bool isCurrentActive = currentLoanee.isActive;
 
-                // Tab 2: Witness Details
-                SingleChildScrollView(
-                  child: Column(
+          return DefaultTabController(
+            length: 2,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              title: Column(
+                children: [
+                  Row(
                     children: [
-                      const SizedBox(height: 8),
-                      if (item.witnessname.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 40),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.info_outline_rounded, size: 40, color: Colors.grey.shade400),
-                              const SizedBox(height: 8),
-                              Text(
-                                'No witness details recorded',
-                                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                              ),
-                            ],
-                          ),
-                        )
-                      else ...[
-                        _buildModalRow('1. Witness Name', item.witnessname),
-                        _buildModalRow('2. Witness W/O, S/O, D/O', item.witnessguardianname),
-                        _buildModalRow('3. Relationship with Loanee', item.witnessrelationship),
-                        _buildModalRow('4. Witness Mobile No', item.witnessmobileno),
-                        _buildModalRow('5. Witness Aadhar No', item.witnessaadharno),
-                        _buildModalRow('6. Witness Address', item.witnessaddress),
-                        _buildModalRow('7. Witness Post Office (P/O)', item.witnesspostoffice),
-                        _buildModalRow('8. Witness Police Station (P/S)', item.witnesspolicestation),
-                        _buildModalRow('9. Witness District', item.witnessdistrict),
-                        _buildModalRow('10. Witness PIN Code', item.witnesspincode),
-                        _buildModalRow('11. Witness Business Type', item.witnessbusinesstype),
-                      ],
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: isCurrentActive ? Colors.black : Colors.red.shade700,
+                        child: Icon(
+                          isCurrentActive ? Icons.badge_rounded : Icons.person_off_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              currentLoanee.loaneename,
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              '${currentLoanee.customerid} | ${currentLoanee.accountnumber}',
+                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  TabBar(
+                    labelColor: Colors.black,
+                    unselectedLabelColor: Colors.grey,
+                    indicatorColor: Colors.black,
+                    indicatorWeight: 2.5,
+                    tabs: const [
+                      Tab(
+                        icon: Icon(Icons.person_rounded, size: 18),
+                        text: 'Loanee Details',
+                      ),
+                      Tab(
+                        icon: Icon(Icons.handshake_outlined, size: 18),
+                        text: 'Witness Details',
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 460,
+                child: TabBarView(
+                  children: [
+                    // Tab 1: Loanee Details
+                    SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 8),
+
+                          // Admin Account Status Toggle Card
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isCurrentActive ? Colors.green.shade50 : Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isCurrentActive ? Colors.green.shade300 : Colors.red.shade300,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Account Status (Login Access)',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: isCurrentActive ? Colors.green.shade900 : Colors.red.shade900,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      isCurrentActive
+                                          ? 'ACTIVE (Login Allowed)'
+                                          : 'INACTIVE (Login Blocked)',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: isCurrentActive ? Colors.green.shade900 : Colors.red.shade900,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (isAdmin)
+                                  Transform.scale(
+                                    scale: 0.85,
+                                    child: Switch(
+                                      value: isCurrentActive,
+                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      activeColor: Colors.green.shade700,
+                                      activeTrackColor: Colors.green.shade200,
+                                      inactiveThumbColor: Colors.red.shade700,
+                                      inactiveTrackColor: Colors.red.shade200,
+                                      onChanged: (val) async {
+                                        await _handleToggleStatus(context, loaneeProvider, currentLoanee);
+                                        setDialogState(() {});
+                                      },
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+
+                          _buildModalRow('1. Customer ID', currentLoanee.customerid),
+                          _buildModalRow('2. Account Number', currentLoanee.accountnumber),
+                          _buildModalRow('3. Loanee Name', currentLoanee.loaneename),
+                          _buildModalRow('4. W/O, S/O, D/O', currentLoanee.guardianname),
+                          _buildModalRow('5. Mobile No', currentLoanee.mobileno),
+                          _buildModalRow('6. Aadhar No', currentLoanee.aadharno),
+                          _buildModalRow('7. Address', currentLoanee.address),
+                          _buildModalRow('8. Post Office (P/O)', currentLoanee.postoffice),
+                          _buildModalRow('9. Police Station (P/S)', currentLoanee.policestation),
+                          _buildModalRow('10. District', currentLoanee.district),
+                          _buildModalRow('11. PIN Code', currentLoanee.pincode),
+                          _buildModalRow('12. Business Type', currentLoanee.businesstype),
+                          _buildModalRow('13. Sanctioned Amount', '₹ ${currentLoanee.loanamount.toStringAsFixed(0)}'),
+                          _buildModalRow('14. Account Status', currentLoanee.status),
+                        ],
+                      ),
+                    ),
+
+                    // Tab 2: Witness Details
+                    SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 8),
+                          if (currentLoanee.witnessname.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 40),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.info_outline_rounded, size: 40, color: Colors.grey.shade400),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'No witness details recorded',
+                                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else ...[
+                            _buildModalRow('1. Witness Name', currentLoanee.witnessname),
+                            _buildModalRow('2. Witness W/O, S/O, D/O', currentLoanee.witnessguardianname),
+                            _buildModalRow('3. Relationship with Loanee', currentLoanee.witnessrelationship),
+                            _buildModalRow('4. Witness Mobile No', currentLoanee.witnessmobileno),
+                            _buildModalRow('5. Witness Aadhar No', currentLoanee.witnessaadharno),
+                            _buildModalRow('6. Witness Address', currentLoanee.witnessaddress),
+                            _buildModalRow('7. Witness Post Office (P/O)', currentLoanee.witnesspostoffice),
+                            _buildModalRow('8. Witness Police Station (P/S)', currentLoanee.witnesspolicestation),
+                            _buildModalRow('9. Witness District', currentLoanee.witnessdistrict),
+                            _buildModalRow('10. Witness PIN Code', currentLoanee.witnesspincode),
+                            _buildModalRow('11. Witness Business Type', currentLoanee.witnessbusinesstype),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Close', style: TextStyle(color: Colors.white)),
                 ),
               ],
             ),
-          ),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Close', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

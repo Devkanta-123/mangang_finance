@@ -103,7 +103,10 @@ class CollectionSheetProvider extends ChangeNotifier {
     return _collectionEntries.where((entry) {
       final matchPhone = cleanPhone.isNotEmpty && entry.mobileNo.trim() == cleanPhone;
       final matchCust = cleanCustId.isNotEmpty && entry.customerId.trim() == cleanCustId;
-      final matchName = cleanName.isNotEmpty && entry.loaneeName.toLowerCase().trim() == cleanName;
+      final matchName = cleanName.isNotEmpty &&
+          cleanName != 'loanee account' &&
+          cleanName != 'user' &&
+          entry.loaneeName.toLowerCase().trim() == cleanName;
       return matchPhone || matchCust || matchName;
     }).toList();
   }
@@ -303,14 +306,29 @@ class CollectionSheetProvider extends ChangeNotifier {
 
       final remoteEntries = await SupabaseService.instance.fetchCollectionEntries();
       if (remoteEntries != null) {
+        final seenEntryIds = <String>{};
         _collectionEntries.clear();
-        _collectionEntries.addAll(remoteEntries);
+        for (var e in remoteEntries) {
+          if (e.id.isNotEmpty && !seenEntryIds.contains(e.id)) {
+            seenEntryIds.add(e.id);
+            _collectionEntries.add(e);
+          } else if (e.id.isEmpty) {
+            _collectionEntries.add(e);
+          }
+        }
       }
 
       final remotePayments = await SupabaseService.instance.fetchAllCollectionPayments();
       if (remotePayments != null) {
+        final seenPaymentIds = <String>{};
         _payments.clear();
-        _payments.addAll(remotePayments);
+        for (var p in remotePayments) {
+          final key = p.id.isNotEmpty ? p.id : '${p.collectionId}_${p.createdAt.toIso8601String()}';
+          if (!seenPaymentIds.contains(key)) {
+            seenPaymentIds.add(key);
+            _payments.add(p);
+          }
+        }
       }
     } catch (e) {
       debugPrint('Error fetching data from Supabase: $e');

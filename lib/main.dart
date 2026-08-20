@@ -17,6 +17,7 @@ import 'screens/account_page.dart';
 import 'screens/recent_loanees_page.dart';
 import 'screens/settings_page.dart';
 import 'screens/late_fines_page.dart';
+import 'screens/admin_users_list_page.dart';
 import 'providers/auth_provider.dart';
 import 'providers/loanee_provider.dart';
 import 'providers/ro_provider.dart';
@@ -113,8 +114,10 @@ class _MainPageState extends State<MainPage> {
     final authProvider = Provider.of<AuthProvider>(context);
 
     // Navigation Pages List - Sequential matching menu ordering
+    final bool isAdmin = authProvider.activeRole == UserType.admin;
+
     final List<Widget> pages = [
-      // Index 0: Dashboard
+      // Index 0: Main Role Dashboard (Role-specific layout with overview widgets)
       HomePage(
         onNavigateToMenu: (index) {
           setState(() {
@@ -122,6 +125,7 @@ class _MainPageState extends State<MainPage> {
           });
         },
       ),
+
       // Index 1: Create Loanee Account
       CreateLoaneePage(
         onAccountCreated: () {
@@ -132,11 +136,13 @@ class _MainPageState extends State<MainPage> {
       ),
       // Index 2: Loanee Accounts List
       LoaneeListPage(
-        onCreateLoaneePressed: () {
-          setState(() {
-            _selectedIndex = 1; // Navigate to Create Loanee Page
-          });
-        },
+        onCreateLoaneePressed: isAdmin
+            ? () {
+                setState(() {
+                  _selectedIndex = 1; // Navigate to Create Loanee Page
+                });
+              }
+            : null,
       ),
       // Index 3: Create RO Account
       CreateRoPage(
@@ -148,11 +154,13 @@ class _MainPageState extends State<MainPage> {
       ),
       // Index 4: RO Accounts List
       RoListPage(
-        onCreateRoPressed: () {
-          setState(() {
-            _selectedIndex = 3; // Navigate to Create RO Page
-          });
-        },
+        onCreateRoPressed: isAdmin
+            ? () {
+                setState(() {
+                  _selectedIndex = 3; // Navigate to Create RO Page
+                });
+              }
+            : null,
       ),
 
       // Under RO Accounts List (Indices 5, 6, 7)
@@ -166,11 +174,13 @@ class _MainPageState extends State<MainPage> {
       ),
       // Index 6: R.O. Collection Sheet View (Table View)
       RoCollectionSheetViewPage(
-        onAddLoaneePressed: () {
-          setState(() {
-            _selectedIndex = 5; // Navigate to Add Loanee Form
-          });
-        },
+        onAddLoaneePressed: isAdmin
+            ? () {
+                setState(() {
+                  _selectedIndex = 5; // Navigate to Add Loanee Form
+                });
+              }
+            : null,
       ),
       // Index 7: Route Management Master
       const RouteManagementPage(),
@@ -180,16 +190,20 @@ class _MainPageState extends State<MainPage> {
 
       // Index 9: Recent Registered Loanees Page
       RecentLoaneesPage(
-        onCreateLoaneePressed: () {
-          setState(() {
-            _selectedIndex = 1; // Navigate to Create Loanee Page
-          });
-        },
+        onCreateLoaneePressed: isAdmin
+            ? () {
+                setState(() {
+                  _selectedIndex = 1; // Navigate to Create Loanee Page
+                });
+              }
+            : null,
       ),
       // Index 10: System Settings (Late Payment Settings, etc.)
       const SettingsPage(),
       // Index 11: Late Fines & Overdue Tracking
       const LateFinesPage(),
+      // Index 12: Admin & Staff Accounts List
+      const AdminUsersListPage(),
     ];
 
     return Scaffold(
@@ -216,7 +230,9 @@ class _MainPageState extends State<MainPage> {
               margin: const EdgeInsets.only(right: 14),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: Colors.amber.shade700,
+                color: authProvider.activeRole == UserType.manager
+                    ? const Color(0xFF8B1A1A)
+                    : Colors.amber.shade700,
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
@@ -279,6 +295,8 @@ class _MainPageState extends State<MainPage> {
         switch (role) {
           case UserType.admin:
             return 'Admin Profile';
+          case UserType.manager:
+            return 'Manager Profile';
           case UserType.ro:
             return 'RO Officer Profile';
           case UserType.loanee:
@@ -290,6 +308,8 @@ class _MainPageState extends State<MainPage> {
         return 'Settings';
       case 11:
         return 'Late Fines & Overdue Tracking';
+      case 12:
+        return 'Admin User';
       default:
         return 'Mangang Finance';
     }

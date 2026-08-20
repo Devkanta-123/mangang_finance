@@ -383,6 +383,68 @@ class _RoCollectionSheetViewPageState
                 ),
                 child: Column(
                   children: [
+                    Builder(
+                      builder: (context) {
+                        final settings = Provider.of<SettingsProvider>(context, listen: false);
+                        final breakdown = entry.getLoanBreakdown(
+                          loaneeLoanAmount: loanee?.loanAmount,
+                          configuredInterestRate: settings.investmentInterestRate,
+                          configuredBasePrincipal: settings.investmentBaseAmount,
+                          configuredBaseDailyAmount: settings.baseDailyAmount,
+                          configuredWeeklyInstallment: settings.weeklyInstallmentAmount,
+                        );
+                        final payableStr = entry.getFormattedPayableAmount(
+                          loaneeLoanAmount: loanee?.loanAmount,
+                          configuredInterestRate: settings.investmentInterestRate,
+                          configuredBasePrincipal: settings.investmentBaseAmount,
+                          configuredBaseDailyAmount: settings.baseDailyAmount,
+                          configuredWeeklyInstallment: settings.weeklyInstallmentAmount,
+                        );
+
+                        return Column(
+                          children: [
+                            _buildDetailRow(
+                              'Loan Amount (incl. interest)',
+                              '₹ ${breakdown.loanAmount.toStringAsFixed(2)}',
+                              Icons.account_balance_wallet_outlined,
+                              isBold: true,
+                              valueColor: const Color(0xFF8B1A1A),
+                            ),
+                            const Divider(height: 16),
+                            _buildDetailRow(
+                              'Actual Principal',
+                              '₹ ${breakdown.actualPrincipal.toStringAsFixed(2)}',
+                              Icons.account_balance_rounded,
+                              isBold: true,
+                              valueColor: Colors.blue.shade900,
+                            ),
+                            const Divider(height: 16),
+                            _buildDetailRow(
+                              'Interest Amount',
+                              '₹ ${breakdown.interestAmount.toStringAsFixed(2)}',
+                              Icons.trending_up_rounded,
+                              isBold: true,
+                              valueColor: Colors.green.shade800,
+                            ),
+                            const Divider(height: 16),
+                            _buildDetailRow(
+                              'Interest Rate',
+                              '${breakdown.interestRate.toStringAsFixed(1)}%',
+                              Icons.percent_rounded,
+                            ),
+                            const Divider(height: 16),
+                            _buildDetailRow(
+                              'Payable Amount (${entry.frequencyLabel})',
+                              payableStr,
+                              Icons.schedule_rounded,
+                              isBold: true,
+                              valueColor: entry.isDaily ? Colors.blue.shade800 : Colors.purple.shade800,
+                            ),
+                            const Divider(height: 16),
+                          ],
+                        );
+                      },
+                    ),
                     _buildDetailRow(
                       'Total Collected',
                       '₹ ${totalCollected.toStringAsFixed(2)}',
@@ -508,7 +570,7 @@ class _RoCollectionSheetViewPageState
     final isAdmin = authProvider.activeRole == UserType.admin ||
         authProvider.currentUser?.userType == UserType.admin;
 
-    // RULE: Master Route "Office" is restricted to Administrator only!
+    // RULE 1: Master Route "Office" is restricted to Administrator only!
     if (isOfficeRoute && !isAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -518,7 +580,31 @@ class _RoCollectionSheetViewPageState
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Access Restricted: "${entry.route}" is a Master Route. Only Administrator can record payment entries for Office accounts.',
+                  'Access Restricted: "${entry.route}" is an Office route. Only Administrator can record payment entries for Office accounts.',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red.shade800,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    // RULE 2: For all other routes, Administrator cannot do payment entry; only assigned RO officer can do it!
+    if (!isOfficeRoute && isAdmin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.lock_outline_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Access Restricted: Administrator can only record payment entries for the "Office" route. For "${entry.route}", payment entry must be recorded by the assigned RO officer.',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                 ),
               ),
@@ -1718,7 +1804,8 @@ class _RoCollectionSheetViewPageState
               columns: const [
                 DataColumn(label: Text('#')),
                 DataColumn(label: Text('Loanee Name')),
-                DataColumn(label: Text('Acc No')),
+                DataColumn(label: Text('ACNO')),
+                DataColumn(label: Text('Payable Amount')),
                 DataColumn(label: Text('Collected')),
                 DataColumn(label: Text('Late Fine')),
                 DataColumn(label: Text('Today')),
@@ -1760,6 +1847,52 @@ class _RoCollectionSheetViewPageState
                     ),
                     DataCell(Text(entry.accountNumber,
                         style: const TextStyle(fontSize: 11))),
+                    DataCell(
+                      Builder(
+                        builder: (context) {
+                          final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                          final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                          final loanee = loaneeProvider.getLoaneeForUser(
+                            customerId: entry.customerId,
+                            mobileNo: entry.mobileNo,
+                            name: entry.loaneeName,
+                          );
+                          final payableText = entry.getFormattedPayableAmount(
+                            loaneeLoanAmount: loanee?.loanAmount,
+                            configuredInterestRate: settingsProvider.investmentInterestRate,
+                            configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+                            configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+                            configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+                          );
+
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: entry.isDaily
+                                  ? Colors.blue.shade50
+                                  : Colors.purple.shade50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: entry.isDaily
+                                    ? Colors.blue.shade200
+                                    : Colors.purple.shade200,
+                              ),
+                            ),
+                            child: Text(
+                              payableText,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                                color: entry.isDaily
+                                    ? Colors.blue.shade900
+                                    : Colors.purple.shade900,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                     DataCell(Text(
                       '₹ ${totalCollected.toStringAsFixed(0)}',
                       style: TextStyle(
@@ -1831,29 +1964,41 @@ class _RoCollectionSheetViewPageState
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Admin and RO can record payment entry if not already paid today
-                          if ((isRoPanel || isAdmin) && !hasPaidToday) ...[
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.all(4),
-                              constraints: const BoxConstraints(),
-                              icon: Icon(
-                                CollectionSheetProvider.isOfficeRoute(entry.route)
-                                    ? Icons.domain_add_rounded
-                                    : Icons.add_card_rounded,
-                                size: 17,
-                                color: CollectionSheetProvider.isOfficeRoute(entry.route)
-                                    ? const Color(0xFF8B1A1A)
-                                    : Colors.green,
-                              ),
-                              tooltip: CollectionSheetProvider.isOfficeRoute(entry.route)
-                                  ? (isAdmin ? 'Admin Office Entry' : 'Office (Admin Only)')
-                                  : 'Record Payment',
-                              onPressed: () =>
-                                  _showAddPaymentEntryModal(context, entry),
-                            ),
-                            const SizedBox(width: 4),
-                          ],
+                        Builder(
+                          builder: (context) {
+                            final bool isOffice = CollectionSheetProvider.isOfficeRoute(entry.route);
+                            final bool canRecordPayment = (isAdmin && isOffice) || (isRoPanel && !isOffice);
+
+                            if (canRecordPayment && !hasPaidToday) {
+                              return Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.all(4),
+                                    constraints: const BoxConstraints(),
+                                    icon: Icon(
+                                      isOffice
+                                          ? Icons.domain_add_rounded
+                                          : Icons.add_card_rounded,
+                                      size: 17,
+                                      color: isOffice
+                                          ? const Color(0xFF8B1A1A)
+                                          : Colors.green,
+                                    ),
+                                    tooltip: isOffice
+                                        ? 'Admin Office Payment Entry'
+                                        : 'Record Payment (RO)',
+                                    onPressed: () =>
+                                        _showAddPaymentEntryModal(context, entry),
+                                  ),
+                                  const SizedBox(width: 4),
+                                ],
+                              );
+                            }
+                            return const SizedBox.shrink();
+                          },
+                        ),
                           IconButton(
                             visualDensity: VisualDensity.compact,
                             padding: const EdgeInsets.all(4),
@@ -2122,13 +2267,64 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    entry.accountNumber,
+                    'ACNO: ${entry.accountNumber}',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: Colors.grey.shade700,
                     ),
                   ),
+                ),
+                const SizedBox(width: 8),
+                Builder(
+                  builder: (context) {
+                    final loaneeProvider =
+                        Provider.of<LoaneeProvider>(context, listen: false);
+                    final settingsProvider =
+                        Provider.of<SettingsProvider>(context, listen: false);
+                    final loanee = loaneeProvider.getLoaneeForUser(
+                      customerId: entry.customerId,
+                      mobileNo: entry.mobileNo,
+                      name: entry.loaneeName,
+                    );
+                    final payableText = entry.getFormattedPayableAmount(
+                      loaneeLoanAmount: loanee?.loanAmount,
+                      configuredInterestRate:
+                          settingsProvider.investmentInterestRate,
+                      configuredBasePrincipal:
+                          settingsProvider.investmentBaseAmount,
+                      configuredBaseDailyAmount:
+                          settingsProvider.baseDailyAmount,
+                      configuredWeeklyInstallment:
+                          settingsProvider.weeklyInstallmentAmount,
+                    );
+
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: entry.isDaily
+                            ? Colors.blue.shade50
+                            : Colors.purple.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: entry.isDaily
+                              ? Colors.blue.shade200
+                              : Colors.purple.shade200,
+                        ),
+                      ),
+                      child: Text(
+                        payableText,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.bold,
+                          color: entry.isDaily
+                              ? Colors.blue.shade900
+                              : Colors.purple.shade900,
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 const Spacer(),
                 Container(
@@ -2300,43 +2496,47 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
 
             const Divider(height: 20),
 
-            // Action Buttons Row (Admin and RO can record payments)
-            Row(
-              children: [
-                if ((isRoPanel || isAdmin) && !hasPaidToday) ...[
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isOfficeRoute
-                            ? const Color(0xFF8B1A1A)
-                            : Colors.amber.shade700,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+            // Action Buttons Row:
+            // - Admin can ONLY record payments for Office route
+            // - RO officer can record payments for non-Office routes
+            Builder(
+              builder: (context) {
+                final bool canRecordPayment = (isAdmin && isOfficeRoute) || (isRoPanel && !isOfficeRoute);
+
+                return Row(
+                  children: [
+                    if (canRecordPayment && !hasPaidToday) ...[
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isOfficeRoute
+                                ? const Color(0xFF8B1A1A)
+                                : Colors.amber.shade700,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            elevation: 1,
+                          ),
+                          onPressed: onTapAddPayment,
+                          icon: Icon(
+                            isOfficeRoute ? Icons.domain_add_rounded : Icons.add_card_rounded,
+                            size: 16,
+                          ),
+                          label: Text(
+                            isOfficeRoute ? 'Admin Office Entry' : '+ Add Payment',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
-                        elevation: 1,
                       ),
-                      onPressed: onTapAddPayment,
-                      icon: Icon(
-                        isOfficeRoute ? Icons.domain_add_rounded : Icons.add_card_rounded,
-                        size: 16,
-                      ),
-                      label: Text(
-                        isOfficeRoute && isAdmin
-                            ? 'Admin Office Entry'
-                            : (isOfficeRoute && !isAdmin ? 'Office (Admin Only)' : '+ Add Payment'),
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                ],
-                Expanded(
-                  child: OutlinedButton.icon(
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF1E1E1E),
                       side: BorderSide(color: Colors.grey.shade400),
@@ -2357,8 +2557,10 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-          ],
+            );
+          },
+        ),
+      ],
         ),
       ),
     );
@@ -2518,8 +2720,24 @@ class __AddPaymentEntryModalContentState
       );
 
       final isDaily = widget.entry.collectionType.toLowerCase().trim() == 'daily';
+      final loanee = loaneeProvider.getLoaneeForUser(
+        customerId: widget.entry.customerId,
+        mobileNo: widget.entry.mobileNo,
+        name: widget.entry.loaneeName,
+      );
+
       if (isDaily) {
         _fineFormulaText = 'Daily: ₹${settingsProvider.dailyLateFine.toStringAsFixed(2)}/day × $_lateUnits late days = ₹${_calculatedFine.toStringAsFixed(2)}';
+        if (_paymentAmountController.text.trim().isEmpty) {
+          final dailyPayable = widget.entry.getCalculatedPayableAmount(
+            loaneeLoanAmount: loanee?.loanAmount,
+            configuredInterestRate: settingsProvider.investmentInterestRate,
+            configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+            configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+            configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+          );
+          _paymentAmountController.text = dailyPayable.toStringAsFixed(2);
+        }
       } else {
         final breakdown = settingsProvider.getWeeklyBreakdown(
           entry: widget.entry,
@@ -2527,7 +2745,14 @@ class __AddPaymentEntryModalContentState
         );
         _fineFormulaText = 'Weekly (₹${breakdown.weeklyInstallment.toStringAsFixed(0)}/wk for ${breakdown.tenureWeeks} wks): ${breakdown.lateWeeks} wks overdue × ₹${breakdown.lateFineRate.toStringAsFixed(2)} = ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)}';
         if (_paymentAmountController.text.trim().isEmpty) {
-          _paymentAmountController.text = breakdown.weeklyInstallment.toStringAsFixed(2);
+          final weeklyPayable = widget.entry.getCalculatedPayableAmount(
+            loaneeLoanAmount: loanee?.loanAmount,
+            configuredInterestRate: settingsProvider.investmentInterestRate,
+            configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+            configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+            configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+          );
+          _paymentAmountController.text = weeklyPayable.toStringAsFixed(2);
         }
       }
 
@@ -3109,6 +3334,82 @@ class __AddPaymentEntryModalContentState
                       ],
                     ),
                     const Divider(height: 14),
+                    Builder(
+                      builder: (context) {
+                        final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                        final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                        final loanee = loaneeProvider.getLoaneeForUser(
+                          customerId: widget.entry.customerId,
+                          mobileNo: widget.entry.mobileNo,
+                          name: widget.entry.loaneeName,
+                        );
+                        final breakdown = widget.entry.getLoanBreakdown(
+                          loaneeLoanAmount: loanee?.loanAmount,
+                          configuredInterestRate: settingsProvider.investmentInterestRate,
+                          configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+                          configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+                          configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+                        );
+                        final payableStr = widget.entry.getFormattedPayableAmount(
+                          loaneeLoanAmount: loanee?.loanAmount,
+                          configuredInterestRate: settingsProvider.investmentInterestRate,
+                          configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+                          configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+                          configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+                        );
+
+                        return Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Loan Amount (incl. interest):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                Text('₹ ${breakdown.loanAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
+                              ],
+                            ),
+                            const SizedBox(height: 3),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Actual Principal:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                Text('₹ ${breakdown.actualPrincipal.toStringAsFixed(2)}', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
+                              ],
+                            ),
+                            const SizedBox(height: 3),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Interest (${breakdown.interestRate.toStringAsFixed(0)}%):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                Text('₹ ${breakdown.interestAmount.toStringAsFixed(2)}', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.green.shade800)),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Payable Amount:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: widget.entry.isDaily ? Colors.blue.shade50 : Colors.purple.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    payableStr,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: widget.entry.isDaily ? Colors.blue.shade900 : Colors.purple.shade900,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 12),
+                          ],
+                        );
+                      },
+                    ),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [

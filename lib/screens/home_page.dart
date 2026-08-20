@@ -1,7 +1,8 @@
-// lib/screens/home_page.dart
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/user_model.dart';
+import '../models/ro_model.dart';
 import '../models/ro_collection_entry_model.dart';
 import '../models/collection_payment_model.dart';
 import '../models/loanee_model.dart';
@@ -10,6 +11,7 @@ import '../providers/loanee_provider.dart';
 import '../providers/ro_provider.dart';
 import '../providers/collection_sheet_provider.dart';
 import '../providers/settings_provider.dart';
+import '../widgets/ro_daily_collection_pie_chart.dart';
 import 'late_fines_page.dart';
 
 class HomePage extends StatelessWidget {
@@ -38,6 +40,8 @@ class HomePage extends StatelessWidget {
             // Role-Specific Dashboard Content
             if (activeRole == UserType.admin)
               _buildAdminDashboard(context, loaneeProvider, roProvider, collectionProvider, onNavigateToMenu)
+            else if (activeRole == UserType.manager)
+              _buildManagerDashboard(context, loaneeProvider, roProvider, collectionProvider, onNavigateToMenu)
             else if (activeRole == UserType.ro)
               _buildRODashboard(context, roProvider, collectionProvider, user, onNavigateToMenu)
             else
@@ -83,157 +87,41 @@ class HomePage extends StatelessWidget {
     CollectionSheetProvider collectionProvider,
     Function(int)? onNavigateToMenu,
   ) {
-    final double extraCollection = collectionProvider.totalCollectedAmount;
-    final double grandTotalCollected = loaneeProvider.totalCollectedAmount + extraCollection;
-
-    final String loanSanctionedText = loaneeProvider.totalLoanAmount >= 100000
-        ? '₹ ${(loaneeProvider.totalLoanAmount / 100000).toStringAsFixed(2)} Lakh'
-        : '₹ ${loaneeProvider.totalLoanAmount.toStringAsFixed(2)}';
-
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Total Sanctioned vs Recovered Summary (Green Theme)
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.green.shade900.withValues(alpha: 0.25),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'TOTAL SANCTIONED',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white70,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.shield_rounded, size: 12, color: Colors.white),
-                          SizedBox(width: 4),
-                          Text(
-                            'ADMIN LIVE',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  loanSanctionedText,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Divider(color: Colors.white24, height: 1),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Total Recovered',
-                            style: TextStyle(fontSize: 11, color: Colors.white70),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '₹ ${grandTotalCollected.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Total Due Remaining',
-                            style: TextStyle(fontSize: 11, color: Colors.white70),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '₹ ${loaneeProvider.totalDueAmount.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.amberAccent,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
           // Quick Metric Cards
           Row(
             children: [
               Expanded(
-                child: _buildMetricCard(
-                  title: 'Total Loanees',
-                  value: '${loaneeProvider.totalLoanees}',
-                  subtitle: 'Registered Accounts',
-                  icon: Icons.people_alt_rounded,
-                  color: Colors.blue.shade700,
-                  backgroundColor: Colors.blue.shade50,
+                child: InkWell(
+                  onTap: () => onNavigateToMenu?.call(2), // Loanee List
+                  borderRadius: BorderRadius.circular(16),
+                  child: _buildMetricCard(
+                    title: 'Total Loanees',
+                    value: '${loaneeProvider.totalLoanees}',
+                    subtitle: 'Registered Accounts',
+                    icon: Icons.people_alt_rounded,
+                    color: Colors.blue.shade700,
+                    backgroundColor: Colors.blue.shade50,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildMetricCard(
-                  title: 'Active ROs',
-                  value: '${roProvider.totalRos}',
-                  subtitle: 'Field Officers',
-                  icon: Icons.badge_rounded,
-                  color: Colors.orange.shade700,
-                  backgroundColor: Colors.orange.shade50,
+                child: InkWell(
+                  onTap: () => onNavigateToMenu?.call(4), // RO List
+                  borderRadius: BorderRadius.circular(16),
+                  child: _buildMetricCard(
+                    title: 'Active ROs',
+                    value: '${roProvider.totalRos}',
+                    subtitle: 'Field Officers',
+                    icon: Icons.badge_rounded,
+                    color: Colors.orange.shade700,
+                    backgroundColor: Colors.orange.shade50,
+                  ),
                 ),
               ),
             ],
@@ -242,35 +130,165 @@ class HomePage extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _buildMetricCard(
-                  title: 'Collection Cards',
-                  value: '${collectionProvider.totalEntriesCount}',
-                  subtitle: 'Sheet Entries',
-                  icon: Icons.table_chart_rounded,
-                  color: Colors.purple.shade700,
-                  backgroundColor: Colors.purple.shade50,
+                child: InkWell(
+                  onTap: () => onNavigateToMenu?.call(6), // Collection Sheet
+                  borderRadius: BorderRadius.circular(16),
+                  child: _buildMetricCard(
+                    title: 'Collection Cards',
+                    value: '${collectionProvider.totalEntriesCount}',
+                    subtitle: 'Sheet Entries',
+                    icon: Icons.table_chart_rounded,
+                    color: Colors.purple.shade700,
+                    backgroundColor: Colors.purple.shade50,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildMetricCard(
-                  title: 'Total Routes',
-                  value: '${collectionProvider.totalRoutesCount}',
-                  subtitle: 'Master Route Setup',
-                  icon: Icons.alt_route_rounded,
-                  color: Colors.teal.shade700,
-                  backgroundColor: Colors.teal.shade50,
+                child: InkWell(
+                  onTap: () => onNavigateToMenu?.call(7), // Master Route Setup
+                  borderRadius: BorderRadius.circular(16),
+                  child: _buildMetricCard(
+                    title: 'Total Routes',
+                    value: '${collectionProvider.totalRoutesCount}',
+                    subtitle: 'Master Route Setup',
+                    icon: Icons.alt_route_rounded,
+                    color: Colors.teal.shade700,
+                    backgroundColor: Colors.teal.shade50,
+                  ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 20),
 
-          // Route Wise Collection Visual Chart
+          // 1. 3D Interactive RO Daily Collection Pie Chart
+          RoDailyCollectionPieChart(
+            roProvider: roProvider,
+            collectionProvider: collectionProvider,
+          ),
+          const SizedBox(height: 20),
+
+          // 2. Route Wise Collection Visual Bar Chart
           _buildRouteWiseCollectionChart(context, collectionProvider),
           const SizedBox(height: 20),
 
-          // All Collection & Payment Done Ledger across All Routes
+          // 3. All Collection & Payment Done Ledger across All Routes (Paginated)
+          _AdminAllCollectionsLedgerSection(collectionProvider: collectionProvider),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // 1.5. MANAGER MONITORING DASHBOARD (READ-ONLY)
+  // ==========================================
+  Widget _buildManagerDashboard(
+    BuildContext context,
+    LoaneeProvider loaneeProvider,
+    RoProvider roProvider,
+    CollectionSheetProvider collectionProvider,
+    Function(int)? onNavigateToMenu,
+  ) {
+    final double extraCollection = collectionProvider.totalCollectedAmount;
+    final double grandTotalCollected = loaneeProvider.totalCollectedAmount + extraCollection;
+    final double totalSanctioned = loaneeProvider.totalLoanAmount;
+    final double remainingBalance = (totalSanctioned - grandTotalCollected).clamp(0.0, double.infinity);
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Recovered vs Remaining Balance Summary with Show/Hide Toggle (Manager Theme - Brand Red)
+          _ManagerBalanceSummaryCard(
+            grandTotalCollected: grandTotalCollected,
+            remainingBalance: remainingBalance,
+          ),
+          const SizedBox(height: 16),
+
+          // Monitoring Metrics Grid (Tap to view relevant pages)
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () => onNavigateToMenu?.call(2), // Loanee List
+                  borderRadius: BorderRadius.circular(16),
+                  child: _buildMetricCard(
+                    title: 'Total Loanees',
+                    value: '${loaneeProvider.totalLoanees}',
+                    subtitle: 'Registered Accounts',
+                    icon: Icons.people_alt_rounded,
+                    color: Colors.blue.shade700,
+                    backgroundColor: Colors.blue.shade50,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: InkWell(
+                  onTap: () => onNavigateToMenu?.call(4), // RO List
+                  borderRadius: BorderRadius.circular(16),
+                  child: _buildMetricCard(
+                    title: 'Active ROs',
+                    value: '${roProvider.totalRos}',
+                    subtitle: 'Field Officers',
+                    icon: Icons.badge_rounded,
+                    color: Colors.orange.shade700,
+                    backgroundColor: Colors.orange.shade50,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () => onNavigateToMenu?.call(6), // Collection Sheet
+                  borderRadius: BorderRadius.circular(16),
+                  child: _buildMetricCard(
+                    title: 'Collection Cards',
+                    value: '${collectionProvider.totalEntriesCount}',
+                    subtitle: 'Sheet Entries',
+                    icon: Icons.table_chart_rounded,
+                    color: Colors.purple.shade700,
+                    backgroundColor: Colors.purple.shade50,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: InkWell(
+                  onTap: () => onNavigateToMenu?.call(7), // Master Route
+                  borderRadius: BorderRadius.circular(16),
+                  child: _buildMetricCard(
+                    title: 'Master Routes',
+                    value: '${collectionProvider.totalRoutesCount}',
+                    subtitle: 'Zone Setups',
+                    icon: Icons.alt_route_rounded,
+                    color: Colors.teal.shade700,
+                    backgroundColor: Colors.teal.shade50,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // 1. 3D Interactive RO Daily Collection Pie Chart
+          RoDailyCollectionPieChart(
+            roProvider: roProvider,
+            collectionProvider: collectionProvider,
+          ),
+          const SizedBox(height: 20),
+
+          // 2. Route Wise Collection Visual Bar Chart
+          _buildRouteWiseCollectionChart(context, collectionProvider),
+          const SizedBox(height: 20),
+
+          // 3. All Collection & Payment Done Ledger across All Routes (Paginated)
           _AdminAllCollectionsLedgerSection(collectionProvider: collectionProvider),
         ],
       ),
@@ -300,6 +318,66 @@ class HomePage extends StatelessWidget {
     final assignedRoute = (roAccount != null && roAccount.route.isNotEmpty)
         ? roAccount.route
         : 'All Routes / General';
+
+    final now = DateTime.now();
+
+    final cleanUserName = (user?.name ?? '').toLowerCase().trim();
+    final cleanUserCustId = (user?.customerId ?? '').toLowerCase().trim();
+    final cleanUserMobile = (user?.mobileNo ?? '').trim();
+    final cleanRoName = (roAccount?.roName ?? '').toLowerCase().trim();
+    final cleanRoCustId = (roAccount?.customerId ?? '').toLowerCase().trim();
+    final cleanRoMobile = (roAccount?.mobileNo ?? '').trim();
+    final cleanRoute = assignedRoute.toLowerCase().trim();
+
+    bool isPaymentForThisRo(CollectionPaymentModel p) {
+      final pRoName = (p.roName ?? '').toLowerCase().trim();
+      final pRoId = (p.roId ?? '').toLowerCase().trim();
+      final pRoRoute = (p.roRoute ?? '').toLowerCase().trim();
+
+      // 1. Direct ID match
+      final matchId = (cleanUserCustId.isNotEmpty && pRoId == cleanUserCustId) ||
+          (cleanRoCustId.isNotEmpty && pRoId == cleanRoCustId) ||
+          (cleanUserMobile.isNotEmpty && pRoId == cleanUserMobile) ||
+          (cleanRoMobile.isNotEmpty && pRoId == cleanRoMobile);
+      if (matchId) return true;
+
+      // 2. Direct Name match
+      final matchName = (cleanUserName.isNotEmpty && pRoName == cleanUserName) ||
+          (cleanRoName.isNotEmpty && pRoName == cleanRoName);
+      if (matchName) return true;
+
+      // 3. Explicit check: If this payment is tagged with another RO officer's ID or name, reject it!
+      if (pRoId.isNotEmpty) return false;
+      if (pRoName.isNotEmpty &&
+          pRoName != 'ro officer' &&
+          pRoName != 'field officer' &&
+          pRoName != 'officer') {
+        return false;
+      }
+
+      // 4. Route match if assigned specific route
+      if (cleanRoute.isNotEmpty &&
+          cleanRoute != 'all routes / general' &&
+          cleanRoute != 'all routes' &&
+          cleanRoute != 'all') {
+        if (pRoRoute == cleanRoute) return true;
+        final card = collectionProvider.getCardForPayment(p);
+        if (card != null && card.route.toLowerCase().trim() == cleanRoute) return true;
+      }
+      return false;
+    }
+
+    // Today's collections strictly for the logged-in RO
+    final todayRoPayments = collectionProvider.payments.where((p) {
+      final isToday = p.createdAt.year == now.year &&
+          p.createdAt.month == now.month &&
+          p.createdAt.day == now.day;
+      return isToday && isPaymentForThisRo(p);
+    }).toList();
+
+    final double todayRecoveredAmount =
+        todayRoPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
+    final int todayCollectionRecordsCount = todayRoPayments.length;
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -440,8 +518,8 @@ class HomePage extends StatelessWidget {
               Expanded(
                 child: _buildMetricCard(
                   title: 'Total Collection Records',
-                  value: '${collectionProvider.totalEntriesCount} Records',
-                  subtitle: 'Active Sheet Entries',
+                  value: '$todayCollectionRecordsCount Records',
+                  subtitle: "Today's Sheet Entries",
                   icon: Icons.post_add_rounded,
                   color: Colors.blue.shade700,
                   backgroundColor: Colors.blue.shade50,
@@ -451,8 +529,8 @@ class HomePage extends StatelessWidget {
               Expanded(
                 child: _buildMetricCard(
                   title: 'Total Recovered',
-                  value: '₹ ${collectionProvider.totalCollectedAmount.toStringAsFixed(2)}',
-                  subtitle: 'Recorded Payments',
+                  value: '₹ ${todayRecoveredAmount.toStringAsFixed(2)}',
+                  subtitle: "Today's Recovered",
                   icon: Icons.payments_rounded,
                   color: Colors.green.shade700,
                   backgroundColor: Colors.green.shade50,
@@ -503,7 +581,7 @@ class HomePage extends StatelessWidget {
           ),
 
           const SizedBox(height: 20),
-          _buildROScheduleCard(collectionProvider, assignedRoute),
+          _buildROScheduleCard(collectionProvider, roProvider, assignedRoute, user, roAccount),
         ],
       ),
     );
@@ -891,29 +969,7 @@ class HomePage extends StatelessWidget {
                   ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade200),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.storage_rounded,
-                        size: 12, color: Colors.green.shade800),
-                    const SizedBox(width: 4),
-                    Text(
-                      'DATABASE',
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green.shade800,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+
             ],
           ),
 
@@ -1251,9 +1307,83 @@ class HomePage extends StatelessWidget {
 
   Widget _buildROScheduleCard(
     CollectionSheetProvider collectionProvider,
+    RoProvider roProvider,
     String assignedRoute,
+    User? user,
+    RoAccount? roAccount,
   ) {
-    final recentEntries = collectionProvider.collectionEntries.take(8).toList();
+    final cleanUserName = (user?.name ?? '').toLowerCase().trim();
+    final cleanUserCustId = (user?.customerId ?? '').toLowerCase().trim();
+    final cleanUserMobile = (user?.mobileNo ?? '').trim();
+    final cleanRoName = (roAccount?.roName ?? '').toLowerCase().trim();
+    final cleanRoCustId = (roAccount?.customerId ?? '').toLowerCase().trim();
+    final cleanRoMobile = (roAccount?.mobileNo ?? '').trim();
+    final cleanRoute = assignedRoute.toLowerCase().trim();
+
+    bool isPaymentForThisRo(CollectionPaymentModel p) {
+      final pRoName = (p.roName ?? '').toLowerCase().trim();
+      final pRoId = (p.roId ?? '').toLowerCase().trim();
+      final pRoRoute = (p.roRoute ?? '').toLowerCase().trim();
+
+      // 1. Direct ID match
+      if (cleanUserCustId.isNotEmpty && pRoId == cleanUserCustId) return true;
+      if (cleanRoCustId.isNotEmpty && pRoId == cleanRoCustId) return true;
+      if (cleanUserMobile.isNotEmpty && pRoId == cleanUserMobile) return true;
+      if (cleanRoMobile.isNotEmpty && pRoId == cleanRoMobile) return true;
+
+      // 2. Direct Name match
+      if (cleanUserName.isNotEmpty &&
+          cleanUserName != 'ro officer' &&
+          cleanUserName != 'field officer' &&
+          pRoName == cleanUserName) {
+        return true;
+      }
+      if (cleanRoName.isNotEmpty &&
+          cleanRoName != 'ro officer' &&
+          cleanRoName != 'field officer' &&
+          pRoName == cleanRoName) {
+        return true;
+      }
+
+      // 3. Explicit check: If this payment is tagged with another RO officer's ID or name, reject it!
+      if (pRoId.isNotEmpty) return false;
+      if (pRoName.isNotEmpty &&
+          pRoName != 'ro officer' &&
+          pRoName != 'field officer' &&
+          pRoName != 'officer') {
+        return false;
+      }
+
+      // 4. Route match if assigned specific route
+      if (cleanRoute.isNotEmpty &&
+          cleanRoute != 'all routes / general' &&
+          cleanRoute != 'all routes' &&
+          cleanRoute != 'all') {
+        if (pRoRoute == cleanRoute) return true;
+        final card = collectionProvider.getCardForPayment(p);
+        if (card != null && card.route.toLowerCase().trim() == cleanRoute) return true;
+      }
+
+      return false;
+    }
+
+    // All historical collection payment entries recorded strictly by this logged-in RO (deduplicated)
+    final rawRoPayments = collectionProvider.payments
+        .where(isPaymentForThisRo)
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    final seenPaymentKeys = <String>{};
+    final roPayments = <CollectionPaymentModel>[];
+    for (final p in rawRoPayments) {
+      final key = p.id.isNotEmpty
+          ? p.id
+          : '${p.collectionId}_${p.createdAt.millisecondsSinceEpoch}';
+      if (!seenPaymentKeys.contains(key)) {
+        seenPaymentKeys.add(key);
+        roPayments.add(p);
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1277,7 +1407,7 @@ class HomePage extends StatelessWidget {
                 ),
               ),
               Text(
-                '${recentEntries.length} Entries',
+                '${roPayments.length} Entries',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
@@ -1287,12 +1417,12 @@ class HomePage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          if (recentEntries.isEmpty) ...[
+          if (roPayments.isEmpty) ...[
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),
               child: Center(
                 child: Text(
-                  'No collection sheet entries recorded yet.',
+                  'No collection sheet entries recorded by your account yet.',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                 ),
               ),
@@ -1301,26 +1431,37 @@ class HomePage extends StatelessWidget {
             ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: recentEntries.length,
+              itemCount: roPayments.length > 8 ? 8 : roPayments.length,
               separatorBuilder: (context, index) => const Divider(height: 16),
               itemBuilder: (context, index) {
-                final entry = recentEntries[index];
-                final paid = collectionProvider.getTotalPaidForCollection(entry.id);
+                final payment = roPayments[index];
+                final card = collectionProvider.getCardForPayment(payment);
+                final loaneeName = card?.loaneeName ??
+                    (payment.remarks?.isNotEmpty == true ? payment.remarks! : 'Loanee Collection');
+                final routeName = (payment.roRoute != null && payment.roRoute!.isNotEmpty)
+                    ? payment.roRoute!
+                    : (card?.route ?? (assignedRoute.isNotEmpty ? assignedRoute : 'General'));
+                final accNo = card?.accountNumber ?? (card?.customerId ?? 'N/A');
+                final dateStr =
+                    '${payment.createdAt.day.toString().padLeft(2, '0')}/${payment.createdAt.month.toString().padLeft(2, '0')}/${payment.createdAt.year}';
+
                 final bool isCrossRoute = assignedRoute.isNotEmpty &&
                     assignedRoute != 'All Routes / General' &&
-                    entry.route.isNotEmpty &&
-                    entry.route.toLowerCase().trim() !=
+                    routeName.isNotEmpty &&
+                    routeName.toLowerCase().trim() !=
                         assignedRoute.toLowerCase().trim();
 
                 return _buildScheduleItem(
-                  name: entry.loaneeName,
-                  location: 'Route: ${entry.route} • Acc #${entry.accountNumber}',
-                  amount: '₹ ${paid.toStringAsFixed(0)}',
-                  status: paid > 0 ? 'Active Collection' : 'Pending Payment',
-                  statusColor: paid > 0 ? Colors.green.shade700 : Colors.orange.shade800,
+                  name: loaneeName,
+                  location: 'Route: $routeName • Acc #$accNo • $dateStr',
+                  amount: '₹ ${payment.paymentAmount.toStringAsFixed(2)}',
+                  status: '${payment.paymentType} • ${payment.status}',
+                  statusColor: payment.status.toLowerCase() == 'success'
+                      ? Colors.green.shade700
+                      : Colors.orange.shade800,
                   isCrossRoute: isCrossRoute,
                   assignedRoute: assignedRoute,
-                  entryRoute: entry.route,
+                  entryRoute: routeName,
                 );
               },
             ),
@@ -1403,6 +1544,8 @@ class HomePage extends StatelessWidget {
     switch (role) {
       case UserType.admin:
         return 'Executive Admin Portal';
+      case UserType.manager:
+        return 'Manager Monitoring Portal';
       case UserType.ro:
         return 'RO Officer Portal';
       case UserType.loanee:
@@ -2919,6 +3062,8 @@ class _AdminAllCollectionsLedgerSectionState
   String _searchQuery = '';
   String _selectedDateFilter = 'All'; // All, Today, Yesterday, This Week, This Month, Custom
   DateTime? _selectedCustomDate;
+  int _currentPage = 1;
+  int _rowsPerPage = 5; // Default 5 records per page
 
   @override
   void dispose() {
@@ -2975,6 +3120,7 @@ class _AdminAllCollectionsLedgerSectionState
       setState(() {
         _selectedCustomDate = picked;
         _selectedDateFilter = 'Custom';
+        _currentPage = 1;
       });
     }
   }
@@ -3320,6 +3466,7 @@ class _AdminAllCollectionsLedgerSectionState
             onChanged: (val) {
               setState(() {
                 _searchQuery = val;
+                _currentPage = 1;
               });
             },
           ),
@@ -3482,263 +3629,443 @@ class _AdminAllCollectionsLedgerSectionState
               ),
             ),
           ] else ...[
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: filteredPayments.length,
-              itemBuilder: (ctx, index) {
-                final payment = filteredPayments[index];
-                final card = widget.collectionProvider.getCardForPayment(payment);
-                final cardRoute = card?.route ?? '';
-                final roRoute = payment.roRoute ?? '';
-                final isCrossRoute = roRoute.isNotEmpty &&
-                    cardRoute.isNotEmpty &&
-                    roRoute.toLowerCase().trim() != cardRoute.toLowerCase().trim();
+            Builder(
+              builder: (context) {
+                final int totalCount = filteredPayments.length;
+                final int totalPages = totalCount > 0 ? (totalCount / _rowsPerPage).ceil() : 1;
+                if (_currentPage > totalPages) {
+                  _currentPage = totalPages;
+                }
+                if (_currentPage < 1) {
+                  _currentPage = 1;
+                }
 
-                final roDisplay = (payment.roName != null && payment.roName!.isNotEmpty)
-                    ? payment.roName!
-                    : 'Field Officer';
+                final int startIndex = (_currentPage - 1) * _rowsPerPage;
+                final int endIndex = min(startIndex + _rowsPerPage, totalCount);
+                final List<CollectionPaymentModel> pagedPayments = totalCount > 0
+                    ? filteredPayments.sublist(startIndex, endIndex)
+                    : [];
 
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withValues(alpha: 0.03),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Row 1: Loanee & Route Header
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          CircleAvatar(
-                            radius: 16,
-                            backgroundColor: Colors.green.shade50,
-                            child: Icon(Icons.arrow_downward_rounded,
-                                color: Colors.green.shade800, size: 16),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  card?.loaneeName ?? 'Card #${payment.collectionId}',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF1E1E1E),
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Cust: ${card?.customerId ?? 'N/A'} • Acc: ${card?.accountNumber ?? 'N/A'}',
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    color: Colors.grey.shade600,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                '₹ ${payment.paymentAmount.toStringAsFixed(2)}',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green.shade800,
-                                ),
+                return Column(
+                  children: [
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: pagedPayments.length,
+                      itemBuilder: (ctx, index) {
+                        final payment = pagedPayments[index];
+                        final card = widget.collectionProvider.getCardForPayment(payment);
+                        final cardRoute = card?.route ?? '';
+                        final roRoute = payment.roRoute ?? '';
+                        final isCrossRoute = roRoute.isNotEmpty &&
+                            cardRoute.isNotEmpty &&
+                            roRoute.toLowerCase().trim() != cardRoute.toLowerCase().trim();
+
+                        final roDisplay = (payment.roName != null && payment.roName!.isNotEmpty)
+                            ? payment.roName!
+                            : 'Field Officer';
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey.shade200),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.grey.withValues(alpha: 0.03),
+                                blurRadius: 4,
+                                offset: const Offset(0, 1),
                               ),
-                              if (payment.lateFine > 0)
-                                Text(
-                                  'Fine: ₹${payment.lateFine.toStringAsFixed(2)}',
-                                  style: TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.red.shade700,
-                                  ),
-                                ),
                             ],
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-
-                      // Row 2: Badges (Route, Mode, Remaining Due)
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.shade50,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: Colors.amber.shade200),
-                            ),
-                            child: Text(
-                              'Route: $cardRoute',
-                              style: TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.amber.shade900,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: Colors.blue.shade200),
-                            ),
-                            child: Text(
-                              payment.paymentType,
-                              style: TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue.shade900,
-                              ),
-                            ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            'Due: ₹ ${payment.remainingBalance.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.orange.shade800,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Divider(height: 14),
-
-                      // Row 3: Officer Attribution & Cross-Route Notice
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: payment.isAdminOrOfficeEntry
-                                  ? const Color(0xFF8B1A1A).withValues(alpha: 0.1)
-                                  : Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(
-                                color: payment.isAdminOrOfficeEntry
-                                    ? const Color(0xFF8B1A1A).withValues(alpha: 0.3)
-                                    : Colors.transparent,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  payment.isAdminOrOfficeEntry ? Icons.shield_rounded : Icons.person_outline_rounded,
-                                  size: 12,
-                                  color: payment.isAdminOrOfficeEntry ? const Color(0xFF8B1A1A) : Colors.grey.shade700,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  payment.isAdminOrOfficeEntry ? 'Admin: $roDisplay (Office)' : 'RO: $roDisplay',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: payment.isAdminOrOfficeEntry ? const Color(0xFF8B1A1A) : Colors.grey.shade800,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          InkWell(
-                            onTap: () =>
-                                _showPaymentReceiptDialog(context, payment, card),
-                            borderRadius: BorderRadius.circular(6),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1B5E20).withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Row 1: Loanee & Route Header
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Icon(Icons.visibility_outlined,
-                                      size: 11, color: Color(0xFF1B5E20)),
-                                  SizedBox(width: 3),
+                                  CircleAvatar(
+                                    radius: 16,
+                                    backgroundColor: Colors.green.shade50,
+                                    child: Icon(Icons.arrow_downward_rounded,
+                                        color: Colors.green.shade800, size: 16),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          card?.loaneeName ?? 'Card #${payment.collectionId}',
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFF1E1E1E),
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Cust: ${card?.customerId ?? 'N/A'} • Acc: ${card?.accountNumber ?? 'N/A'}',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            color: Colors.grey.shade600,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        '₹ ${payment.paymentAmount.toStringAsFixed(2)}',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.green.shade800,
+                                        ),
+                                      ),
+                                      if (payment.lateFine > 0)
+                                        Text(
+                                          'Fine: ₹${payment.lateFine.toStringAsFixed(2)}',
+                                          style: TextStyle(
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.red.shade700,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+
+                              // Row 2: Badges (Route, Mode, Remaining Due)
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.shade50,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.amber.shade200),
+                                    ),
+                                    child: Text(
+                                      'Route: $cardRoute',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.amber.shade900,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade50,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.blue.shade200),
+                                    ),
+                                    child: Text(
+                                      payment.paymentType,
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue.shade900,
+                                      ),
+                                    ),
+                                  ),
+                                  const Spacer(),
                                   Text(
-                                    'Receipt',
+                                    'Due: ₹ ${payment.remainingBalance.toStringAsFixed(2)}',
                                     style: TextStyle(
-                                      fontSize: 10,
+                                      fontSize: 10.5,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xFF1B5E20),
+                                      color: Colors.orange.shade800,
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                          ),
-                        ],
-                      ),
+                              const Divider(height: 14),
 
-                      if (isCrossRoute) ...[
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.deepPurple.shade50,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                                color: Colors.deepPurple.shade200),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.alt_route_rounded,
-                                  size: 12, color: Colors.deepPurple.shade700),
-                              const SizedBox(width: 5),
-                              Expanded(
-                                child: Text(
-                                  '⚡ Cross-Route: RO from "$roRoute" collected for "$cardRoute"',
-                                  style: TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.deepPurple.shade900,
+                              // Row 3: Officer Attribution & Cross-Route Notice
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: payment.isAdminOrOfficeEntry
+                                          ? const Color(0xFF8B1A1A).withValues(alpha: 0.1)
+                                          : Colors.grey.shade100,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(
+                                        color: payment.isAdminOrOfficeEntry
+                                            ? const Color(0xFF8B1A1A).withValues(alpha: 0.3)
+                                            : Colors.transparent,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          payment.isAdminOrOfficeEntry ? Icons.shield_rounded : Icons.person_outline_rounded,
+                                          size: 12,
+                                          color: payment.isAdminOrOfficeEntry ? const Color(0xFF8B1A1A) : Colors.grey.shade700,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          payment.isAdminOrOfficeEntry ? 'Admin: $roDisplay (Office)' : 'RO: $roDisplay',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: payment.isAdminOrOfficeEntry ? const Color(0xFF8B1A1A) : Colors.grey.shade800,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  InkWell(
+                                    onTap: () =>
+                                        _showPaymentReceiptDialog(context, payment, card),
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF1B5E20).withValues(alpha: 0.08),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.visibility_outlined,
+                                              size: 11, color: Color(0xFF1B5E20)),
+                                          SizedBox(width: 3),
+                                          Text(
+                                            'Receipt',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF1B5E20),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              if (isCrossRoute) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.deepPurple.shade50,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                        color: Colors.deepPurple.shade200),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.alt_route_rounded,
+                                          size: 12, color: Colors.deepPurple.shade700),
+                                      const SizedBox(width: 5),
+                                      Expanded(
+                                        child: Text(
+                                          '⚡ Cross-Route: RO from "$roRoute" collected for "$cardRoute"',
+                                          style: TextStyle(
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.deepPurple.shade900,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
+                              ],
+
+                              const SizedBox(height: 4),
+                              Text(
+                                'Time: ${payment.createdAt.toString().split('.')[0]}',
+                                style: TextStyle(fontSize: 9.5, color: Colors.grey.shade500),
                               ),
                             ],
                           ),
-                        ),
-                      ],
-
-                      const SizedBox(height: 4),
-                      Text(
-                        'Time: ${payment.createdAt.toString().split('.')[0]}',
-                        style: TextStyle(fontSize: 9.5, color: Colors.grey.shade500),
-                      ),
-                    ],
-                  ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _buildPaginationControls(
+                      totalCount: totalCount,
+                      totalPages: totalPages,
+                      startIndex: startIndex,
+                      endIndex: endIndex,
+                    ),
+                  ],
                 );
               },
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationControls({
+    required int totalCount,
+    required int totalPages,
+    required int startIndex,
+    required int endIndex,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Entries indicator
+              Text(
+                'Showing ${startIndex + 1}–$endIndex of $totalCount entries',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade700,
+                ),
+              ),
+
+              // Rows Per Page Selector
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Per Page: ',
+                    style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                  ),
+                  DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      value: _rowsPerPage,
+                      isDense: true,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1B5E20),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 5, child: Text('5')),
+                        DropdownMenuItem(value: 10, child: Text('10')),
+                        DropdownMenuItem(value: 20, child: Text('20')),
+                        DropdownMenuItem(value: 50, child: Text('50')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null && val != _rowsPerPage) {
+                          setState(() {
+                            _rowsPerPage = val;
+                            _currentPage = 1;
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Divider(height: 1),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // First Page Button
+              IconButton(
+                icon: const Icon(Icons.first_page_rounded),
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                color: _currentPage > 1 ? const Color(0xFF1B5E20) : Colors.grey.shade400,
+                onPressed: _currentPage > 1
+                    ? () => setState(() => _currentPage = 1)
+                    : null,
+                tooltip: 'First Page',
+              ),
+              const SizedBox(width: 4),
+
+              // Previous Page Button
+              IconButton(
+                icon: const Icon(Icons.chevron_left_rounded),
+                iconSize: 20,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                color: _currentPage > 1 ? const Color(0xFF1B5E20) : Colors.grey.shade400,
+                onPressed: _currentPage > 1
+                    ? () => setState(() => _currentPage -= 1)
+                    : null,
+                tooltip: 'Previous Page',
+              ),
+              const SizedBox(width: 8),
+
+              // Page badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1B5E20),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Page $_currentPage of $totalPages',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Next Page Button
+              IconButton(
+                icon: const Icon(Icons.chevron_right_rounded),
+                iconSize: 20,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                color: _currentPage < totalPages ? const Color(0xFF1B5E20) : Colors.grey.shade400,
+                onPressed: _currentPage < totalPages
+                    ? () => setState(() => _currentPage += 1)
+                    : null,
+                tooltip: 'Next Page',
+              ),
+              const SizedBox(width: 4),
+
+              // Last Page Button
+              IconButton(
+                icon: const Icon(Icons.last_page_rounded),
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                color: _currentPage < totalPages ? const Color(0xFF1B5E20) : Colors.grey.shade400,
+                onPressed: _currentPage < totalPages
+                    ? () => setState(() => _currentPage = totalPages)
+                    : null,
+                tooltip: 'Last Page',
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -3752,6 +4079,7 @@ class _AdminAllCollectionsLedgerSectionState
         setState(() {
           _selectedDateFilter = label;
           if (label != 'Custom') _selectedCustomDate = null;
+          _currentPage = 1;
         });
       },
       borderRadius: BorderRadius.circular(14),
@@ -3770,6 +4098,155 @@ class _AdminAllCollectionsLedgerSectionState
             fontSize: 10.5,
             fontWeight: FontWeight.bold,
             color: isSelected ? Colors.white : Colors.grey.shade800,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =========================================================
+// MANAGER DASHBOARD SUMMARY CARD (WITH TOGGLEABLE BALANCES)
+// =========================================================
+class _ManagerBalanceSummaryCard extends StatefulWidget {
+  final double grandTotalCollected;
+  final double remainingBalance;
+
+  const _ManagerBalanceSummaryCard({
+    required this.grandTotalCollected,
+    required this.remainingBalance,
+  });
+
+  @override
+  State<_ManagerBalanceSummaryCard> createState() => _ManagerBalanceSummaryCardState();
+}
+
+class _ManagerBalanceSummaryCardState extends State<_ManagerBalanceSummaryCard> {
+  bool _showBalances = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF8B1A1A), Color(0xFF5E0F0F)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8B1A1A).withValues(alpha: 0.35),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            setState(() {
+              _showBalances = !_showBalances;
+            });
+          },
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.dashboard_rounded, size: 16, color: Colors.white70),
+                        SizedBox(width: 6),
+                        Text(
+                          'TOTAL SANCTIONED',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white70,
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'MANAGER MONITORING',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Divider(color: Colors.white24, height: 1),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Total Recovered',
+                            style: TextStyle(fontSize: 11.5, color: Colors.white70),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _showBalances
+                                ? '₹ ${widget.grandTotalCollected.toStringAsFixed(2)}'
+                                : '₹ ${widget.grandTotalCollected.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Total Due Remaining',
+                            style: TextStyle(fontSize: 11.5, color: Colors.white70),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _showBalances
+                                ? '₹ ${widget.remainingBalance.toStringAsFixed(2)}'
+                                : '₹ ${widget.remainingBalance.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.amberAccent,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -1,8 +1,8 @@
-// lib/screens/route_management_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/user_model.dart';
 import '../models/route_model.dart';
+import '../providers/auth_provider.dart';
 import '../providers/collection_sheet_provider.dart';
 
 class RouteManagementPage extends StatefulWidget {
@@ -307,6 +307,9 @@ class _RouteManagementPageState extends State<RouteManagementPage> {
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final bool isAdmin = authProvider.activeRole == UserType.admin;
+
     final provider = Provider.of<CollectionSheetProvider>(context);
     final allRoutes = provider.routes;
     final collectionEntries = provider.collectionEntries;
@@ -321,18 +324,20 @@ class _RouteManagementPageState extends State<RouteManagementPage> {
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: Colors.amber.shade700,
-        onPressed: () => _showAddRouteDialog(context),
-        icon: const Icon(Icons.add_rounded, color: Colors.white),
-        label: const Text(
-          'New Route Master',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
+      floatingActionButton: isAdmin
+          ? FloatingActionButton.extended(
+              backgroundColor: Colors.amber.shade700,
+              onPressed: () => _showAddRouteDialog(context),
+              icon: const Icon(Icons.add_rounded, color: Colors.white),
+              label: const Text(
+                'New Route Master',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            )
+          : null,
       body: Column(
         children: [
           // Header Banner matching Loanee Accounts design
@@ -575,47 +580,48 @@ class _RouteManagementPageState extends State<RouteManagementPage> {
                                       ),
                                     ),
                                   ),
-                                  PopupMenuButton<String>(
-                                    icon: const Icon(Icons.more_vert_rounded),
-                                    onSelected: (action) {
-                                      if (action == 'edit') {
-                                        _showAddRouteDialog(
-                                          context,
-                                          existingRoute: route,
-                                        );
-                                      } else if (action == 'delete') {
-                                        _confirmDeleteRouteSweetAlert(context, route);
-                                      }
-                                    },
-                                    itemBuilder: (context) => [
-                                      const PopupMenuItem(
-                                        value: 'edit',
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.edit_outlined, size: 18),
-                                            SizedBox(width: 8),
-                                            Text('Edit Master'),
-                                          ],
+                                  if (isAdmin)
+                                    PopupMenuButton<String>(
+                                      icon: const Icon(Icons.more_vert_rounded),
+                                      onSelected: (action) {
+                                        if (action == 'edit') {
+                                          _showAddRouteDialog(
+                                            context,
+                                            existingRoute: route,
+                                          );
+                                        } else if (action == 'delete') {
+                                          _confirmDeleteRouteSweetAlert(context, route);
+                                        }
+                                      },
+                                      itemBuilder: (context) => [
+                                        const PopupMenuItem(
+                                          value: 'edit',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.edit_outlined, size: 18),
+                                              SizedBox(width: 8),
+                                              Text('Edit Master'),
+                                            ],
+                                          ),
                                         ),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'delete',
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.delete_outline,
-                                                size: 18, color: Colors.red),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              'Delete Route',
-                                              style: TextStyle(
-                                                color: Colors.red.shade700,
+                                        PopupMenuItem(
+                                          value: 'delete',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.delete_outline,
+                                                  size: 18, color: Colors.red),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                'Delete Route',
+                                                style: TextStyle(
+                                                  color: Colors.red.shade700,
+                                                ),
                                               ),
-                                            ),
-                                          ],
+                                            ],
+                                          ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
+                                      ],
+                                    ),
                                 ],
                               ),
                               if (route.description.isNotEmpty) ...[

@@ -1,4 +1,4 @@
-enum UserType { admin, ro, loanee }
+enum UserType { admin, manager, ro, loanee }
 
 class User {
   final String name;
@@ -7,6 +7,7 @@ class User {
   final String? customerId;
   final String? roName;
   final String? accountName;
+  final String status;
 
   User({
     required this.name,
@@ -15,13 +16,37 @@ class User {
     this.customerId,
     this.roName,
     this.accountName,
+    this.status = 'Active',
   });
+
+  bool get isActive => status.toLowerCase() != 'inactive';
+
+  User copyWith({
+    String? name,
+    String? mobileNo,
+    UserType? userType,
+    String? customerId,
+    String? roName,
+    String? accountName,
+    String? status,
+  }) {
+    return User(
+      name: name ?? this.name,
+      mobileNo: mobileNo ?? this.mobileNo,
+      userType: userType ?? this.userType,
+      customerId: customerId ?? this.customerId,
+      roName: roName ?? this.roName,
+      accountName: accountName ?? this.accountName,
+      status: status ?? this.status,
+    );
+  }
 
   factory User.fromJson(Map<String, dynamic> json) {
     UserType parseUserType(String? val) {
       if (val == null) return UserType.loanee;
       final clean = val.toLowerCase().replaceAll('usertype.', '');
       if (clean == 'admin') return UserType.admin;
+      if (clean == 'manager') return UserType.manager;
       if (clean == 'ro') return UserType.ro;
       return UserType.loanee;
     }
@@ -33,6 +58,7 @@ class User {
       customerId: json['customerId']?.toString() ?? json['customer_id']?.toString(),
       roName: json['roName']?.toString() ?? json['ro_name']?.toString(),
       accountName: json['accountName']?.toString() ?? json['account_name']?.toString(),
+      status: json['status']?.toString() ?? 'Active',
     );
   }
 
@@ -44,6 +70,7 @@ class User {
       'customerId': customerId,
       'roName': roName,
       'accountName': accountName,
+      'status': status,
     };
   }
 }
@@ -57,6 +84,7 @@ class UserAuthRecord {
   final String name;
   final String? roName;
   final String? accountName;
+  final String status;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -69,20 +97,52 @@ class UserAuthRecord {
     required this.name,
     this.roName,
     this.accountName,
+    this.status = 'Active',
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
-  factory UserAuthRecord.fromJson(Map<String, dynamic> json) {
-    UserType parseUserType(String? val) {
-      if (val == null) return UserType.loanee;
-      final clean = val.toLowerCase().replaceAll('usertype.', '');
-      if (clean == 'admin') return UserType.admin;
-      if (clean == 'ro') return UserType.ro;
-      return UserType.loanee;
-    }
+  bool get isActive => status.toLowerCase() != 'inactive';
 
+  static UserType parseUserType(String? val) {
+    if (val == null) return UserType.loanee;
+    final clean = val.toLowerCase().replaceAll('usertype.', '');
+    if (clean == 'admin') return UserType.admin;
+    if (clean == 'manager') return UserType.manager;
+    if (clean == 'ro') return UserType.ro;
+    return UserType.loanee;
+  }
+
+  UserAuthRecord copyWith({
+    String? id,
+    String? mobileNo,
+    String? customerId,
+    UserType? userType,
+    String? pin,
+    String? name,
+    String? roName,
+    String? accountName,
+    String? status,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return UserAuthRecord(
+      id: id ?? this.id,
+      mobileNo: mobileNo ?? this.mobileNo,
+      customerId: customerId ?? this.customerId,
+      userType: userType ?? this.userType,
+      pin: pin ?? this.pin,
+      name: name ?? this.name,
+      roName: roName ?? this.roName,
+      accountName: accountName ?? this.accountName,
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  factory UserAuthRecord.fromJson(Map<String, dynamic> json) {
     return UserAuthRecord(
       id: json['id']?.toString() ?? json['mobile_no']?.toString() ?? '',
       mobileNo: json['mobile_no']?.toString() ?? json['mobileNo']?.toString() ?? '',
@@ -92,6 +152,7 @@ class UserAuthRecord {
       name: json['name']?.toString() ?? '',
       roName: json['ro_name']?.toString() ?? json['roName']?.toString(),
       accountName: json['account_name']?.toString() ?? json['accountName']?.toString(),
+      status: json['status']?.toString() ?? 'Active',
       createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now() : DateTime.now(),
       updatedAt: json['updated_at'] != null ? DateTime.tryParse(json['updated_at'].toString()) ?? DateTime.now() : DateTime.now(),
     );
@@ -107,6 +168,7 @@ class UserAuthRecord {
       'name': name,
       'ro_name': roName,
       'account_name': accountName,
+      'status': status,
       'updated_at': DateTime.now().toIso8601String(),
     };
   }
@@ -119,6 +181,7 @@ class UserAuthRecord {
       customerId: customerId,
       roName: roName,
       accountName: accountName,
+      status: status,
     );
   }
 }

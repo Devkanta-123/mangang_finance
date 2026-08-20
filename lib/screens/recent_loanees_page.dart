@@ -1,8 +1,8 @@
-// lib/screens/recent_loanees_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/user_model.dart';
 import '../models/loanee_model.dart';
+import '../providers/auth_provider.dart';
 import '../providers/loanee_provider.dart';
 
 class RecentLoaneesPage extends StatefulWidget {
@@ -100,111 +100,192 @@ class _RecentLoaneesPageState extends State<RecentLoaneesPage> {
     }
   }
 
-  void _showLoaneeDetailsDialog(BuildContext context, LoaneeAccount account) {
+  void _showLoaneeDetailsDialog(BuildContext context, LoaneeAccount account, bool isAdmin) {
+    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        titlePadding: EdgeInsets.zero,
-        title: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF1E1E1E), Color(0xFF2C2C2C)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-          ),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: Colors.amber.shade700,
-                child: Text(
-                  account.loaneeName.isNotEmpty
-                      ? account.loaneeName[0].toUpperCase()
-                      : 'L',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final currentAccount = loaneeProvider.loanees.firstWhere(
+            (l) => l.customerId.toLowerCase() == account.customerId.toLowerCase(),
+            orElse: () => account,
+          );
+          final bool isCurrentActive = currentAccount.isActive;
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            titlePadding: EdgeInsets.zero,
+            title: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF1E1E1E), Color(0xFF2C2C2C)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(18),
+                  topRight: Radius.circular(18),
+                ),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: const Color(0xFF8B1A1A),
+                    child: const Icon(Icons.person_rounded, color: Colors.white, size: 22),
                   ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      account.loaneeName,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          currentAccount.loaneeName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        Text(
+                          'Cust ID: ${currentAccount.customerId}',
+                          style: const TextStyle(fontSize: 12, color: Colors.white70),
+                        ),
+                      ],
                     ),
-                    Text(
-                      '${account.customerId} • ${account.accountNumber}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.white.withValues(alpha: 0.75),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                    onPressed: () => Navigator.pop(dialogContext),
+                  ),
+                ],
               ),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white),
-                onPressed: () => Navigator.pop(ctx),
-              ),
-            ],
-          ),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildModalSectionTitle('LOANEE PARTICULARS'),
-              _buildModalRow('Customer ID', account.customerId, Icons.badge_outlined),
-              _buildModalRow('Account Number', account.accountNumber, Icons.account_balance_wallet_outlined),
-              _buildModalRow('Mobile Number', account.mobileNo, Icons.phone_android_rounded),
-              _buildModalRow('W/O, S/O, D/O', account.guardianName.isNotEmpty ? account.guardianName : 'N/A', Icons.people_outline_rounded),
-              _buildModalRow('Aadhar Number', account.aadharNo.isNotEmpty ? account.aadharNo : 'N/A', Icons.credit_card_rounded),
-              _buildModalRow('Business Type', account.businesstype.isNotEmpty ? account.businesstype : 'N/A', Icons.storefront_outlined),
-              _buildModalRow('Address', '${account.address}, ${account.district}', Icons.location_on_outlined),
-              _buildModalRow('Police Station', account.policeStation.isNotEmpty ? account.policeStation : 'N/A', Icons.local_police_outlined),
-              _buildModalRow('Post Office', account.postOffice.isNotEmpty ? account.postOffice : 'N/A', Icons.markunread_mailbox_outlined),
-              _buildModalRow('PIN Code', account.pinCode.isNotEmpty ? account.pinCode : 'N/A', Icons.pin_drop_outlined),
-
-              const Divider(height: 20),
-              _buildModalSectionTitle('LOAN & FINANCIAL STATS'),
-              _buildModalRow('Sanctioned Amount', '₹ ${account.loanAmount.toStringAsFixed(2)}', Icons.currency_rupee_rounded, valueColor: Colors.black87),
-              _buildModalRow('Total Paid Amount', '₹ ${account.paidAmount.toStringAsFixed(2)}', Icons.payments_outlined, valueColor: Colors.green.shade800),
-              _buildModalRow('Remaining Due Balance', '₹ ${account.dueAmount.toStringAsFixed(2)}', Icons.money_off_rounded, valueColor: Colors.orange.shade900),
-
-              const Divider(height: 20),
-              _buildModalSectionTitle('WITNESS & REGISTRATION'),
-              _buildModalRow('Witness Name', account.witnessName.isNotEmpty ? account.witnessName : 'N/A', Icons.person_outline_rounded),
-              _buildModalRow('Witness Mobile', account.witnessMobileNo.isNotEmpty ? account.witnessMobileNo : 'N/A', Icons.phone_outlined),
-              _buildModalRow('Registration Date', account.createdAt.toString().split('.')[0], Icons.calendar_today_outlined),
-              _buildModalRow('Account Status', account.status, Icons.verified_user_outlined, valueColor: Colors.green.shade700),
-            ],
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF8B1A1A),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-        ],
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Status Bar Toggle Box
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isCurrentActive ? Colors.green.shade50 : Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isCurrentActive ? Colors.green.shade300 : Colors.red.shade300,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Account Status',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isCurrentActive ? Colors.green.shade900 : Colors.red.shade900,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isCurrentActive
+                                  ? 'ACTIVE (Login Allowed)'
+                                  : 'INACTIVE (Login Blocked)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: isCurrentActive ? Colors.green.shade900 : Colors.red.shade900,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (isAdmin)
+                          Transform.scale(
+                            scale: 0.85,
+                            child: Switch(
+                              value: isCurrentActive,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              activeColor: Colors.green.shade700,
+                              activeTrackColor: Colors.green.shade200,
+                              inactiveThumbColor: Colors.red.shade700,
+                              inactiveTrackColor: Colors.red.shade200,
+                              onChanged: (val) async {
+                                final willBeActive = !isCurrentActive;
+                                final newStatus = willBeActive ? 'Active' : 'Inactive';
+                                await loaneeProvider.updateStatus(currentAccount.customerId, newStatus);
+                                setDialogState(() {});
+                                  if (context.mounted) {
+                                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        willBeActive
+                                            ? 'Account for ${currentAccount.loaneeName} is now ACTIVE'
+                                            : 'Account for ${currentAccount.loaneeName} is now INACTIVE',
+                                      ),
+                                      backgroundColor: willBeActive ? Colors.green.shade800 : Colors.red.shade800,
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  _buildModalSectionTitle('LOANEE PARTICULARS'),
+                  _buildModalRow('Customer ID', currentAccount.customerId, Icons.badge_outlined),
+                  _buildModalRow('Account Number', currentAccount.accountNumber, Icons.account_balance_wallet_outlined),
+                  _buildModalRow('Mobile Number', currentAccount.mobileNo, Icons.phone_android_rounded),
+                  _buildModalRow('W/O, S/O, D/O', currentAccount.guardianName.isNotEmpty ? currentAccount.guardianName : 'N/A', Icons.people_outline_rounded),
+                  _buildModalRow('Aadhar Number', currentAccount.aadharNo.isNotEmpty ? currentAccount.aadharNo : 'N/A', Icons.credit_card_rounded),
+                  _buildModalRow('Business Type', currentAccount.businesstype.isNotEmpty ? currentAccount.businesstype : 'N/A', Icons.storefront_outlined),
+                  _buildModalRow('Address', '${currentAccount.address}, ${currentAccount.district}', Icons.location_on_outlined),
+                  _buildModalRow('Police Station', currentAccount.policeStation.isNotEmpty ? currentAccount.policeStation : 'N/A', Icons.local_police_outlined),
+                  _buildModalRow('Post Office', currentAccount.postOffice.isNotEmpty ? currentAccount.postOffice : 'N/A', Icons.markunread_mailbox_outlined),
+                  _buildModalRow('PIN Code', currentAccount.pinCode.isNotEmpty ? currentAccount.pinCode : 'N/A', Icons.pin_drop_outlined),
+
+                  const Divider(height: 20),
+                  _buildModalSectionTitle('LOAN & FINANCIAL STATS'),
+                  _buildModalRow('Sanctioned Amount', '₹ ${currentAccount.loanAmount.toStringAsFixed(2)}', Icons.currency_rupee_rounded, valueColor: Colors.black87),
+                  _buildModalRow('Total Paid Amount', '₹ ${currentAccount.paidAmount.toStringAsFixed(2)}', Icons.payments_outlined, valueColor: Colors.green.shade800),
+                  _buildModalRow('Remaining Due Balance', '₹ ${currentAccount.dueAmount.toStringAsFixed(2)}', Icons.money_off_rounded, valueColor: Colors.orange.shade900),
+
+                  const Divider(height: 20),
+                  _buildModalSectionTitle('WITNESS & REGISTRATION'),
+                  _buildModalRow('Witness Name', currentAccount.witnessName.isNotEmpty ? currentAccount.witnessName : 'N/A', Icons.person_outline_rounded),
+                  _buildModalRow('Witness Mobile', currentAccount.witnessMobileNo.isNotEmpty ? currentAccount.witnessMobileNo : 'N/A', Icons.phone_outlined),
+                  _buildModalRow('Registration Date', currentAccount.createdAt.toString().split('.')[0], Icons.calendar_today_outlined),
+                  _buildModalRow(
+                    'Account Status',
+                    currentAccount.status,
+                    Icons.verified_user_outlined,
+                    valueColor: isCurrentActive ? Colors.green.shade700 : Colors.red.shade700,
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF8B1A1A),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -257,6 +338,9 @@ class _RecentLoaneesPageState extends State<RecentLoaneesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final bool isAdmin = authProvider.activeRole == UserType.admin;
+
     final loaneeProvider = Provider.of<LoaneeProvider>(context);
     final allLoanees = loaneeProvider.loanees;
     final filteredLoanees = _getFilteredLoanees(allLoanees);
@@ -654,16 +738,79 @@ class _RecentLoaneesPageState extends State<RecentLoaneesPage> {
                                 children: [
                                   Row(
                                     children: [
-                                      Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey.shade600),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Reg: ${account.createdAt.toString().split(' ')[0]}',
-                                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                        decoration: BoxDecoration(
+                                          color: account.isActive ? Colors.green.shade50 : Colors.red.shade50,
+                                          borderRadius: BorderRadius.circular(16),
+                                          border: Border.all(
+                                            color: account.isActive ? Colors.green.shade300 : Colors.red.shade300,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                              width: 5,
+                                              height: 5,
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: account.isActive ? Colors.green.shade700 : Colors.red.shade700,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 3),
+                                            Text(
+                                              account.isActive ? 'ACTIVE' : 'INACTIVE',
+                                              style: TextStyle(
+                                                fontSize: 8.5,
+                                                fontWeight: FontWeight.bold,
+                                                color: account.isActive ? Colors.green.shade800 : Colors.red.shade800,
+                                                letterSpacing: 0.3,
+                                              ),
+                                            ),
+                                            if (isAdmin) ...[
+                                              const SizedBox(width: 4),
+                                              Transform.scale(
+                                                scale: 0.65,
+                                                child: SizedBox(
+                                                  width: 36,
+                                                  height: 20,
+                                                  child: Switch(
+                                                    value: account.isActive,
+                                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                    activeColor: Colors.green.shade700,
+                                                    activeTrackColor: Colors.green.shade200,
+                                                    inactiveThumbColor: Colors.red.shade700,
+                                                    inactiveTrackColor: Colors.red.shade200,
+                                                    onChanged: (val) async {
+                                                      final willBeActive = !account.isActive;
+                                                      final newStatus = willBeActive ? 'Active' : 'Inactive';
+                                                      await loaneeProvider.updateStatus(account.customerId, newStatus);
+                                                      if (context.mounted) {
+                                                        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(
+                                                            content: Text(
+                                                              willBeActive
+                                                                  ? 'Account for ${account.loaneeName} is now ACTIVE'
+                                                                  : 'Account for ${account.loaneeName} is now INACTIVE',
+                                                            ),
+                                                            backgroundColor: willBeActive ? Colors.green.shade800 : Colors.red.shade800,
+                                                          ),
+                                                        );
+                                                      }
+                                                    },
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
                                       ),
                                     ],
                                   ),
                                   InkWell(
-                                    onTap: () => _showLoaneeDetailsDialog(context, account),
+                                    onTap: () => _showLoaneeDetailsDialog(context, account, isAdmin),
                                     borderRadius: BorderRadius.circular(6),
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

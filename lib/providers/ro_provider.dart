@@ -15,6 +15,12 @@ class RoProvider extends ChangeNotifier {
 
   List<RoAccount> get roAccounts => List.unmodifiable(_roAccounts);
 
+  void setRoAccountsForTesting(List<RoAccount> accounts) {
+    _roAccounts.clear();
+    _roAccounts.addAll(accounts);
+    notifyListeners();
+  }
+
   int get totalRoAccounts => _roAccounts.length;
   int get totalRos => _roAccounts.length;
 
@@ -50,13 +56,47 @@ class RoProvider extends ChangeNotifier {
     _isSyncing = true;
     notifyListeners();
 
-    final remoteRos = await SupabaseService.instance.fetchRoAccounts();
-    if (remoteRos != null) {
-      _roAccounts.clear();
-      _roAccounts.addAll(remoteRos);
+    try {
+      final remoteRos = await SupabaseService.instance.fetchRoAccounts();
+      if (remoteRos != null) {
+        _roAccounts.clear();
+        _roAccounts.addAll(remoteRos);
+      }
+    } catch (e) {
+      debugPrint('❌ Error in RoProvider.fetchFromSupabase: $e');
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
     }
-    _isSyncing = false;
-    notifyListeners();
+  }
+
+  /// Update account status for an RO in-memory & in Supabase table
+  Future<bool> updateStatus(String customerId, String newStatus) async {
+    final cleanCust = customerId.trim().toLowerCase();
+    int foundIndex = -1;
+    for (int i = 0; i < _roAccounts.length; i++) {
+      if (_roAccounts[i].customerId.trim().toLowerCase() == cleanCust ||
+          _roAccounts[i].mobileNo.trim() == customerId.trim() ||
+          _roAccounts[i].roName.trim().toLowerCase() == cleanCust) {
+        foundIndex = i;
+        break;
+      }
+    }
+
+    if (foundIndex != -1) {
+      _roAccounts[foundIndex] = _roAccounts[foundIndex].copyWith(status: newStatus);
+      notifyListeners();
+    }
+
+    // Persist live to Supabase
+    final success = await SupabaseService.instance.updateRoStatus(customerId, newStatus);
+    return success;
+  }
+
+  /// Toggle status between Active and Inactive
+  Future<bool> toggleStatus(RoAccount ro) async {
+    final nextStatus = ro.isActive ? 'Inactive' : 'Active';
+    return await updateStatus(ro.customerId, nextStatus);
   }
 
   String generateNextCustomerId() {

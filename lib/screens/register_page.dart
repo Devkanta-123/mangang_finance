@@ -25,12 +25,14 @@ class _RegisterPageState extends State<RegisterPage> {
 
   final Map<UserType, String> _userTypeLabels = {
     UserType.admin: 'Admin',
+    UserType.manager: 'Manager',
     UserType.ro: 'RO',
     UserType.loanee: 'Loanee',
   };
 
   final Map<UserType, IconData> _userTypeIcons = {
     UserType.admin: Icons.admin_panel_settings,
+    UserType.manager: Icons.supervisor_account_rounded,
     UserType.ro: Icons.person_outline,
     UserType.loanee: Icons.person,
   };
@@ -44,8 +46,10 @@ class _RegisterPageState extends State<RegisterPage> {
       await Future.delayed(const Duration(milliseconds: 300));
 
       String userName;
-      if (_selectedUserType == UserType.admin) {
-        userName = _nameController.text.trim();
+      if (_selectedUserType == UserType.admin || _selectedUserType == UserType.manager) {
+        userName = _nameController.text.trim().isNotEmpty
+            ? _nameController.text.trim()
+            : (_selectedUserType == UserType.manager ? 'Branch Manager' : 'Administrator');
       } else if (_selectedUserType == UserType.ro) {
         userName = _roNameController.text.trim().isNotEmpty
             ? _roNameController.text.trim()
@@ -61,7 +65,9 @@ class _RegisterPageState extends State<RegisterPage> {
         name: userName,
         mobileNo: _mobileController.text.trim(),
         userType: _selectedUserType,
-        customerId: _selectedUserType != UserType.admin ? _customerIdController.text.trim() : null,
+        customerId: (_selectedUserType != UserType.admin && _selectedUserType != UserType.manager)
+            ? _customerIdController.text.trim()
+            : (_selectedUserType == UserType.manager ? 'MGR-01' : 'ADM-01'),
         roName: _selectedUserType == UserType.ro ? _roNameController.text.trim() : null,
         accountName: _selectedUserType == UserType.loanee ? _accountNameController.text.trim() : null,
       );
@@ -332,8 +338,8 @@ class _RegisterPageState extends State<RegisterPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Full Name Field (ONLY for Admin)
-        if (_selectedUserType == UserType.admin) ...[
+        // Full Name Field (for Admin and Manager)
+        if (_selectedUserType == UserType.admin || _selectedUserType == UserType.manager) ...[
           _buildFieldLabel('Full Name'),
           CustomTextField(
             controller: _nameController,
@@ -350,7 +356,7 @@ class _RegisterPageState extends State<RegisterPage> {
         ],
         
         // Customer ID (for RO and Loanee)
-        if (_selectedUserType != UserType.admin) ...[
+        if (_selectedUserType != UserType.admin && _selectedUserType != UserType.manager) ...[
           _buildFieldLabel('Customer ID'),
           CustomTextField(
             controller: _customerIdController,

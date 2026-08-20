@@ -223,6 +223,70 @@ class AppDrawer extends StatelessWidget {
           subtitle: 'Account details & security PIN',
         ),
       ];
+    } else if (role == UserType.manager) {
+      // MANAGER ROLE (Strictly Monitoring - No Entry Menus)
+      return [
+        DrawerMenuItemData(
+          index: 0,
+          icon: Icons.dashboard_rounded,
+          title: 'Manager Dashboard',
+          subtitle: 'Monitoring & collection overview',
+          badge: 'MANAGER',
+          badgeColor: const Color(0xFF8B1A1A),
+        ),
+        DrawerMenuItemData(
+          index: 12,
+          icon: Icons.admin_panel_settings_rounded,
+          title: 'Admin User',
+          subtitle: 'Monitor administrator accounts',
+          badge: 'ADMIN',
+          badgeColor: const Color(0xFF8B1A1A),
+        ),
+        DrawerMenuItemData(
+          index: 2,
+          icon: Icons.people_alt_rounded,
+          title: 'Loanee Accounts List',
+          subtitle: 'Monitor all registered loanees',
+        ),
+        DrawerMenuItemData(
+          index: 4,
+          icon: Icons.manage_accounts_rounded,
+          title: 'RO Accounts List',
+          subtitle: 'Monitor RO field officers',
+        ),
+        DrawerMenuItemData(
+          index: 6,
+          icon: Icons.table_chart_rounded,
+          title: 'Collection Sheet',
+          subtitle: 'View route sheets & payment ledgers',
+        ),
+        DrawerMenuItemData(
+          index: 7,
+          icon: Icons.alt_route_rounded,
+          title: 'Master Routes',
+          subtitle: 'View master route definitions',
+        ),
+        DrawerMenuItemData(
+          index: 9,
+          icon: Icons.recent_actors_rounded,
+          title: 'Recent Registered Loanees',
+          subtitle: 'New customer registrations & loans',
+          badge: 'NEW',
+          badgeColor: Colors.green.shade700,
+        ),
+        DrawerMenuItemData(
+          index: 11,
+          icon: Icons.timer_off_rounded,
+          title: 'Late Fines & Penalties',
+          subtitle: 'Live overdue & penalty tracking',
+        ),
+        DrawerMenuItemData(
+          index: 8,
+          icon: Icons.account_circle_rounded,
+          title: 'Manager Profile',
+          subtitle: 'Account details & security PIN',
+        ),
+      ];
     } else if (role == UserType.ro) {
       // RO ROLE
       return [
@@ -256,12 +320,6 @@ class AppDrawer extends StatelessWidget {
           subtitle: 'Loan card & repayment overview',
         ),
         DrawerMenuItemData(
-          index: 11,
-          icon: Icons.gavel_rounded,
-          title: 'Late Fine & Overdue Notice',
-          subtitle: 'Overdue assessment & acknowledgment',
-        ),
-        DrawerMenuItemData(
           index: 8,
           icon: Icons.badge_outlined,
           title: 'Loanee Profile',
@@ -290,25 +348,30 @@ class AppDrawer extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Row(
-            children: [
-              AppLogo(
-                width: 44,
-                height: 44,
-                fallbackIcon: Icons.account_balance_wallet,
-                fallbackIconColor: Colors.amber,
-              ),
-              SizedBox(width: 10),
-              Text(
-                'MANGANG FINANCE',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  letterSpacing: 0.5,
+          const Expanded(
+            child: Row(
+              children: [
+                AppLogo(
+                  width: 44,
+                  height: 44,
+                  fallbackIcon: Icons.account_balance_wallet,
+                  fallbackIconColor: Colors.amber,
                 ),
-              ),
-            ],
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'MANGANG FINANCE',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      letterSpacing: 0.5,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.close_rounded, color: Colors.white70),
@@ -360,7 +423,9 @@ class AppDrawer extends StatelessWidget {
                 ? Border.all(color: Colors.amber.shade300)
                 : null),
       ),
-      child: ListTile(
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         dense: true,
         leading: Container(
@@ -421,13 +486,16 @@ class AppDrawer extends StatelessWidget {
                 : null),
         onTap: () => onMenuSelected(index),
       ),
-    );
-  }
+    ),
+  );
+}
 
   String _getRoleBadge(UserType role) {
     switch (role) {
       case UserType.admin:
         return 'ADMIN';
+      case UserType.manager:
+        return 'MANAGER';
       case UserType.ro:
         return 'RO';
       case UserType.loanee:

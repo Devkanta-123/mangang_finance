@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/ro_collection_entry_model.dart';
 import '../models/collection_payment_model.dart';
+import '../models/investment_model.dart';
 import '../services/supabase_service.dart';
 
 class WeeklyBreakdown {
@@ -75,19 +76,23 @@ class LoaneeLateFineStatus {
 }
 
 class SettingsProvider extends ChangeNotifier {
-  // Default values as specified:
-  // Daily Late Fine: default ₹3 per day
-  // Weekly Late Fine: default ₹25 per week
-  // Weekly Installment Scheme: ₹650 per week for 17.5 weeks tenure
   double _dailyLateFine = 3.0;
   double _weeklyLateFine = 25.0;
   double _weeklyInstallmentAmount = 650.0;
   double _weeklyTenureWeeks = 17.5;
 
+  // Investment Settings (Single Source of Truth: Supabase system_settings table)
+  // No localStorage or SharedPreferences used for calculation rules
+  InvestmentSettingsModel _investmentSettings = const InvestmentSettingsModel(
+    baseAmount: 10000.0,
+    interestAmount: 1500.0,
+    interestRate: 15.0,
+  );
+
   bool _isLoading = true;
   DateTime? _lastUpdated;
 
-  // SharedPreferences keys
+  // SharedPreferences keys for late payment UI cache
   static const String _keyDailyLateFine = 'mangang_daily_late_fine';
   static const String _keyWeeklyLateFine = 'mangang_weekly_late_fine';
   static const String _keyWeeklyInstallment = 'mangang_weekly_installment_amt';
@@ -104,72 +109,88 @@ class SettingsProvider extends ChangeNotifier {
   double get weeklyTenureWeeks => _weeklyTenureWeeks;
   double get totalWeeklyTenureAmount => _weeklyInstallmentAmount * _weeklyTenureWeeks; // 650 * 17.5 = 11,375
 
+  // Investment Settings Getters (Fetched from system_settings table)
+  InvestmentSettingsModel get investmentSettings => _investmentSettings;
+  double get investmentBaseAmount => _investmentSettings.baseAmount;
+  double get investmentInterestAmount => _investmentSettings.interestAmount;
+  double get investmentInterestRate => _investmentSettings.interestRate;
+
   bool get isLoading => _isLoading;
   DateTime? get lastUpdated => _lastUpdated;
 
-  /// Load persisted settings from SharedPreferences (and fallback/sync with Supabase)
+  /// Load settings with Supabase 'system_settings' table as single source of truth (Row-wise)
   Future<void> loadSettings() async {
     _isLoading = true;
     notifyListeners();
 
     try {
+      // 1. Fetch live row-wise settings directly from Supabase system_settings table
+      try {
+        final map = await SupabaseService.instance.fetchAllSystemSettings();
+
+        // Investment Settings (row-wise scalar values)
+        double base = 10000.0;
+        double interest = 1500.0;
+        double rate = 15.0;
+
+        if (map.containsKey('investment_base_amount')) {
+          base = double.tryParse(map['investment_base_amount']!) ?? base;
+        }
+        if (map.containsKey('investment_interest_amount')) {
+          interest = double.tryParse(map['investment_interest_amount']!) ?? interest;
+        }
+        if (map.containsKey('investment_interest_rate')) {
+          rate = double.tryParse(map['investment_interest_rate']!) ?? rate;
+        }
+
+        _investmentSettings = InvestmentSettingsModel(
+          baseAmount: base,
+          interestAmount: interest,
+          interestRate: rate,
+          updatedAt: DateTime.now(),
+        );
+
+        // Late Payment & Scheme Settings (row-wise scalar values)
+        if (map.containsKey('daily_late_fine')) {
+          _dailyLateFine = double.tryParse(map['daily_late_fine']!) ?? _dailyLateFine;
+        }
+        if (map.containsKey('weekly_late_fine')) {
+          _weeklyLateFine = double.tryParse(map['weekly_late_fine']!) ?? _weeklyLateFine;
+        }
+        if (map.containsKey('weekly_installment_amount')) {
+          _weeklyInstallmentAmount = double.tryParse(map['weekly_installment_amount']!) ?? _weeklyInstallmentAmount;
+        }
+        if (map.containsKey('weekly_tenure_weeks')) {
+          _weeklyTenureWeeks = double.tryParse(map['weekly_tenure_weeks']!) ?? _weeklyTenureWeeks;
+        }
+
+        if (map.isNotEmpty) {
+          _lastUpdated = DateTime.now();
+        }
+      } catch (e) {
+        debugPrint('ℹ️ Note loading system_settings from Supabase: $e');
+      }
+
       final prefs = await SharedPreferences.getInstance();
 
-      // Read from local persistent storage
-      if (prefs.containsKey(_keyDailyLateFine)) {
+      // Read from local persistent storage for late fines fallback if offline
+      if (prefs.containsKey(_keyDailyLateFine) && _dailyLateFine == 3.0) {
         _dailyLateFine = prefs.getDouble(_keyDailyLateFine) ?? 3.0;
       }
-      if (prefs.containsKey(_keyWeeklyLateFine)) {
+      if (prefs.containsKey(_keyWeeklyLateFine) && _weeklyLateFine == 25.0) {
         _weeklyLateFine = prefs.getDouble(_keyWeeklyLateFine) ?? 25.0;
       }
-      if (prefs.containsKey(_keyWeeklyInstallment)) {
+      if (prefs.containsKey(_keyWeeklyInstallment) && _weeklyInstallmentAmount == 650.0) {
         _weeklyInstallmentAmount = prefs.getDouble(_keyWeeklyInstallment) ?? 650.0;
       }
-      if (prefs.containsKey(_keyWeeklyTenure)) {
+      if (prefs.containsKey(_keyWeeklyTenure) && _weeklyTenureWeeks == 17.5) {
         _weeklyTenureWeeks = prefs.getDouble(_keyWeeklyTenure) ?? 17.5;
       }
-      if (prefs.containsKey(_keyLastUpdated)) {
+      if (prefs.containsKey(_keyLastUpdated) && _lastUpdated == null) {
         final lastIso = prefs.getString(_keyLastUpdated);
         if (lastIso != null) {
           _lastUpdated = DateTime.tryParse(lastIso);
         }
-      }
-
-      // Try fetching remote settings from Supabase if available
-      try {
-        final supabase = SupabaseService.instance.client;
-        if (supabase != null) {
-          final res = await supabase
-              .from('system_settings')
-              .select()
-              .eq('setting_key', 'late_payment_settings')
-              .maybeSingle();
-
-          if (res != null && res['setting_value'] != null) {
-            final val = res['setting_value'];
-            if (val is Map) {
-              if (val['daily_late_fine'] != null) {
-                _dailyLateFine = (val['daily_late_fine'] as num).toDouble();
-                await prefs.setDouble(_keyDailyLateFine, _dailyLateFine);
-              }
-              if (val['weekly_late_fine'] != null) {
-                _weeklyLateFine = (val['weekly_late_fine'] as num).toDouble();
-                await prefs.setDouble(_keyWeeklyLateFine, _weeklyLateFine);
-              }
-              if (val['weekly_installment_amount'] != null) {
-                _weeklyInstallmentAmount = (val['weekly_installment_amount'] as num).toDouble();
-                await prefs.setDouble(_keyWeeklyInstallment, _weeklyInstallmentAmount);
-              }
-              if (val['weekly_tenure_weeks'] != null) {
-                _weeklyTenureWeeks = (val['weekly_tenure_weeks'] as num).toDouble();
-                await prefs.setDouble(_keyWeeklyTenure, _weeklyTenureWeeks);
-              }
-              _lastUpdated = DateTime.now();
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('ℹ️ Note: Supabase remote settings sync optional: $e');
       }
     } catch (e) {
       debugPrint('⚠️ Error loading SettingsProvider: $e');
@@ -179,7 +200,71 @@ class SettingsProvider extends ChangeNotifier {
     }
   }
 
-  /// Save late payment settings permanently
+  /// Save investment settings directly to Supabase 'system_settings' table row-wise (Single Source of Truth)
+  Future<bool> saveInvestmentSettings({
+    required double baseAmount,
+    required double interestAmount,
+    required double interestRate,
+  }) async {
+    if (baseAmount < 0 || interestAmount < 0 || interestRate < 0) {
+      throw ArgumentError('Amounts and interest rate cannot be negative.');
+    }
+
+    try {
+      final success = await SupabaseService.instance.saveInvestmentSettings(
+        baseAmount: baseAmount,
+        interestAmount: interestAmount,
+        interestRate: interestRate,
+      );
+
+      _investmentSettings = InvestmentSettingsModel(
+        baseAmount: baseAmount,
+        interestAmount: interestAmount,
+        interestRate: interestRate,
+        updatedAt: DateTime.now(),
+      );
+
+      _lastUpdated = DateTime.now();
+      notifyListeners();
+      return success;
+    } catch (e) {
+      debugPrint('⚠️ Error saving investment settings: $e');
+      return false;
+    }
+  }
+
+  double get baseDailyAmount => investmentBaseAmount / 100.0; // ₹10,000 / 100 = ₹100
+
+  /// Calculate principal, interest, and daily/weekly payable amount from entered loan amount (which includes interest)
+  /// Formula: principal = loan_amount / (1 + interest_rate / 100)
+  /// daily_payable = principal / base_principal * base_daily_amount
+  LoanPrincipalBreakdown calculateLoanPrincipalBreakdown(double enteredLoanAmount) {
+    return LoanPrincipalBreakdown.calculate(
+      loanAmount: enteredLoanAmount,
+      interestRate: investmentInterestRate,
+      basePrincipal: investmentBaseAmount,
+      baseDailyAmount: baseDailyAmount,
+      baseWeeklyAmount: weeklyInstallmentAmount,
+    );
+  }
+
+  /// Calculate investment plan dynamically for ANY amount based on system_settings rate
+  /// Business rule: Interest = Investment Amount * 15% (or configured rate); Total = Investment Amount + Interest
+  InvestmentCalculationResult calculateInvestmentPlan(double amount) {
+    return InvestmentCalculationResult.calculate(
+      amount: amount,
+      settings: _investmentSettings,
+      dailyTenureDays: 100,
+      weeklyTenureWeeks: _weeklyTenureWeeks,
+    );
+  }
+
+  /// Fetch live investment calculation result directly from Supabase system_settings API
+  Future<InvestmentCalculationResult> fetchLiveInvestmentCalculation(double amount) async {
+    return await SupabaseService.instance.calculateInvestment(amount);
+  }
+
+  /// Save late payment settings row-wise in 'system_settings'
   Future<bool> saveLatePaymentSettings({
     required double dailyFine,
     required double weeklyFine,
@@ -198,14 +283,7 @@ class SettingsProvider extends ChangeNotifier {
     }
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble(_keyDailyLateFine, dailyFine);
-      await prefs.setDouble(_keyWeeklyLateFine, weeklyFine);
-      await prefs.setDouble(_keyWeeklyInstallment, installment);
-      await prefs.setDouble(_keyWeeklyTenure, tenure);
-
       final now = DateTime.now();
-      await prefs.setString(_keyLastUpdated, now.toIso8601String());
 
       _dailyLateFine = dailyFine;
       _weeklyLateFine = weeklyFine;
@@ -213,28 +291,25 @@ class SettingsProvider extends ChangeNotifier {
       _weeklyTenureWeeks = tenure;
       _lastUpdated = now;
 
-      // Try persisting to Supabase system_settings table if possible
+      // Save row-wise in Supabase system_settings table
+      final success = await SupabaseService.instance.saveLatePaymentSettings(
+        dailyFine: dailyFine,
+        weeklyFine: weeklyFine,
+        weeklyInstallment: installment,
+        weeklyTenure: tenure,
+      );
+
       try {
-        final supabase = SupabaseService.instance.client;
-        if (supabase != null) {
-          await supabase.from('system_settings').upsert({
-            'setting_key': 'late_payment_settings',
-            'setting_value': {
-              'daily_late_fine': dailyFine,
-              'weekly_late_fine': weeklyFine,
-              'weekly_installment_amount': installment,
-              'weekly_tenure_weeks': tenure,
-              'updated_at': now.toIso8601String(),
-            },
-            'updated_at': now.toIso8601String(),
-          });
-        }
-      } catch (e) {
-        debugPrint('ℹ️ Supabase system_settings upsert (table may not exist, local storage saved): $e');
-      }
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setDouble(_keyDailyLateFine, dailyFine);
+        await prefs.setDouble(_keyWeeklyLateFine, weeklyFine);
+        await prefs.setDouble(_keyWeeklyInstallment, installment);
+        await prefs.setDouble(_keyWeeklyTenure, tenure);
+        await prefs.setString(_keyLastUpdated, now.toIso8601String());
+      } catch (_) {}
 
       notifyListeners();
-      return true;
+      return success;
     } catch (e) {
       debugPrint('⚠️ Error saving late payment settings: $e');
       return false;
@@ -603,13 +678,18 @@ class SettingsProvider extends ChangeNotifier {
     }
   }
 
-  /// Reset to default settings
+  /// Reset to default settings (Row-wise)
   Future<void> resetToDefaults() async {
     await saveLatePaymentSettings(
       dailyFine: 3.0,
       weeklyFine: 25.0,
       weeklyInstallment: 650.0,
       weeklyTenure: 17.5,
+    );
+    await saveInvestmentSettings(
+      baseAmount: 10000.0,
+      interestAmount: 1500.0,
+      interestRate: 15.0,
     );
   }
 }

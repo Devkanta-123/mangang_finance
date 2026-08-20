@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/loanee_model.dart';
 import '../providers/loanee_provider.dart';
+import '../providers/settings_provider.dart';
 import '../services/supabase_service.dart';
 
 class CreateLoaneePage extends StatefulWidget {
@@ -119,6 +120,10 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
     _witnessDistrictController.text = _districts.first;
     _witnessBusinessTypeController.text = _selectedWitnessBusinessType;
     _witnessRelationshipController.text = _selectedWitnessRelationship;
+
+    _loanAmountController.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
 
@@ -910,6 +915,55 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                     return 'Enter valid loan amount';
                                   }
                                   return null;
+                                },
+                              ),
+                              Builder(
+                                builder: (context) {
+                                  final amount = double.tryParse(_loanAmountController.text.trim()) ?? 0.0;
+                                  if (amount <= 0) return const SizedBox.shrink();
+                                  final settings = Provider.of<SettingsProvider>(context);
+                                  final calc = settings.calculateInvestmentPlan(amount);
+
+                                  return Container(
+                                    margin: const EdgeInsets.only(top: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.shade50,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.green.shade200),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Text(
+                                              'Interest (${calc.interestRate.toStringAsFixed(0)}%): ₹${calc.interestAmount.toStringAsFixed(0)}',
+                                              style: TextStyle(
+                                                fontSize: 11.5,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.green.shade900,
+                                              ),
+                                            ),
+                                            Text(
+                                              'Total Repayment: ₹${calc.totalAmount.toStringAsFixed(0)}',
+                                              style: const TextStyle(
+                                                fontSize: 11.5,
+                                                fontWeight: FontWeight.bold,
+                                                color: Color(0xFF8B1A1A),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '• Daily Scheme (100d): ₹${calc.dailyPlan.dailyInstallment.toStringAsFixed(2)}/day  • Weekly Scheme (${calc.weeklyPlan.tenureWeeks.toStringAsFixed(1)}w): ₹${calc.weeklyPlan.weeklyInstallment.toStringAsFixed(2)}/wk',
+                                          style: TextStyle(fontSize: 10.5, color: Colors.grey.shade800),
+                                        ),
+                                      ],
+                                    ),
+                                  );
                                 },
                               ),
                             ],
