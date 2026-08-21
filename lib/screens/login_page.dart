@@ -640,7 +640,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          _isSetPinMode ? 'CREATE SECURITY PIN' : 'SIGN IN TO PORTAL',
+                          _isSetPinMode ? 'CREATE SECURITY PIN' : 'SIGN IN',
                           style: TextStyle(
                             color: Colors.amber.shade300,
                             fontWeight: FontWeight.bold,
@@ -921,7 +921,7 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                               )
                             : const Text(
-                                'SIGN IN TO PORTAL',
+                                'SIGN IN',
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,

@@ -300,7 +300,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify RO Officer Portal Header
-      expect(find.text('RO Officer Portal'), findsOneWidget);
+      expect(find.text('RO Officer '), findsOneWidget);
       expect(find.text('Officer Tom'), findsOneWidget);
 
       // Verify "Total Collection Records" and "Total Recovered" strictly show Today's Tom metrics (1 record, ₹ 2500.00)

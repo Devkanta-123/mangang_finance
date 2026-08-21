@@ -1543,13 +1543,13 @@ class HomePage extends StatelessWidget {
   String _getRoleTitle(UserType role) {
     switch (role) {
       case UserType.admin:
-        return 'Executive Admin Portal';
+        return 'Executive Admin ';
       case UserType.manager:
-        return 'Manager Monitoring Portal';
+        return 'Manager Monitoring';
       case UserType.ro:
-        return 'RO Officer Portal';
+        return 'RO Officer';
       case UserType.loanee:
-        return 'Loanee Account Portal';
+        return 'Loanee Account';
     }
   }
 }

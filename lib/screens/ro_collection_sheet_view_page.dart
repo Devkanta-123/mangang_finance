@@ -30,21 +30,22 @@ class RoCollectionSheetViewPage extends StatefulWidget {
 class _RoCollectionSheetViewPageState
     extends State<RoCollectionSheetViewPage> {
   String? _selectedRoute;
-  String _selectedType = 'All Types';
+  String _selectedType = 'Today';
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   bool _isTableView = true;
 
-  final List<String> _collectionTypeOptions = [
-    'All Types',
-    'Daily',
-    'Mon',
-    'Tue',
-    'Wed',
-    'Thur',
-    'Fri',
-    'Sat',
-  ];
+  List<String> _getCollectionDayOptions() {
+    return const [
+      'Today',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
+  }
 
   @override
   void dispose() {
@@ -55,7 +56,7 @@ class _RoCollectionSheetViewPageState
   void _resetFilters() {
     setState(() {
       _selectedRoute = null;
-      _selectedType = 'All Types';
+      _selectedType = 'Today';
       _searchController.clear();
       _searchQuery = '';
     });
@@ -283,7 +284,12 @@ class _RoCollectionSheetViewPageState
         collectionProvider.getLatestRemainingBalance(entry.id, loanee?.loanAmount ?? 0.0);
     final hasPaidToday = collectionProvider.hasPaymentForDate(entry.id);
     final payments = collectionProvider.getPaymentsForCollection(entry.id);
-    final lastPayment = payments.isNotEmpty ? payments.first : null;
+    final now = DateTime.now();
+    final todayPayments = payments.where((p) =>
+        p.createdAt.year == now.year &&
+        p.createdAt.month == now.month &&
+        p.createdAt.day == now.day).toList();
+    final todayPayment = todayPayments.isNotEmpty ? todayPayments.first : null;
 
     showModalBottomSheet(
       context: context,
@@ -412,28 +418,6 @@ class _RoCollectionSheetViewPageState
                             ),
                             const Divider(height: 16),
                             _buildDetailRow(
-                              'Actual Principal',
-                              '₹ ${breakdown.actualPrincipal.toStringAsFixed(2)}',
-                              Icons.account_balance_rounded,
-                              isBold: true,
-                              valueColor: Colors.blue.shade900,
-                            ),
-                            const Divider(height: 16),
-                            _buildDetailRow(
-                              'Interest Amount',
-                              '₹ ${breakdown.interestAmount.toStringAsFixed(2)}',
-                              Icons.trending_up_rounded,
-                              isBold: true,
-                              valueColor: Colors.green.shade800,
-                            ),
-                            const Divider(height: 16),
-                            _buildDetailRow(
-                              'Interest Rate',
-                              '${breakdown.interestRate.toStringAsFixed(1)}%',
-                              Icons.percent_rounded,
-                            ),
-                            const Divider(height: 16),
-                            _buildDetailRow(
                               'Payable Amount (${entry.frequencyLabel})',
                               payableStr,
                               Icons.schedule_rounded,
@@ -483,11 +467,11 @@ class _RoCollectionSheetViewPageState
                       entry.route,
                       Icons.alt_route_rounded,
                     ),
-                    if (lastPayment != null) ...[
+                    if (todayPayment != null) ...[
                       const Divider(height: 16),
                       _buildDetailRow(
-                        'Last Collected By',
-                        lastPayment.roName ?? 'Field Officer',
+                        'Collected Today By',
+                        todayPayment.roName ?? 'Field Officer',
                         Icons.person_pin_rounded,
                         isBold: true,
                         valueColor: const Color(0xFF8B1A1A),
@@ -513,7 +497,7 @@ class _RoCollectionSheetViewPageState
                     _showPaymentHistoryModal(context, entry);
                   },
                   icon: const Icon(Icons.history_rounded, size: 18),
-                  label: const Text('View Linked Payment History',
+                  label: const Text('View Today\'s Payment Record',
                       style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
@@ -660,7 +644,7 @@ class _RoCollectionSheetViewPageState
     }
   }
 
-  // Modal to show all payment records linked to a collection ID with collecting RO info
+  // Modal to show today's payment records linked to a collection ID with collecting RO info
   void _showPaymentHistoryModal(BuildContext context, RoCollectionEntry entry) {
     showModalBottomSheet(
       context: context,
@@ -672,8 +656,13 @@ class _RoCollectionSheetViewPageState
       builder: (ctx) {
         final collectionProvider =
             Provider.of<CollectionSheetProvider>(context);
-        final payments =
+        final allPayments =
             collectionProvider.getPaymentsForCollection(entry.id);
+        final now = DateTime.now();
+        final payments = allPayments.where((p) =>
+            p.createdAt.year == now.year &&
+            p.createdAt.month == now.month &&
+            p.createdAt.day == now.day).toList();
 
         return Padding(
           padding: const EdgeInsets.all(20),
@@ -689,7 +678,7 @@ class _RoCollectionSheetViewPageState
                       const Icon(Icons.history_rounded, color: Color(0xFF8B1A1A)),
                       const SizedBox(width: 8),
                       Text(
-                        'Payment History (${entry.loaneeName})',
+                        'Today\'s Payment Record (${entry.loaneeName})',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -724,7 +713,7 @@ class _RoCollectionSheetViewPageState
                           size: 36, color: Colors.grey),
                       SizedBox(height: 8),
                       Text(
-                        'No payment entries in table yet',
+                        'No payment entries recorded for today',
                         style: TextStyle(
                             color: Colors.grey,
                             fontWeight: FontWeight.bold,
@@ -1051,7 +1040,7 @@ class _RoCollectionSheetViewPageState
 
     final totalFilteredAmount = filteredEntries.fold(
       0.0,
-      (sum, item) => sum + provider.getTotalPaidForCollection(item.id),
+      (sum, item) => sum + provider.getTodayPaidForCollection(item.id),
     );
 
     // Entries count in selected route overall
@@ -1282,13 +1271,13 @@ class _RoCollectionSheetViewPageState
                       routeName.trim().toLowerCase())
                   .toList();
               final routeCollected = routeEntries.fold(
-                  0.0, (sum, e) => sum + provider.getTotalPaidForCollection(e.id));
+                  0.0, (sum, e) => sum + provider.getTodayPaidForCollection(e.id));
 
               return InkWell(
                 onTap: () {
                   setState(() {
                     _selectedRoute = routeName;
-                    _selectedType = 'All Types';
+                    _selectedType = 'Today';
                     _searchQuery = '';
                     _searchController.clear();
                   });
@@ -1343,7 +1332,7 @@ class _RoCollectionSheetViewPageState
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${routeEntries.length} ${routeEntries.length == 1 ? 'Record' : 'Records'} • ₹${routeCollected >= 1000 ? (routeCollected / 1000).toStringAsFixed(1) + 'k' : routeCollected.toStringAsFixed(0)}',
+                            '${routeEntries.length} ${routeEntries.length == 1 ? 'Record' : 'Records'} • ₹${routeCollected >= 1000 ? (routeCollected / 1000).toStringAsFixed(1) + 'k' : routeCollected.toStringAsFixed(0)} today',
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.w500,
@@ -1403,7 +1392,7 @@ class _RoCollectionSheetViewPageState
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '$totalInRoute Loanee Accounts in Route • Total Collected: ₹ ${totalCollected.toStringAsFixed(2)}',
+                  '$totalInRoute Loanee Accounts in Route • Today Collected: ₹ ${totalCollected.toStringAsFixed(2)}',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -1431,6 +1420,8 @@ class _RoCollectionSheetViewPageState
   // 3. COLLECTION TYPE (SMALL CARDS WISE AFTER ROUTE)
   // ==========================================
   Widget _buildCollectionTypeCardsSection(CollectionSheetProvider provider) {
+    final collectionDayOptions = _getCollectionDayOptions();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1440,7 +1431,7 @@ class _RoCollectionSheetViewPageState
                 size: 16, color: Color(0xFF8B1A1A)),
             const SizedBox(width: 6),
             const Text(
-              'COLLECTION FREQUENCY / TYPE',
+              'COLLECTION FREQUENCY / DAY',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
@@ -1454,19 +1445,14 @@ class _RoCollectionSheetViewPageState
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: _collectionTypeOptions.map((type) {
+          children: collectionDayOptions.map((type) {
             final isSelected = _selectedType == type;
 
-            // Count for this type in currently selected route
-            final count = type == 'All Types'
-                ? provider
-                    .getFilteredEntries(
-                        selectedRoute: _selectedRoute, selectedType: 'All Types')
-                    .length
-                : provider
-                    .getFilteredEntries(
-                        selectedRoute: _selectedRoute, selectedType: type)
-                    .length;
+            // Count for this type/day in currently selected route
+            final count = provider
+                .getFilteredEntries(
+                    selectedRoute: _selectedRoute, selectedType: type)
+                .length;
 
             return InkWell(
               onTap: () {
@@ -1710,7 +1696,7 @@ class _RoCollectionSheetViewPageState
                 ),
               ),
               Text(
-                'Total: ₹ ${totalFilteredAmount.toStringAsFixed(2)}',
+                'Today Collected: ₹ ${totalFilteredAmount.toStringAsFixed(2)}',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -1814,11 +1800,10 @@ class _RoCollectionSheetViewPageState
               rows: entries.asMap().entries.map((mapEntry) {
                 final idx = mapEntry.key + 1;
                 final entry = mapEntry.value;
-                final totalCollected =
-                    provider.getTotalPaidForCollection(entry.id);
-                final entryPayments = provider.getPaymentsForCollection(entry.id);
-                final totalLateFine =
-                    entryPayments.fold(0.0, (sum, p) => sum + p.lateFine);
+                final todayCollected =
+                    provider.getTodayPaidForCollection(entry.id);
+                final todayLateFine =
+                    provider.getTodayLateFineForCollection(entry.id);
                 final hasPaidToday = provider.hasPaymentForDate(entry.id);
 
                 return DataRow(
@@ -1894,17 +1879,17 @@ class _RoCollectionSheetViewPageState
                       ),
                     ),
                     DataCell(Text(
-                      '₹ ${totalCollected.toStringAsFixed(0)}',
+                      '₹ ${todayCollected.toStringAsFixed(0)}',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: totalCollected > 0
+                        color: todayCollected > 0
                             ? Colors.green.shade800
                             : Colors.grey.shade700,
                       ),
                     )),
                     DataCell(
-                      totalLateFine > 0
+                      todayLateFine > 0
                           ? Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
@@ -1914,7 +1899,7 @@ class _RoCollectionSheetViewPageState
                                 border: Border.all(color: Colors.red.shade200),
                               ),
                               child: Text(
-                                '₹ ${totalLateFine.toStringAsFixed(0)}',
+                                '₹ ${todayLateFine.toStringAsFixed(0)}',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
@@ -2016,7 +2001,7 @@ class _RoCollectionSheetViewPageState
                             constraints: const BoxConstraints(),
                             icon: const Icon(Icons.history_rounded,
                                 size: 17, color: Color(0xFF8B1A1A)),
-                            tooltip: 'Payment History',
+                            tooltip: 'Today\'s Payment Record',
                             onPressed: () =>
                                 _showPaymentHistoryModal(context, entry),
                           ),
@@ -2421,16 +2406,16 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                 ),
                 Builder(
                   builder: (context) {
-                    final entryPayments =
-                        collectionProvider.getPaymentsForCollection(entry.id);
-                    final totalLateFine =
-                        entryPayments.fold(0.0, (sum, p) => sum + p.lateFine);
+                    final todayCollected =
+                        collectionProvider.getTodayPaidForCollection(entry.id);
+                    final todayLateFine =
+                        collectionProvider.getTodayLateFineForCollection(entry.id);
 
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          '₹ ${collectionProvider.getTotalPaidForCollection(entry.id).toStringAsFixed(2)}',
+                          '₹ ${todayCollected.toStringAsFixed(2)}',
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -2438,13 +2423,13 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          'Collected Total',
+                          'Collected Today',
                           style: TextStyle(
                             fontSize: 10,
                             color: Colors.grey.shade600,
                           ),
                         ),
-                        if (totalLateFine > 0)
+                        if (todayLateFine > 0)
                           Container(
                             margin: const EdgeInsets.only(top: 3),
                             padding: const EdgeInsets.symmetric(
@@ -2455,7 +2440,7 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                               border: Border.all(color: Colors.red.shade200),
                             ),
                             child: Text(
-                              'Late Fine: ₹${totalLateFine.toStringAsFixed(0)}',
+                              'Late Fine: ₹${todayLateFine.toStringAsFixed(0)}',
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
@@ -3365,22 +3350,6 @@ class __AddPaymentEntryModalContentState
                               children: [
                                 Text('Loan Amount (incl. interest):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
                                 Text('₹ ${breakdown.loanAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
-                              ],
-                            ),
-                            const SizedBox(height: 3),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text('Actual Principal:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
-                                Text('₹ ${breakdown.actualPrincipal.toStringAsFixed(2)}', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
-                              ],
-                            ),
-                            const SizedBox(height: 3),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text('Interest (${breakdown.interestRate.toStringAsFixed(0)}%):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
-                                Text('₹ ${breakdown.interestAmount.toStringAsFixed(2)}', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.green.shade800)),
                               ],
                             ),
                             const SizedBox(height: 4),

@@ -65,6 +65,28 @@ class CollectionSheetProvider extends ChangeNotifier {
     return cardPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
   }
 
+  /// Calculate today's amount paid for a collection card ID strictly from payment table
+  double getTodayPaidForCollection(String collectionId, [DateTime? targetDate]) {
+    final date = targetDate ?? DateTime.now();
+    final cardPayments = getPaymentsForCollection(collectionId);
+    return cardPayments.where((p) {
+      return p.createdAt.year == date.year &&
+          p.createdAt.month == date.month &&
+          p.createdAt.day == date.day;
+    }).fold(0.0, (sum, p) => sum + p.paymentAmount);
+  }
+
+  /// Calculate today's late fine for a collection card ID strictly from payment table
+  double getTodayLateFineForCollection(String collectionId, [DateTime? targetDate]) {
+    final date = targetDate ?? DateTime.now();
+    final cardPayments = getPaymentsForCollection(collectionId);
+    return cardPayments.where((p) {
+      return p.createdAt.year == date.year &&
+          p.createdAt.month == date.month &&
+          p.createdAt.day == date.day;
+    }).fold(0.0, (sum, p) => sum + p.lateFine);
+  }
+
   /// Get the latest remaining balance for a collection card ID (default fallback if no payments)
   double getLatestRemainingBalance(String collectionId, [double fallback = 0.0]) {
     final cardPayments = getPaymentsForCollection(collectionId);
@@ -236,30 +258,80 @@ class CollectionSheetProvider extends ChangeNotifier {
     return 'ACC-${88239100 + _collectionEntries.length + 1}';
   }
 
+  static bool _matchesWeekday(String colType, int weekday) {
+    switch (weekday) {
+      case 1:
+        return colType.startsWith('mon');
+      case 2:
+        return colType.startsWith('tue');
+      case 3:
+        return colType.startsWith('wed');
+      case 4:
+        return colType.startsWith('thu');
+      case 5:
+        return colType.startsWith('fri');
+      case 6:
+        return colType.startsWith('sat');
+      case 7:
+        return colType.startsWith('sun');
+      default:
+        return false;
+    }
+  }
+
+  static int? _weekdayForDayName(String dayName) {
+    final d = dayName.toLowerCase().trim();
+    if (d.startsWith('mon')) return 1;
+    if (d.startsWith('tue')) return 2;
+    if (d.startsWith('wed')) return 3;
+    if (d.startsWith('thu')) return 4;
+    if (d.startsWith('fri')) return 5;
+    if (d.startsWith('sat')) return 6;
+    if (d.startsWith('sun')) return 7;
+    return null;
+  }
+
   // FILTERING METHODS
   List<RoCollectionEntry> getFilteredEntries({
     String? selectedRoute,
     String? selectedType,
     String? searchQuery,
   }) {
+    final now = DateTime.now();
+
     return _collectionEntries.where((entry) {
       // 1. Route Filter
       if (selectedRoute != null &&
           selectedRoute != 'All' &&
           selectedRoute != 'All Routes' &&
           selectedRoute.isNotEmpty) {
-        if (entry.route.toLowerCase() != selectedRoute.toLowerCase()) {
+        if (entry.route.toLowerCase().trim() != selectedRoute.toLowerCase().trim()) {
           return false;
         }
       }
 
-      // 2. Collection Type Filter
+      // 2. Collection Type / Day Filter
       if (selectedType != null &&
           selectedType != 'All' &&
           selectedType != 'All Types' &&
           selectedType.isNotEmpty) {
-        if (entry.collectionType.toLowerCase() != selectedType.toLowerCase()) {
-          return false;
+        final colType = entry.collectionType.toLowerCase().trim();
+        final selType = selectedType.toLowerCase().trim();
+
+        if (selType == 'today') {
+          final isMatch = entry.isDaily ||
+              colType == 'daily' ||
+              colType == 'day' ||
+              _matchesWeekday(colType, now.weekday);
+          if (!isMatch) return false;
+        } else {
+          final targetWeekday = _weekdayForDayName(selType);
+          if (targetWeekday != null) {
+            final isMatch = _matchesWeekday(colType, targetWeekday);
+            if (!isMatch) return false;
+          } else if (colType != selType) {
+            return false;
+          }
         }
       }
 
