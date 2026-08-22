@@ -959,50 +959,79 @@ class HomePage extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
                   ),
-                  child: Row(
+                  child: Column(
                     children: [
-                      const Icon(Icons.calendar_today_rounded, size: 14, color: Colors.white70),
-                      const SizedBox(width: 6),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Row(
                         children: [
-                          const Text('Sanction Date', style: TextStyle(color: Colors.white60, fontSize: 9.5)),
-                          const SizedBox(height: 1),
-                          Text(
-                            loaneeAccount?.formattedSanctionDate ?? 'N/A',
-                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
-                      Container(height: 24, width: 1, color: Colors.white24),
-                      const Spacer(),
-                      const Icon(Icons.event_available_rounded, size: 14, color: Colors.amberAccent),
-                      const SizedBox(width: 6),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                          const Icon(Icons.calendar_today_rounded, size: 14, color: Colors.white70),
+                          const SizedBox(width: 6),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Maturity Date', style: TextStyle(color: Colors.white60, fontSize: 9.5)),
-                              const SizedBox(width: 4),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: Colors.teal.shade700,
-                                  borderRadius: BorderRadius.circular(3),
-                                ),
-                                child: const Text('5 Months', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                              const Text('Sanction Date', style: TextStyle(color: Colors.white60, fontSize: 9.5)),
+                              const SizedBox(height: 1),
+                              Text(
+                                loaneeAccount?.formattedSanctionDate ?? 'N/A',
+                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 1),
-                          Text(
-                            loaneeAccount?.formattedMaturityDate ?? 'N/A',
-                            style: const TextStyle(color: Colors.amberAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                          const Spacer(),
+                          Container(height: 24, width: 1, color: Colors.white24),
+                          const Spacer(),
+                          const Icon(Icons.event_available_rounded, size: 14, color: Colors.amberAccent),
+                          const SizedBox(width: 6),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Text('Maturity Date', style: TextStyle(color: Colors.white60, fontSize: 9.5)),
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: Colors.teal.shade700,
+                                      borderRadius: BorderRadius.circular(3),
+                                    ),
+                                    child: const Text('5 Months', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                loaneeAccount?.formattedMaturityDate ?? 'N/A',
+                                style: const TextStyle(color: Colors.amberAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            ],
                           ),
                         ],
                       ),
+                      if (loaneeAccount?.isPastMaturity == true) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade900.withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.amberAccent),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.amberAccent),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Post-Maturity Alert: Loan has exceeded the maturity date. Under servicing policy, overdue interest is auto-applied on the unpaid remaining balance.',
+                                  style: const TextStyle(fontSize: 10.5, color: Colors.white, fontWeight: FontWeight.w600, height: 1.25),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1753,9 +1782,10 @@ class _LoaneeLateFineAcknowledgmentSectionState
         _hasCheckedAck = true;
       });
 
-      // If fine is accrued, and not yet acknowledged today, auto-prompt the Loanee
+      // If fine is accrued or past maturity date, and not yet acknowledged today, auto-prompt the Loanee
       final status = _calculateStatus(settings);
-      if (status.calculatedLateFine > 0 && !acknowledged && !_modalAutoShown) {
+      final bool hasOverdueOrPostMaturity = status.calculatedLateFine > 0 || status.isPastMaturity;
+      if (hasOverdueOrPostMaturity && !acknowledged && !_modalAutoShown) {
         _modalAutoShown = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
@@ -1785,8 +1815,10 @@ class _LoaneeLateFineAcknowledgmentSectionState
         (widget.user?.name ?? (widget.loaneeEntries.isNotEmpty ? widget.loaneeEntries.first.loaneeName : 'Loanee Account'));
     final accNo = widget.loaneeAccount?.accountNumber ??
         (widget.loaneeEntries.isNotEmpty ? widget.loaneeEntries.map((e) => e.accountNumber).toSet().join(', ') : 'N/A');
-    final fallbackStart = widget.loaneeAccount?.createdAt ?? DateTime.now();
+    final fallbackStart = widget.loaneeAccount?.loansanctiondate ?? widget.loaneeAccount?.createdAt ?? DateTime.now();
+    final fallbackMaturity = widget.loaneeAccount?.loanmaturitydate;
     final fallbackLoanAmt = widget.loaneeAccount?.loanAmount ?? 0.0;
+    final fallbackDueAmt = widget.loaneeAccount?.dueAmount ?? 0.0;
 
     return settings.getAggregateLateFineStatus(
       entries: widget.loaneeEntries,
@@ -1795,7 +1827,9 @@ class _LoaneeLateFineAcknowledgmentSectionState
       loaneeName: name,
       accountNumber: accNo,
       fallbackStartDate: fallbackStart,
+      fallbackMaturityDate: fallbackMaturity,
       fallbackLoanAmount: fallbackLoanAmt,
+      fallbackDueAmount: fallbackDueAmt,
     );
   }
 
@@ -2162,6 +2196,98 @@ class _LoaneeLateFineAcknowledgmentSectionState
                     ],
                   ),
                 ),
+
+                if (status.postMaturityBreakdown != null && status.postMaturityBreakdown!.isPastMaturity) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.amber.shade400, width: 1.2),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 18, color: Colors.amber.shade900),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'POST-MATURITY OVERDUE INTEREST NOTICE',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber.shade900,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Maturity date (${SettingsProvider.formatDate(status.postMaturityBreakdown!.maturityDate)}) exceeded (${status.postMaturityBreakdown!.overdueMonths} month(s) overdue). Under terms, overdue interest applies strictly on completed month basis.',
+                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.amber.shade900),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.amber.shade200),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Unpaid Remaining Balance:', style: TextStyle(fontSize: 10.5, color: Colors.black87)),
+                                  Text('₹ ${status.postMaturityBreakdown!.remainingBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                              const SizedBox(height: 3),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Standard Rate (5m Tenure):', style: TextStyle(fontSize: 10.5, color: Colors.black54)),
+                                  Text('${status.postMaturityBreakdown!.normalInterestRate.toStringAsFixed(1)}%', style: const TextStyle(fontSize: 10.5, color: Colors.black54)),
+                                ],
+                              ),
+                              const SizedBox(height: 3),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Overdue Interest Status:', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.red.shade900)),
+                                  Text('Active (${status.postMaturityBreakdown!.overdueMonths > 0 ? "${status.postMaturityBreakdown!.overdueMonths}m " : ""}Compounded)', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.red.shade900)),
+                                ],
+                              ),
+                              const SizedBox(height: 3),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Accrued Overdue Interest:', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
+                                  Text('₹ ${status.postMaturityBreakdown!.postMaturityInterestAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
+                                ],
+                              ),
+                              const SizedBox(height: 3),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Total Payable (Due + Interest):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade900)),
+                                  Text('₹ ${status.postMaturityBreakdown!.postMaturityPayableAmount.toStringAsFixed(2)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal.shade900)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 14),
 
@@ -2570,6 +2696,29 @@ class _LoaneeLateFineAcknowledgmentSectionState
                             '₹ ${(status.latePayableBreakdown?.currentInstallment ?? (status.isDaily ? 100.0 : 650.0)).toStringAsFixed(2)}',
                             valueColor: Colors.teal.shade800,
                           ),
+                          if (status.postMaturityBreakdown != null && status.postMaturityBreakdown!.isPastMaturity) ...[
+                            const Divider(height: 1),
+                            _buildBreakdownItem(
+                              'Overdue Interest Status',
+                              'Active Overdue Compounding',
+                              valueColor: Colors.red.shade900,
+                              isBold: true,
+                            ),
+                            const Divider(height: 1),
+                            _buildBreakdownItem(
+                              'Unpaid Remaining Balance',
+                              '₹ ${status.postMaturityBreakdown!.remainingBalance.toStringAsFixed(2)}',
+                              valueColor: const Color(0xFF8B1A1A),
+                              isBold: true,
+                            ),
+                            const Divider(height: 1),
+                            _buildBreakdownItem(
+                              'Accrued Overdue Interest',
+                              '₹ ${status.postMaturityBreakdown!.postMaturityInterestAmount.toStringAsFixed(2)}',
+                              valueColor: Colors.red.shade900,
+                              isBold: true,
+                            ),
+                          ],
                           const Divider(height: 1),
                           _buildBreakdownItem(
                             'Late Payment Fine Rate',
@@ -2592,7 +2741,7 @@ class _LoaneeLateFineAcknowledgmentSectionState
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     const Text(
-                                      'Total Payable Today (incl. Late Days)',
+                                      'Total Auto-Calculated Payable',
                                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF8B1A1A)),
                                     ),
                                     Text(
@@ -2630,7 +2779,9 @@ class _LoaneeLateFineAcknowledgmentSectionState
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'By clicking acknowledge below, you verify you have viewed and accepted your account overdue notice and late fine penalty calculations under Mangang Finance terms.',
+                              status.isPastMaturity
+                                  ? 'Acknowledgment Notice: Your loan exceeded the 5-month maturity period. Under Mangang Finance servicing terms, overdue interest is automatically applied to your unpaid remaining balance.'
+                                  : 'By clicking acknowledge below, you verify you have viewed and accepted your account overdue notice, late fine penalty, and payment calculations under Mangang Finance terms.',
                               style: TextStyle(fontSize: 10.5, color: Colors.amber.shade900, height: 1.3),
                             ),
                           ),

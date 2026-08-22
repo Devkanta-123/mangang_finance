@@ -1,9 +1,7 @@
-// lib/screens/settings_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/user_model.dart';
-import '../models/investment_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/settings_provider.dart';
 
@@ -17,6 +15,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final _formKey = GlobalKey<FormState>();
   final _investmentFormKey = GlobalKey<FormState>();
+  final _policyFormKey = GlobalKey<FormState>();
 
   late TextEditingController _dailyFineController;
   late TextEditingController _weeklyFineController;
@@ -29,8 +28,13 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController _investmentInterestRateController;
   late TextEditingController _simulatedAmountController;
 
+  // Loan servicing & Post-Maturity Interest Policy controllers
+  late TextEditingController _normalInterestRateController;
+  late TextEditingController _postMaturityInterestRateController;
+
   bool _isSaving = false;
   bool _isSavingInvestment = false;
+  bool _isSavingPolicy = false;
   bool _initialized = false;
 
   double _previewDailyFine = 3.0;
@@ -42,6 +46,9 @@ class _SettingsPageState extends State<SettingsPage> {
   double _previewInvestmentInterest = 1500.0;
   double _previewInvestmentRate = 15.0;
   double _simulatedAmount = 10000.0;
+
+  double _previewNormalRate = 3.0;
+  double _previewPostMaturityRate = 7.0;
 
   @override
   void initState() {
@@ -55,6 +62,9 @@ class _SettingsPageState extends State<SettingsPage> {
     _investmentInterestAmountController = TextEditingController();
     _investmentInterestRateController = TextEditingController();
     _simulatedAmountController = TextEditingController(text: '10000');
+
+    _normalInterestRateController = TextEditingController();
+    _postMaturityInterestRateController = TextEditingController();
 
     _dailyFineController.addListener(() {
       final val = double.tryParse(_dailyFineController.text.trim()) ?? 0.0;
@@ -92,6 +102,24 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     });
 
+    _normalInterestRateController.addListener(() {
+      final val = double.tryParse(_normalInterestRateController.text.trim()) ?? 3.0;
+      if (val >= 0 && mounted) {
+        setState(() {
+          _previewNormalRate = val;
+        });
+      }
+    });
+
+    _postMaturityInterestRateController.addListener(() {
+      final val = double.tryParse(_postMaturityInterestRateController.text.trim()) ?? 7.0;
+      if (val >= 0 && mounted) {
+        setState(() {
+          _previewPostMaturityRate = val;
+        });
+      }
+    });
+
     _investmentBaseAmountController.addListener(() {
       final base = double.tryParse(_investmentBaseAmountController.text.trim()) ?? 10000.0;
       final rate = double.tryParse(_investmentInterestRateController.text.trim()) ?? 15.0;
@@ -100,6 +128,7 @@ class _SettingsPageState extends State<SettingsPage> {
         setState(() {
           _previewInvestmentBase = base;
           _previewInvestmentInterest = interest;
+          _previewInvestmentRate = rate;
         });
       }
     });
@@ -117,7 +146,7 @@ class _SettingsPageState extends State<SettingsPage> {
     });
 
     _simulatedAmountController.addListener(() {
-      final val = double.tryParse(_simulatedAmountController.text.trim()) ?? 0.0;
+      final val = double.tryParse(_simulatedAmountController.text.trim()) ?? 10000.0;
       if (mounted) {
         setState(() {
           _simulatedAmount = val;
@@ -140,6 +169,9 @@ class _SettingsPageState extends State<SettingsPage> {
       _investmentInterestAmountController.text = settings.investmentInterestAmount.toStringAsFixed(0);
       _investmentInterestRateController.text = settings.investmentInterestRate.toStringAsFixed(0);
 
+      _normalInterestRateController.text = settings.normalInterestRate.toStringAsFixed(1);
+      _postMaturityInterestRateController.text = settings.postMaturityInterestRate.toStringAsFixed(1);
+
       _previewDailyFine = settings.dailyLateFine;
       _previewWeeklyFine = settings.weeklyLateFine;
       _previewWeeklyInstallment = settings.weeklyInstallmentAmount;
@@ -148,6 +180,9 @@ class _SettingsPageState extends State<SettingsPage> {
       _previewInvestmentBase = settings.investmentBaseAmount;
       _previewInvestmentInterest = settings.investmentInterestAmount;
       _previewInvestmentRate = settings.investmentInterestRate;
+
+      _previewNormalRate = settings.normalInterestRate;
+      _previewPostMaturityRate = settings.postMaturityInterestRate;
       _initialized = true;
     }
   }
@@ -162,6 +197,8 @@ class _SettingsPageState extends State<SettingsPage> {
     _investmentInterestAmountController.dispose();
     _investmentInterestRateController.dispose();
     _simulatedAmountController.dispose();
+    _normalInterestRateController.dispose();
+    _postMaturityInterestRateController.dispose();
     super.dispose();
   }
 
@@ -247,6 +284,90 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Failed to save investment settings to system_settings table.'),
+          backgroundColor: Colors.red.shade800,
+        ),
+      );
+    }
+  }
+
+  Future<void> _savePolicySettings() async {
+    if (!_policyFormKey.currentState!.validate()) {
+      return;
+    }
+
+    final normal = double.tryParse(_normalInterestRateController.text.trim());
+    final post = double.tryParse(_postMaturityInterestRateController.text.trim());
+
+    if (normal == null || normal < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Normal interest rate cannot be negative.'),
+          backgroundColor: Colors.red.shade800,
+        ),
+      );
+      return;
+    }
+
+    if (post == null || post < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Post-maturity interest rate cannot be negative.'),
+          backgroundColor: Colors.red.shade800,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSavingPolicy = true;
+    });
+
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    final success = await settingsProvider.saveInterestPolicySettings(
+      normalRate: normal,
+      postMaturityRate: post,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _isSavingPolicy = false;
+    });
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          backgroundColor: Colors.green.shade800,
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Interest Policy Saved to Database',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    Text(
+                      'Normal Rate: $normal% (5m) • Post-Maturity Rate: $post% (on Remaining Balance)',
+                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Failed to save interest policy settings to system_settings table.'),
           backgroundColor: Colors.red.shade800,
         ),
       );
@@ -1277,6 +1398,219 @@ class _SettingsPageState extends State<SettingsPage> {
                               label: const Text(
                                 'Reset to System Defaults (₹3 / ₹25 / ₹650)',
                                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // SECTION: POST-MATURITY INTEREST POLICY (3% NORMAL VS 7% ON REMAINING BALANCE)
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.grey.shade300),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withValues(alpha: 0.06),
+                          blurRadius: 10,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Form(
+                      key: _policyFormKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Expanded(
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.rule_folder_rounded,
+                                      color: Color(0xFF8B1A1A),
+                                      size: 22,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Interest Policy & Post-Maturity',
+                                        style: TextStyle(
+                                          fontSize: 15.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF8B1A1A),
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.amber.shade300),
+                                ),
+                                child: Text(
+                                  '3% NORMAL ➔ 7% MATURED',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.amber.shade900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Configure standard interest rate during 5-month tenure and post-maturity overdue default rate calculated on remaining balance.',
+                            style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                          ),
+                          const Divider(height: 24),
+
+                          // Field 1: Normal Interest Rate
+                          _buildFieldHeader(
+                            title: '1. Standard Loan Interest Rate',
+                            badgeText: 'Tenure: 5 Months',
+                            badgeColor: Colors.blue.shade100,
+                            badgeTextColor: Colors.blue.shade900,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Standard rate applied during the 5-month loan maturity window.',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _normalInterestRateController,
+                            enabled: isAdmin && !_isSavingPolicy,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                            ],
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                            decoration: InputDecoration(
+                              labelText: 'NORMAL INTEREST RATE (%) *',
+                              hintText: '3.0',
+                              prefixIcon: const Icon(Icons.percent_rounded, color: Colors.blue, size: 20),
+                              suffixText: '%',
+                              filled: true,
+                              fillColor: isAdmin ? Colors.white : Colors.grey.shade100,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            validator: (val) {
+                              if (val == null || val.trim().isEmpty) return 'Required';
+                              final num = double.tryParse(val.trim());
+                              if (num == null || num < 0) return 'Invalid rate';
+                              return null;
+                            },
+                          ),
+
+                          const SizedBox(height: 18),
+
+                          // Field 2: Post-Maturity Overdue Rate
+                          _buildFieldHeader(
+                            title: '2. Post-Maturity Default Rate',
+                            badgeText: 'On Remaining Balance',
+                            badgeColor: Colors.red.shade100,
+                            badgeTextColor: Colors.red.shade900,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Rate automatically applied to unpaid remaining balance when loan passes maturity date.',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _postMaturityInterestRateController,
+                            enabled: isAdmin && !_isSavingPolicy,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                            ],
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
+                            decoration: InputDecoration(
+                              labelText: 'POST-MATURITY INTEREST RATE (%) *',
+                              hintText: '7.0',
+                              prefixIcon: const Icon(Icons.warning_amber_rounded, color: Color(0xFF8B1A1A), size: 20),
+                              suffixText: '% of Remaining Balance',
+                              filled: true,
+                              fillColor: isAdmin ? Colors.white : Colors.grey.shade100,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            validator: (val) {
+                              if (val == null || val.trim().isEmpty) return 'Required';
+                              final num = double.tryParse(val.trim());
+                              if (num == null || num < 0) return 'Invalid rate';
+                              return null;
+                            },
+                          ),
+
+                          const SizedBox(height: 14),
+
+                          // Policy Explanation Box
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.shade50,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.amber.shade300),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(Icons.gavel_rounded, size: 16, color: Colors.amber.shade900),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Servicing Policy & Acknowledgment Rules:',
+                                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.amber.shade900),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '• All loans follow a 5-month maturity period under ${_previewNormalRate.toStringAsFixed(1)}% normal rate.\n• If a Loanee does not clear the loan within the maturity date, the next coming payable amount auto-calculates on ${_previewPostMaturityRate.toStringAsFixed(1)}% of the unpaid remaining balance.\n• All users (Admin, ROs, and Loanees upon login) are presented with transparent acknowledgments and breakdown rationales.',
+                                  style: TextStyle(fontSize: 11, color: Colors.amber.shade900, height: 1.35),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 18),
+
+                          if (isAdmin) ...[
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF8B1A1A),
+                                foregroundColor: Colors.white,
+                                minimumSize: const Size(double.infinity, 44),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              onPressed: _isSavingPolicy ? null : _savePolicySettings,
+                              icon: _isSavingPolicy
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.cloud_upload_rounded, size: 18),
+                              label: Text(
+                                _isSavingPolicy ? 'Saving to Database...' : 'Save Interest Policy to Database',
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                               ),
                             ),
                           ],

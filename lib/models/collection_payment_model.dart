@@ -1,5 +1,7 @@
 // lib/models/collection_payment_model.dart
 
+import 'notification_model.dart';
+
 class CollectionPaymentModel {
   final String id;
   final String collectionId; // Foreign key linking to ro_collection_entries.id
@@ -94,9 +96,7 @@ class CollectionPaymentModel {
       roName: json['ro_name']?.toString() ?? json['roName']?.toString() ?? json['recorded_by']?.toString() ?? json['recordedBy']?.toString(),
       roId: json['ro_id']?.toString() ?? json['roId']?.toString(),
       roRoute: json['ro_route']?.toString() ?? json['roRoute']?.toString(),
-      createdAt: json['created_at'] != null
-          ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
-          : DateTime.now(),
+      createdAt: AppNotification.parseDateTime(json['created_at'] ?? json['createdAt']),
       status: json['status']?.toString() ?? 'Success',
       remarks: json['remarks']?.toString(),
     );

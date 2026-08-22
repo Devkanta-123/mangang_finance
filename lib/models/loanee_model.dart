@@ -1,5 +1,7 @@
 // lib/models/loanee_model.dart
 
+import 'notification_model.dart';
+
 class LoaneeAccount {
   final String customerid;
   final String accountnumber;
@@ -109,9 +111,30 @@ class LoaneeAccount {
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
   }
 
+  DateTime get effectiveMaturityDate =>
+      loanmaturitydate ?? calculateMaturityDate(loansanctiondate ?? createdat);
+
   String get formattedMaturityDate {
-    final d = loanmaturitydate ?? calculateMaturityDate(loansanctiondate ?? createdat);
+    final d = effectiveMaturityDate;
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
+  /// Whether loan tenure has exceeded the 5-month maturity date and has unpaid balance
+  bool get isPastMaturity {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final mat = DateTime(effectiveMaturityDate.year, effectiveMaturityDate.month, effectiveMaturityDate.day);
+    final hasBalance = dueamount > 0 || (loanamount > 0 && paidamount < loanamount);
+    return today.isAfter(mat) && hasBalance;
+  }
+
+  /// Number of overdue days past loan maturity date
+  int get daysPastMaturity {
+    if (!isPastMaturity) return 0;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final mat = DateTime(effectiveMaturityDate.year, effectiveMaturityDate.month, effectiveMaturityDate.day);
+    return today.difference(mat).inDays;
   }
 
   // Witness getters
@@ -236,27 +259,13 @@ class LoaneeAccount {
   }
 
   factory LoaneeAccount.fromJson(Map<String, dynamic> json) {
-    final parsedCreatedAt = json['createdat'] != null
-        ? (DateTime.tryParse(json['createdat'].toString()) ?? DateTime.now())
-        : (json['createdAt'] != null
-            ? (DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now())
-            : DateTime.now());
+    final parsedCreatedAt = AppNotification.parseDateTime(json['createdat'] ?? json['createdAt']);
 
-    final parsedSanctionDate = json['loansanctiondate'] != null
-        ? DateTime.tryParse(json['loansanctiondate'].toString())
-        : (json['loanSanctionDate'] != null
-            ? DateTime.tryParse(json['loanSanctionDate'].toString())
-            : (json['loan_sanction_date'] != null
-                ? DateTime.tryParse(json['loan_sanction_date'].toString())
-                : null));
+    final rawSanction = json['loansanctiondate'] ?? json['loanSanctionDate'] ?? json['loan_sanction_date'];
+    final parsedSanctionDate = rawSanction != null ? AppNotification.parseDateTime(rawSanction) : null;
 
-    final parsedMaturityDate = json['loanmaturitydate'] != null
-        ? DateTime.tryParse(json['loanmaturitydate'].toString())
-        : (json['loanMaturityDate'] != null
-            ? DateTime.tryParse(json['loanMaturityDate'].toString())
-            : (json['loan_maturity_date'] != null
-                ? DateTime.tryParse(json['loan_maturity_date'].toString())
-                : null));
+    final rawMaturity = json['loanmaturitydate'] ?? json['loanMaturityDate'] ?? json['loan_maturity_date'];
+    final parsedMaturityDate = rawMaturity != null ? AppNotification.parseDateTime(rawMaturity) : null;
 
     return LoaneeAccount(
       customerid: json['customerid']?.toString() ?? json['customerId']?.toString() ?? '',

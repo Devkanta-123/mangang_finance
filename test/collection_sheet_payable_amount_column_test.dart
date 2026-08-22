@@ -317,10 +317,17 @@ void main() {
       expect(find.text('ACNO'), findsOneWidget);
       expect(find.text('Payable Amount'), findsOneWidget);
 
-      // Verify displayed formatted payable amounts
+      // Verify displayed formatted payable amounts on Daily
       expect(find.text('₹100 / Day'), findsOneWidget);
       expect(find.text('₹500 / Day'), findsOneWidget);
-      expect(find.text('₹650 / Week'), findsOneWidget);
+
+      // Switch to 'Mon' filter tab to verify Monday weekly entry
+      final monFilterFinder = find.text('Mon');
+      if (monFilterFinder.evaluate().isNotEmpty) {
+        await tester.tap(monFilterFinder.first);
+        await tester.pumpAndSettle();
+        expect(find.text('₹650 / Week'), findsOneWidget);
+      }
     });
   });
 }

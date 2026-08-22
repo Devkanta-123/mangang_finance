@@ -209,12 +209,15 @@ class NotificationsSheet extends StatelessWidget {
                               ),
                             ),
                           ),
-                          Text(
-                            item.timeAgoFormatted,
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              color: item.isRead ? Colors.grey.shade500 : const Color(0xFF8B1A1A),
-                              fontWeight: item.isRead ? FontWeight.normal : FontWeight.bold,
+                          Tooltip(
+                            message: item.formattedDateTime,
+                            child: Text(
+                              item.timeAgoFormatted,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: item.isRead ? Colors.grey.shade500 : const Color(0xFF8B1A1A),
+                                fontWeight: item.isRead ? FontWeight.normal : FontWeight.bold,
+                              ),
                             ),
                           ),
                         ],
@@ -227,6 +230,21 @@ class NotificationsSheet extends StatelessWidget {
                           color: Colors.grey.shade700,
                           height: 1.3,
                         ),
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          Icon(Icons.schedule_rounded, size: 11, color: Colors.grey.shade500),
+                          const SizedBox(width: 4),
+                          Text(
+                            item.formattedDateTime,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey.shade500,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),

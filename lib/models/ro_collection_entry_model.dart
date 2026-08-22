@@ -1,5 +1,7 @@
 // lib/models/ro_collection_entry_model.dart
 
+import 'notification_model.dart';
+
 /// Comprehensive breakdown of Loan Amount (including interest) vs Actual Principal, Interest, and Payables
 class LoanPrincipalBreakdown {
   final double loanAmount; // Total amount entered / sanctioned including interest (e.g. ₹57,500)
@@ -329,11 +331,7 @@ class RoCollectionEntry {
       collectionType: json['collection_type']?.toString() ?? json['collectionType']?.toString() ?? 'Daily',
       route: json['route']?.toString() ?? 'Mangang',
       mobileNo: json['mobile_no']?.toString() ?? json['mobileNo']?.toString() ?? '',
-      createdAt: json['created_at'] != null
-          ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
-          : (json['createdAt'] != null
-              ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
-              : DateTime.now()),
+      createdAt: AppNotification.parseDateTime(json['created_at'] ?? json['createdAt']),
       status: json['status']?.toString() ?? 'Active',
       payableAmount: pAmt,
       loanAmount: lAmt,

@@ -11,8 +11,6 @@ import '../providers/ro_provider.dart';
 import '../providers/settings_provider.dart';
 import '../models/collection_payment_model.dart';
 import '../services/supabase_service.dart';
-import '../services/bulk_collection_import_service.dart';
-import '../widgets/bulk_collection_upload_dialog.dart';
 import '../widgets/edit_collection_entry_dialog.dart';
 import '../widgets/edit_loanee_dialog.dart';
 
@@ -405,7 +403,9 @@ class _RoCollectionSheetViewPageState
                           entry: entry,
                           payments: payments,
                           loaneeLoanAmount: loanee?.loanAmount,
+                          maturityDate: loanee?.loanMaturityDate,
                         );
+                        final postMaturity = latePayable.postMaturityBreakdown;
 
                         return Column(
                           children: [
@@ -419,18 +419,52 @@ class _RoCollectionSheetViewPageState
                             const Divider(height: 16),
                             _buildDetailRow(
                               'Base Installment (${entry.frequencyLabel})',
-                              '₹ ${latePayable.currentInstallment.toStringAsFixed(2)} / ${entry.frequencyLabel}',
+                              '₹ ${latePayable.baseInstallment.toStringAsFixed(2)} / ${entry.frequencyLabel}',
                               Icons.schedule_rounded,
                               isBold: true,
                               valueColor: entry.isDaily ? Colors.blue.shade800 : Colors.purple.shade800,
                             ),
+                            if (postMaturity != null && postMaturity.isPastMaturity) ...[
+                              const Divider(height: 16),
+                              _buildDetailRow(
+                                'Unpaid Remaining Balance',
+                                '₹ ${postMaturity.remainingBalance.toStringAsFixed(2)}',
+                                Icons.account_balance_wallet_outlined,
+                                isBold: true,
+                                valueColor: const Color(0xFF8B1A1A),
+                              ),
+                              const Divider(height: 16),
+                              _buildDetailRow(
+                                'Overdue Period Past Due Date',
+                                '${postMaturity.overdueMonths} Month(s)',
+                                Icons.timer_off_outlined,
+                                isBold: true,
+                                valueColor: Colors.amber.shade900,
+                              ),
+                              const Divider(height: 16),
+                              _buildDetailRow(
+                                'Overdue Assessment',
+                                'Overdue Compounded Interest (Active)',
+                                Icons.warning_amber_rounded,
+                                isBold: true,
+                                valueColor: Colors.red.shade900,
+                              ),
+                              const Divider(height: 16),
+                              _buildDetailRow(
+                                'Accrued Overdue Interest',
+                                '+ ₹ ${postMaturity.postMaturityInterestAmount.toStringAsFixed(2)}',
+                                Icons.percent_rounded,
+                                isBold: true,
+                                valueColor: Colors.red.shade800,
+                              ),
+                            ],
                             const Divider(height: 16),
                             _buildDetailRow(
                               'Total Payable Today (Auto)',
                               '₹ ${latePayable.totalPayableAmount.toStringAsFixed(2)}',
                               Icons.payment_rounded,
                               isBold: true,
-                              valueColor: latePayable.isOverdue ? Colors.red.shade800 : Colors.green.shade800,
+                              valueColor: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade800 : Colors.green.shade800,
                             ),
                             const Divider(height: 16),
                             _buildDetailRow(
@@ -446,7 +480,7 @@ class _RoCollectionSheetViewPageState
                               padding: const EdgeInsets.all(10),
                               margin: const EdgeInsets.only(bottom: 8),
                               decoration: BoxDecoration(
-                                color: latePayable.isOverdue ? Colors.amber.shade50 : Colors.grey.shade100,
+                                color: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.amber.shade50 : Colors.grey.shade100,
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
                                   color: latePayable.isOverdue ? Colors.amber.shade300 : Colors.grey.shade300,
@@ -547,7 +581,7 @@ class _RoCollectionSheetViewPageState
                     if (todayPayment != null) ...[
                       const Divider(height: 16),
                       _buildDetailRow(
-                        'Collected Today By',
+                        'Collected  By',
                         todayPayment.roName ?? 'Field Officer',
                         Icons.person_pin_rounded,
                         isBold: true,
@@ -957,7 +991,7 @@ class _RoCollectionSheetViewPageState
                                       const SizedBox(width: 4),
                                       Text(
                                         p.isAdminOrOfficeEntry
-                                            ? 'Recorded By: Admin ($roDisplay) • Office Route'
+                                            ? 'Recorded By: ($roDisplay)'
                                             : 'Collected By: $roDisplay',
                                         style: TextStyle(
                                           fontSize: 11,
@@ -1906,7 +1940,7 @@ class _RoCollectionSheetViewPageState
                 DataColumn(label: Text('Loanee Name')),
                 DataColumn(label: Text('ACNO')),
                 DataColumn(label: Text('Payable Amount')),
-                DataColumn(label: Text('Late Payment Fee')),
+                DataColumn(label: Text('Overdue')),
                 DataColumn(label: Text('Sanction Date')),
                 DataColumn(label: Text('Maturity Date')),
                 DataColumn(label: Text('Collected')),
@@ -1958,6 +1992,65 @@ class _RoCollectionSheetViewPageState
                             mobileNo: entry.mobileNo,
                             name: entry.loaneeName,
                           );
+                          final payments = provider.getPaymentsForCollection(entry.id);
+                          final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
+                            entry: entry,
+                            payments: payments,
+                            loaneeLoanAmount: loanee?.loanAmount,
+                            maturityDate: loanee?.loanMaturityDate,
+                          );
+                          final postMaturity = breakdown.postMaturityBreakdown;
+
+                          if (postMaturity != null && postMaturity.isPastMaturity) {
+                            final formattedTotal = (postMaturity.postMaturityPayableAmount % 1 == 0)
+                                ? postMaturity.postMaturityPayableAmount.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')
+                                : postMaturity.postMaturityPayableAmount.toStringAsFixed(2);
+
+                            return Tooltip(
+                              message: 'PAST MATURITY: ${postMaturity.explanation}',
+                              child: InkWell(
+                                onTap: () => _showViewDetailsModal(context, entry),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade50,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: Colors.red.shade300),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '₹ $formattedTotal',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.red.shade900,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 3.5),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.shade900,
+                                          borderRadius: BorderRadius.circular(3),
+                                        ),
+                                        child: Text(
+                                          '${postMaturity.overdueMonths > 0 ? "${postMaturity.overdueMonths}M " : ""}MATURED',
+                                          style: const TextStyle(
+                                            fontSize: 7.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
                           final payableText = entry.getFormattedPayableAmount(
                             loaneeLoanAmount: loanee?.loanAmount,
                             configuredInterestRate: settingsProvider.investmentInterestRate,
@@ -2009,7 +2102,57 @@ class _RoCollectionSheetViewPageState
                             entry: entry,
                             payments: payments,
                             loaneeLoanAmount: loanee?.loanAmount,
+                            maturityDate: loanee?.loanMaturityDate,
                           );
+                          final postMaturity = breakdown.postMaturityBreakdown;
+
+                          if (postMaturity != null && postMaturity.isPastMaturity) {
+                            return Tooltip(
+                              message: 'Post-Maturity Overdue Interest: ₹${postMaturity.postMaturityInterestAmount.toStringAsFixed(2)} accrued (${postMaturity.overdueMonths} month(s) overdue)',
+                              child: InkWell(
+                                onTap: () => _showViewDetailsModal(context, entry),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.red.shade300),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '+ ₹ ${postMaturity.postMaturityInterestAmount.toStringAsFixed(0)}',
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.red.shade900,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 2.5),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 3, vertical: 0.5),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.shade900,
+                                          borderRadius: BorderRadius.circular(2),
+                                        ),
+                                        child: const Text(
+                                          'OVERDUE INT',
+                                          style: TextStyle(
+                                            fontSize: 7,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
 
                           if (breakdown.lateUnits > 0) {
                             return Tooltip(
@@ -2059,11 +2202,14 @@ class _RoCollectionSheetViewPageState
                             );
                           }
 
-                          return Text('₹ 0',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.grey.shade500,
-                              ));
+                          return Text(
+                            '₹ 0',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.green.shade800,
+                            ),
+                          );
                         },
                       ),
                     ),
@@ -2491,6 +2637,63 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                       mobileNo: entry.mobileNo,
                       name: entry.loaneeName,
                     );
+                    final collectionProvider =
+                        Provider.of<CollectionSheetProvider>(context, listen: false);
+                    final payments = collectionProvider.getPaymentsForCollection(entry.id);
+                    final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
+                      entry: entry,
+                      payments: payments,
+                      loaneeLoanAmount: loanee?.loanAmount,
+                      maturityDate: loanee?.loanMaturityDate,
+                    );
+                    final postMaturity = breakdown.postMaturityBreakdown;
+
+                    if (postMaturity != null && postMaturity.isPastMaturity) {
+                      final formattedTotal = (postMaturity.postMaturityPayableAmount % 1 == 0)
+                          ? postMaturity.postMaturityPayableAmount.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')
+                          : postMaturity.postMaturityPayableAmount.toStringAsFixed(2);
+
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '₹ $formattedTotal',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red.shade900,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 3.5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade900,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(
+                                '${postMaturity.overdueMonths > 0 ? "${postMaturity.overdueMonths}M " : ""}MATURED',
+                                style: const TextStyle(
+                                  fontSize: 7.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
                     final payableText = entry.getFormattedPayableAmount(
                       loaneeLoanAmount: loanee?.loanAmount,
                       configuredInterestRate: settingsProvider.investmentInterestRate,
@@ -2637,6 +2840,7 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                       entry: entry,
                       payments: payments,
                       loaneeLoanAmount: loanee?.loanAmount,
+                      maturityDate: loanee?.loanMaturityDate,
                     );
 
                     return Column(
@@ -3033,6 +3237,7 @@ class __AddPaymentEntryModalContentState
         entry: widget.entry,
         payments: payments,
         loaneeLoanAmount: loanee?.loanAmount,
+        maturityDate: loanee?.loanMaturityDate,
       );
 
       _payableBreakdown = breakdown;
@@ -3050,8 +3255,11 @@ class __AddPaymentEntryModalContentState
   void _updateRemainingBalanceDisplay() {
     final payment =
         double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
-    final calculatedBal = (_currentDueBalance >= payment)
-        ? (_currentDueBalance - payment)
+    final totalTarget = (_payableBreakdown?.isPastMaturity == true)
+        ? _payableBreakdown!.totalPayableAmount
+        : _currentDueBalance;
+    final calculatedBal = (totalTarget >= payment)
+        ? (totalTarget - payment)
         : 0.0;
     _remainingBalanceController.text = calculatedBal.toStringAsFixed(2);
     if (mounted) {
@@ -3635,7 +3843,9 @@ class __AddPaymentEntryModalContentState
                           entry: widget.entry,
                           payments: payments,
                           loaneeLoanAmount: loanee?.loanAmount,
+                          maturityDate: loanee?.loanMaturityDate,
                         );
+                        final postMaturity = breakdown.postMaturityBreakdown;
                         final loanBreakdown = widget.entry.getLoanBreakdown(
                           loaneeLoanAmount: loanee?.loanAmount,
                           configuredInterestRate: settingsProvider.investmentInterestRate,
@@ -3658,9 +3868,25 @@ class __AddPaymentEntryModalContentState
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text('Base Installment (${widget.entry.frequencyLabel}):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
-                                Text('₹ ${breakdown.currentInstallment.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF1E1E1E))),
+                                Text('₹ ${breakdown.baseInstallment.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF1E1E1E))),
                               ],
                             ),
+                            if (postMaturity != null && postMaturity.isPastMaturity) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Post-Maturity Overdue Interest:',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red.shade900),
+                                  ),
+                                  Text(
+                                    '+ ₹ ${postMaturity.postMaturityInterestAmount.toStringAsFixed(2)}',
+                                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.red.shade900),
+                                  ),
+                                ],
+                              ),
+                            ],
                             if (breakdown.lateUnits > 0) ...[
                               const SizedBox(height: 6),
                               Row(
@@ -3681,20 +3907,20 @@ class __AddPaymentEntryModalContentState
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('Total Payable:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: breakdown.isOverdue ? Colors.red.shade900 : Colors.green.shade900)),
+                                Text('Total Payable:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: (breakdown.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade900 : Colors.green.shade900)),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: breakdown.isOverdue ? Colors.red.shade50 : Colors.green.shade50,
+                                    color: (breakdown.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade50 : Colors.green.shade50,
                                     borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: breakdown.isOverdue ? Colors.red.shade300 : Colors.green.shade300),
+                                    border: Border.all(color: (breakdown.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade300 : Colors.green.shade300),
                                   ),
                                   child: Text(
                                     '₹ ${breakdown.totalPayableAmount.toStringAsFixed(2)}',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
-                                      color: breakdown.isOverdue ? Colors.red.shade900 : Colors.green.shade900,
+                                      color: (breakdown.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade900 : Colors.green.shade900,
                                     ),
                                   ),
                                 ),
