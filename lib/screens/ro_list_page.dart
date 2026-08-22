@@ -5,6 +5,7 @@ import '../models/user_model.dart';
 import '../models/ro_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/ro_provider.dart';
+import '../widgets/edit_ro_dialog.dart';
 
 class RoListPage extends StatefulWidget {
   final VoidCallback? onCreateRoPressed;
@@ -505,6 +506,36 @@ class _RoListPageState extends State<RoListPage> {
                                 ),
                               ),
                             ),
+                            if (isAdmin) ...[
+                              InkWell(
+                                onTap: () => EditRoDialog.show(context, item),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.shade50,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.amber.shade300),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.edit_note_rounded, size: 14, color: Colors.amber.shade900),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        'Edit',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.amber.shade900,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
                             // Interactive Status Toggle Pill & Switch (Admin Only)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
@@ -829,13 +860,37 @@ class _RoListPageState extends State<RoListPage> {
               ),
             ),
             actions: [
+              if (isAdmin)
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber.shade800,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      if (context.mounted) {
+                        EditRoDialog.show(context, currentRo);
+                      }
+                    });
+                  },
+                  icon: const Icon(Icons.edit_note_rounded, size: 15),
+                  label: const Text('Edit RO Details', style: TextStyle(fontSize: 12)),
+                ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('Close', style: TextStyle(color: Colors.white)),
+                child: const Text('Close', style: TextStyle(color: Colors.white, fontSize: 12)),
               ),
             ],
           );

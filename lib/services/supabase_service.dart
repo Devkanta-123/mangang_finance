@@ -1,5 +1,4 @@
 // lib/services/supabase_service.dart
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/loanee_model.dart';
@@ -9,6 +8,7 @@ import '../models/ro_collection_entry_model.dart';
 import '../models/user_model.dart';
 import '../models/collection_payment_model.dart';
 import '../models/investment_model.dart';
+import '../models/notification_model.dart';
 
 class SupabaseService {
   static final SupabaseService instance = SupabaseService._internal();
@@ -75,13 +75,32 @@ class SupabaseService {
       if (supaClient != null) {
         final payload = loanee.toJson();
         
-        await supaClient
-            .from('loanee_accounts')
-            .upsert(
-              payload,
-              onConflict: 'customerid',
-            )
-            .select();
+        try {
+          await supaClient
+              .from('loanee_accounts')
+              .upsert(
+                payload,
+                onConflict: 'customerid',
+              )
+              .select();
+        } catch (colErr) {
+          debugPrint('⚠️ Upsert with date columns note: $colErr, trying fallback without date columns');
+          try {
+            final safePayload = Map<String, dynamic>.from(payload)
+              ..remove('loansanctiondate')
+              ..remove('loanmaturitydate');
+            await supaClient
+                .from('loanee_accounts')
+                .upsert(
+                  safePayload,
+                  onConflict: 'customerid',
+                )
+                .select();
+          } catch (colErr2) {
+            debugPrint('⚠️ Fallback loanee upsert note: $colErr2');
+            rethrow;
+          }
+        }
             
         debugPrint('✅ Successfully saved loanee ${loanee.customerid} to Supabase (loanee_accounts).');
 
@@ -1464,5 +1483,194 @@ class SupabaseService {
       amount: amount,
       settings: settings,
     );
+  }
+
+  // ==========================================
+  // REAL-TIME NOTIFICATIONS METHODS
+  // ==========================================
+
+  /// Fetch notifications for current user (filtered by matching recipient IDs or 'admin')
+  Future<List<AppNotification>> fetchNotificationsForUser({
+    required String userId,
+    String? customerId,
+    String? mobileNo,
+    bool isAdmin = false,
+  }) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return [];
+
+      final validRecipients = <String>{};
+      if (userId.isNotEmpty) validRecipients.add(userId);
+      if (customerId != null && customerId.isNotEmpty) validRecipients.add(customerId);
+      if (mobileNo != null && mobileNo.isNotEmpty) validRecipients.add(mobileNo);
+      if (isAdmin) {
+        validRecipients.add('admin');
+        validRecipients.add('ADM-01');
+      }
+
+      if (validRecipients.isEmpty) return [];
+
+      // Query notifications matching any of the user's identifiers
+      final response = await supaClient
+          .from('notifications')
+          .select('*')
+          .inFilter('recipient_user_id', validRecipients.toList())
+          .order('created_at', ascending: false)
+          .limit(100);
+
+      if (response.isNotEmpty) {
+        final seenIds = <String>{};
+        final seenRefKeys = <String>{};
+        final list = <AppNotification>[];
+        for (var item in response) {
+          final n = AppNotification.fromJson(Map<String, dynamic>.from(item));
+          final refKey = n.referenceId != null && n.referenceId!.isNotEmpty
+              ? '${n.notificationType}_${n.referenceId}'
+              : n.id;
+
+          if (n.id.isNotEmpty && !seenIds.contains(n.id) && !seenRefKeys.contains(refKey)) {
+            seenIds.add(n.id);
+            seenRefKeys.add(refKey);
+            list.add(n);
+          }
+        }
+        return list;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching notifications: $e');
+    }
+    return [];
+  }
+
+  /// Save single notification to Supabase 'notifications' table
+  Future<bool> saveNotification(AppNotification notification) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        await supaClient
+            .from('notifications')
+            .upsert(notification.toJson(), onConflict: 'id')
+            .select();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error saving notification: $e');
+    }
+    return false;
+  }
+
+  /// Create and dispatch notifications for a collection payment
+  /// Uses deterministic IDs matching DB triggers to ensure zero duplicates
+  Future<void> createCollectionPaymentNotifications({
+    required CollectionPaymentModel payment,
+    required RoCollectionEntry card,
+  }) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return;
+
+      final roName = payment.roName?.isNotEmpty == true ? payment.roName! : 'RO Field Officer';
+      final formattedAmount = payment.paymentAmount.toStringAsFixed(2);
+      final formattedRemaining = payment.remainingBalance.toStringAsFixed(2);
+
+      // 1. Single Notification for the specific Loanee (deterministic ID)
+      final loaneeTarget = card.customerId.isNotEmpty ? card.customerId : card.mobileNo;
+      if (loaneeTarget.isNotEmpty) {
+        final loaneeNotification = AppNotification(
+          id: 'notif_pay_${payment.id}_loanee',
+          recipientUserId: loaneeTarget,
+          senderUserId: payment.roId,
+          notificationType: 'collection_payment',
+          title: 'Payment Received',
+          message: 'Dear ${card.loaneeName}, payment of ₹$formattedAmount has been recorded by $roName. Remaining balance: ₹$formattedRemaining.',
+          referenceId: payment.id,
+          isRead: false,
+          createdAt: payment.createdAt,
+        );
+        await saveNotification(loaneeNotification);
+      }
+
+      // 2. Single Notification for Admin Broadcast (deterministic ID)
+      final adminNotification = AppNotification(
+        id: 'notif_pay_${payment.id}_admin',
+        recipientUserId: 'admin',
+        senderUserId: payment.roId,
+        notificationType: 'collection_payment',
+        title: 'New Collection Payment',
+        message: '$roName collected ₹$formattedAmount from ${card.loaneeName} (${card.accountNumber.isNotEmpty ? card.accountNumber : card.customerId}).',
+        referenceId: payment.id,
+        isRead: false,
+        createdAt: payment.createdAt,
+      );
+      await saveNotification(adminNotification);
+    } catch (e) {
+      debugPrint('⚠️ Error dispatching payment notifications: $e');
+    }
+  }
+
+  /// Mark notification as read
+  Future<bool> markNotificationAsRead(String id) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        await supaClient
+            .from('notifications')
+            .update({'is_read': true})
+            .eq('id', id);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error marking notification read: $e');
+    }
+    return false;
+  }
+
+  /// Mark all notifications as read for a set of recipient IDs
+  Future<bool> markAllNotificationsAsRead(List<String> recipientIds) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null && recipientIds.isNotEmpty) {
+        await supaClient
+            .from('notifications')
+            .update({'is_read': true})
+            .inFilter('recipient_user_id', recipientIds);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error marking all notifications read: $e');
+    }
+    return false;
+  }
+
+  /// Delete notification by ID
+  Future<bool> deleteNotification(String id) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        await supaClient.from('notifications').delete().eq('id', id);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error deleting notification: $e');
+    }
+    return false;
+  }
+
+  /// Clear all notifications for matching recipient IDs
+  Future<bool> clearAllNotifications(List<String> recipientIds) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null && recipientIds.isNotEmpty) {
+        await supaClient
+            .from('notifications')
+            .delete()
+            .inFilter('recipient_user_id', recipientIds);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error clearing all notifications: $e');
+    }
+    return false;
   }
 }

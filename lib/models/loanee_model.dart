@@ -18,6 +18,8 @@ class LoaneeAccount {
   final double loanamount;
   final double paidamount;
   final double dueamount;
+  final DateTime? loansanctiondate;
+  final DateTime? loanmaturitydate;
 
   // Witness Details
   final String witnessname;
@@ -50,6 +52,8 @@ class LoaneeAccount {
     this.loanamount = 0.0,
     this.paidamount = 0.0,
     this.dueamount = 0.0,
+    DateTime? loansanctiondate,
+    DateTime? loanmaturitydate,
     this.witnessname = '',
     this.witnessguardianname = '',
     this.witnessaddress = '',
@@ -61,7 +65,25 @@ class LoaneeAccount {
     this.witnessmobileno = '',
     this.witnessaadharno = '',
     this.witnessrelationship = '',
-  }) : createdat = createdat ?? DateTime.now();
+  })  : createdat = createdat ?? DateTime.now(),
+        loansanctiondate = loansanctiondate ?? createdat ?? DateTime.now(),
+        loanmaturitydate = loanmaturitydate ?? calculateMaturityDate(loansanctiondate ?? createdat ?? DateTime.now());
+
+  /// Automatically calculates maturity date (5 months after sanction date)
+  static DateTime calculateMaturityDate(DateTime sanction) {
+    int year = sanction.year;
+    int month = sanction.month + 5;
+    if (month > 12) {
+      year += (month - 1) ~/ 12;
+      month = ((month - 1) % 12) + 1;
+    }
+    int day = sanction.day;
+    int daysInMonth = DateTime(year, month + 1, 0).day;
+    if (day > daysInMonth) {
+      day = daysInMonth;
+    }
+    return DateTime(year, month, day);
+  }
 
   // Backward compatibility & camelCase getters for Loanee
   String get customerId => customerid;
@@ -79,6 +101,18 @@ class LoaneeAccount {
   double get paidAmount => paidamount;
   double get dueAmount => dueamount;
   bool get isActive => status.toLowerCase() != 'inactive';
+  DateTime? get loanSanctionDate => loansanctiondate;
+  DateTime? get loanMaturityDate => loanmaturitydate;
+
+  String get formattedSanctionDate {
+    final d = loansanctiondate ?? createdat;
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
+  String get formattedMaturityDate {
+    final d = loanmaturitydate ?? calculateMaturityDate(loansanctiondate ?? createdat);
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
 
   // Witness getters
   String get witnessName => witnessname;
@@ -111,6 +145,8 @@ class LoaneeAccount {
     double? loanamount,
     double? paidamount,
     double? dueamount,
+    DateTime? loansanctiondate,
+    DateTime? loanmaturitydate,
     String? witnessname,
     String? witnessguardianname,
     String? witnessaddress,
@@ -141,6 +177,8 @@ class LoaneeAccount {
       loanamount: loanamount ?? this.loanamount,
       paidamount: paidamount ?? this.paidamount,
       dueamount: dueamount ?? this.dueamount,
+      loansanctiondate: loansanctiondate ?? this.loansanctiondate,
+      loanmaturitydate: loanmaturitydate ?? this.loanmaturitydate,
       witnessname: witnessname ?? this.witnessname,
       witnessguardianname: witnessguardianname ?? this.witnessguardianname,
       witnessaddress: witnessaddress ?? this.witnessaddress,
@@ -174,6 +212,8 @@ class LoaneeAccount {
       'loanamount': loanamount,
       'paidamount': paidamount,
       'dueamount': dueamount,
+      'loansanctiondate': loansanctiondate?.toIso8601String(),
+      'loanmaturitydate': loanmaturitydate?.toIso8601String(),
       'witnessname': witnessname,
       'witnessguardianname': witnessguardianname,
       'witnessaddress': witnessaddress,
@@ -196,6 +236,28 @@ class LoaneeAccount {
   }
 
   factory LoaneeAccount.fromJson(Map<String, dynamic> json) {
+    final parsedCreatedAt = json['createdat'] != null
+        ? (DateTime.tryParse(json['createdat'].toString()) ?? DateTime.now())
+        : (json['createdAt'] != null
+            ? (DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now())
+            : DateTime.now());
+
+    final parsedSanctionDate = json['loansanctiondate'] != null
+        ? DateTime.tryParse(json['loansanctiondate'].toString())
+        : (json['loanSanctionDate'] != null
+            ? DateTime.tryParse(json['loanSanctionDate'].toString())
+            : (json['loan_sanction_date'] != null
+                ? DateTime.tryParse(json['loan_sanction_date'].toString())
+                : null));
+
+    final parsedMaturityDate = json['loanmaturitydate'] != null
+        ? DateTime.tryParse(json['loanmaturitydate'].toString())
+        : (json['loanMaturityDate'] != null
+            ? DateTime.tryParse(json['loanMaturityDate'].toString())
+            : (json['loan_maturity_date'] != null
+                ? DateTime.tryParse(json['loan_maturity_date'].toString())
+                : null));
+
     return LoaneeAccount(
       customerid: json['customerid']?.toString() ?? json['customerId']?.toString() ?? '',
       accountnumber: json['accountnumber']?.toString() ?? json['accountNumber']?.toString() ?? '',
@@ -209,15 +271,13 @@ class LoaneeAccount {
       pincode: json['pincode']?.toString() ?? json['pinCode']?.toString() ?? '',
       mobileno: json['mobileno']?.toString() ?? json['mobileNo']?.toString() ?? '',
       aadharno: json['aadharno']?.toString() ?? json['aadharNo']?.toString() ?? '',
-      createdat: json['createdat'] != null
-          ? (DateTime.tryParse(json['createdat'].toString()) ?? DateTime.now())
-          : (json['createdAt'] != null
-              ? (DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now())
-              : DateTime.now()),
+      createdat: parsedCreatedAt,
       status: json['status']?.toString() ?? 'Active',
       loanamount: _parseDouble(json['loanamount'] ?? json['loanAmount'] ?? json['loan_amount']),
       paidamount: _parseDouble(json['paidamount'] ?? json['paidAmount'] ?? json['paid_amount']),
       dueamount: _parseDouble(json['dueamount'] ?? json['dueAmount'] ?? json['due_amount']),
+      loansanctiondate: parsedSanctionDate ?? parsedCreatedAt,
+      loanmaturitydate: parsedMaturityDate ?? calculateMaturityDate(parsedSanctionDate ?? parsedCreatedAt),
       witnessname: json['witnessname']?.toString() ?? json['witnessName']?.toString() ?? '',
       witnessguardianname: json['witnessguardianname']?.toString() ?? json['witnessGuardianName']?.toString() ?? '',
       witnessaddress: json['witnessaddress']?.toString() ?? json['witnessAddress']?.toString() ?? '',

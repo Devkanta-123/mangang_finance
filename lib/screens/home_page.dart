@@ -867,6 +867,64 @@ class HomePage extends StatelessWidget {
                     ),
                   ],
                 ),
+
+                const SizedBox(height: 12),
+
+                // Loan Sanction & Maturity Date Section
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.calendar_today_rounded, size: 14, color: Colors.white70),
+                      const SizedBox(width: 6),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Sanction Date', style: TextStyle(color: Colors.white60, fontSize: 9.5)),
+                          const SizedBox(height: 1),
+                          Text(
+                            loaneeAccount?.formattedSanctionDate ?? 'N/A',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      Container(height: 24, width: 1, color: Colors.white24),
+                      const Spacer(),
+                      const Icon(Icons.event_available_rounded, size: 14, color: Colors.amberAccent),
+                      const SizedBox(width: 6),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Text('Maturity Date', style: TextStyle(color: Colors.white60, fontSize: 9.5)),
+                              const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.teal.shade700,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Text('5 Months', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            loaneeAccount?.formattedMaturityDate ?? 'N/A',
+                            style: const TextStyle(color: Colors.amberAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),

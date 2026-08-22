@@ -4,6 +4,7 @@ import '../models/user_model.dart';
 import '../models/loanee_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/loanee_provider.dart';
+import '../widgets/edit_loanee_dialog.dart';
 
 class RecentLoaneesPage extends StatefulWidget {
   final VoidCallback? onCreateLoaneePressed;
@@ -256,6 +257,8 @@ class _RecentLoaneesPageState extends State<RecentLoaneesPage> {
                   const Divider(height: 20),
                   _buildModalSectionTitle('LOAN & FINANCIAL STATS'),
                   _buildModalRow('Sanctioned Amount', '₹ ${currentAccount.loanAmount.toStringAsFixed(2)}', Icons.currency_rupee_rounded, valueColor: Colors.black87),
+                  _buildModalRow('Loan Sanction Date', currentAccount.formattedSanctionDate, Icons.calendar_today_outlined),
+                  _buildModalRow('Loan Maturity Date (5m)', currentAccount.formattedMaturityDate, Icons.event_available_outlined, valueColor: Colors.teal.shade800),
                   _buildModalRow('Total Paid Amount', '₹ ${currentAccount.paidAmount.toStringAsFixed(2)}', Icons.payments_outlined, valueColor: Colors.green.shade800),
                   _buildModalRow('Remaining Due Balance', '₹ ${currentAccount.dueAmount.toStringAsFixed(2)}', Icons.money_off_rounded, valueColor: Colors.orange.shade900),
 
@@ -274,14 +277,38 @@ class _RecentLoaneesPageState extends State<RecentLoaneesPage> {
               ),
             ),
             actions: [
+              if (isAdmin)
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF8B1A1A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      if (context.mounted) {
+                        EditLoaneeDialog.show(context, currentAccount);
+                      }
+                    });
+                  },
+                  icon: const Icon(Icons.edit_note_rounded, size: 15),
+                  label: const Text('Edit Loanee', style: TextStyle(fontSize: 12)),
+                ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF8B1A1A),
+                  backgroundColor: Colors.black,
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('Close'),
+                child: const Text('Close', style: TextStyle(fontSize: 12)),
               ),
             ],
           );
@@ -730,6 +757,8 @@ class _RecentLoaneesPageState extends State<RecentLoaneesPage> {
                                     _buildTagChip('📍 ${account.district}', Colors.grey.shade100, Colors.black87),
                                   if (account.businesstype.isNotEmpty)
                                     _buildTagChip('🏢 ${account.businesstype}', Colors.amber.shade50, Colors.amber.shade900),
+                                  _buildTagChip('📅 Sanction: ${account.formattedSanctionDate}', Colors.grey.shade100, Colors.grey.shade800),
+                                  _buildTagChip('⏳ Maturity: ${account.formattedMaturityDate}', Colors.teal.shade50, Colors.teal.shade900),
                                 ],
                               ),
                               const Divider(height: 18),
@@ -809,31 +838,66 @@ class _RecentLoaneesPageState extends State<RecentLoaneesPage> {
                                       ),
                                     ],
                                   ),
-                                  InkWell(
-                                    onTap: () => _showLoaneeDetailsDialog(context, account, isAdmin),
-                                    borderRadius: BorderRadius.circular(6),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: const Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.visibility_outlined, size: 13, color: Color(0xFF8B1A1A)),
-                                          SizedBox(width: 4),
-                                          Text(
-                                            'View Details',
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.bold,
-                                              color: Color(0xFF8B1A1A),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (isAdmin) ...[
+                                        InkWell(
+                                          onTap: () => EditLoaneeDialog.show(context, account),
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            margin: const EdgeInsets.only(right: 6),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.3)),
+                                            ),
+                                            child: const Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.edit_note_rounded, size: 13, color: Color(0xFF8B1A1A)),
+                                                SizedBox(width: 3),
+                                                Text(
+                                                  'Edit',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Color(0xFF8B1A1A),
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                        ],
+                                        ),
+                                      ],
+                                      InkWell(
+                                        onTap: () => _showLoaneeDetailsDialog(context, account, isAdmin),
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: const Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.visibility_outlined, size: 13, color: Color(0xFF8B1A1A)),
+                                              SizedBox(width: 4),
+                                              Text(
+                                                'View Details',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Color(0xFF8B1A1A),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
                                       ),
-                                    ),
+                                    ],
                                   ),
                                 ],
                               ),

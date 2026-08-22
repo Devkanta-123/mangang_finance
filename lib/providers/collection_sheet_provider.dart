@@ -225,7 +225,70 @@ class CollectionSheetProvider extends ChangeNotifier {
     notifyListeners();
 
     // Save payment to Supabase table ro_collection_payments
-    return await SupabaseService.instance.saveCollectionPayment(payment);
+    final success = await SupabaseService.instance.saveCollectionPayment(payment);
+    if (success) {
+      final parentCard = getCollectionEntryById(payment.collectionId);
+      if (parentCard != null) {
+        // Trigger notification creation fallback
+        SupabaseService.instance.createCollectionPaymentNotifications(
+          payment: payment,
+          card: parentCard,
+        );
+      }
+    }
+    return success;
+  }
+
+  // ==========================================
+  // REALTIME POSTGRES CHANGES HANDLERS
+  // ==========================================
+
+  void handleRealtimePaymentInsert(CollectionPaymentModel payment) {
+    final existingIndex = _payments.indexWhere((p) => p.id == payment.id);
+    if (existingIndex == -1) {
+      _payments.insert(0, payment);
+      notifyListeners();
+    }
+  }
+
+  void handleRealtimePaymentUpdate(CollectionPaymentModel payment) {
+    final existingIndex = _payments.indexWhere((p) => p.id == payment.id);
+    if (existingIndex != -1) {
+      _payments[existingIndex] = payment;
+      notifyListeners();
+    } else {
+      _payments.insert(0, payment);
+      notifyListeners();
+    }
+  }
+
+  void handleRealtimePaymentDelete(String id) {
+    _payments.removeWhere((p) => p.id == id);
+    notifyListeners();
+  }
+
+  void handleRealtimeEntryInsert(RoCollectionEntry entry) {
+    final existingIndex = _collectionEntries.indexWhere((e) => e.id == entry.id);
+    if (existingIndex == -1) {
+      _collectionEntries.insert(0, entry);
+      notifyListeners();
+    }
+  }
+
+  void handleRealtimeEntryUpdate(RoCollectionEntry entry) {
+    final existingIndex = _collectionEntries.indexWhere((e) => e.id == entry.id);
+    if (existingIndex != -1) {
+      _collectionEntries[existingIndex] = entry;
+      notifyListeners();
+    } else {
+      _collectionEntries.insert(0, entry);
+      notifyListeners();
+    }
+  }
+
+  void handleRealtimeEntryDelete(String id) {
+    _collectionEntries.removeWhere((e) => e.id == id);
+    notifyListeners();
   }
 
   Future<bool> updateCollectionEntry(RoCollectionEntry updatedEntry) async {

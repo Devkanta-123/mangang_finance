@@ -34,6 +34,12 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
   final TextEditingController _aadharController = TextEditingController();
   final TextEditingController _loanAmountController = TextEditingController();
 
+  // Loan Sanction & Maturity Dates (5 Months Auto-calculated, can be edited)
+  DateTime _loanSanctionDate = DateTime.now();
+  late DateTime _loanMaturityDate;
+  final TextEditingController _loanSanctionDateController = TextEditingController();
+  final TextEditingController _loanMaturityDateController = TextEditingController();
+
   // Witness Controllers (11 Witness Details)
   final TextEditingController _witnessNameController = TextEditingController();
   final TextEditingController _witnessGuardianNameController = TextEditingController(); // W/O, S/O, D/O
@@ -121,11 +127,80 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
     _witnessBusinessTypeController.text = _selectedWitnessBusinessType;
     _witnessRelationshipController.text = _selectedWitnessRelationship;
 
+    _loanMaturityDate = LoaneeAccount.calculateMaturityDate(_loanSanctionDate);
+    _loanSanctionDateController.text =
+        '${_loanSanctionDate.day.toString().padLeft(2, '0')}/${_loanSanctionDate.month.toString().padLeft(2, '0')}/${_loanSanctionDate.year}';
+    _loanMaturityDateController.text =
+        '${_loanMaturityDate.day.toString().padLeft(2, '0')}/${_loanMaturityDate.month.toString().padLeft(2, '0')}/${_loanMaturityDate.year}';
+
     _loanAmountController.addListener(() {
       if (mounted) setState(() {});
     });
   }
 
+  Future<void> _pickLoanSanctionDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _loanSanctionDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2050),
+      helpText: 'Select Loan Sanction Date',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Colors.black,
+              onPrimary: Colors.white,
+              onSurface: Colors.black87,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _loanSanctionDate = picked;
+        _loanSanctionDateController.text =
+            '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
+        // Auto calculate +5 months
+        _loanMaturityDate = LoaneeAccount.calculateMaturityDate(picked);
+        _loanMaturityDateController.text =
+            '${_loanMaturityDate.day.toString().padLeft(2, '0')}/${_loanMaturityDate.month.toString().padLeft(2, '0')}/${_loanMaturityDate.year}';
+      });
+    }
+  }
+
+  Future<void> _pickLoanMaturityDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _loanMaturityDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2050),
+      helpText: 'Select Loan Maturity Date (Custom / Edited)',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Colors.black,
+              onPrimary: Colors.white,
+              onSurface: Colors.black87,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _loanMaturityDate = picked;
+        _loanMaturityDateController.text =
+            '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
+      });
+    }
+  }
 
   void _copyAddressFromLoanee() {
     setState(() {
@@ -167,6 +242,8 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
     _mobileController.dispose();
     _aadharController.dispose();
     _loanAmountController.dispose();
+    _loanSanctionDateController.dispose();
+    _loanMaturityDateController.dispose();
 
     // Dispose witness controllers
     _witnessNameController.dispose();
@@ -210,6 +287,8 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
         loanamount: loanAmount,
         paidamount: 0.0,
         dueamount: loanAmount,
+        loansanctiondate: _loanSanctionDate,
+        loanmaturitydate: _loanMaturityDate,
 
         // Witness Details
         witnessname: _witnessNameController.text.trim(),
@@ -281,6 +360,13 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
     _mobileController.clear();
     _aadharController.clear();
     _loanAmountController.clear();
+
+    _loanSanctionDate = DateTime.now();
+    _loanMaturityDate = LoaneeAccount.calculateMaturityDate(_loanSanctionDate);
+    _loanSanctionDateController.text =
+        '${_loanSanctionDate.day.toString().padLeft(2, '0')}/${_loanSanctionDate.month.toString().padLeft(2, '0')}/${_loanSanctionDate.year}';
+    _loanMaturityDateController.text =
+        '${_loanMaturityDate.day.toString().padLeft(2, '0')}/${_loanMaturityDate.month.toString().padLeft(2, '0')}/${_loanMaturityDate.year}';
 
     // Clear witness fields
     _witnessNameController.clear();
@@ -437,6 +523,8 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
               _buildDetailRow('Witness Mobile:', loanee.witnessMobileNo),
               _buildDetailRow('Witness District:', loanee.witnessDistrict),
               _buildDetailRow('Loan Sanction:', '₹ ${loanee.loanAmount.toStringAsFixed(0)}'),
+              _buildDetailRow('Sanction Date:', loanee.formattedSanctionDate),
+              _buildDetailRow('Maturity Date (+5m):', loanee.formattedMaturityDate),
             ],
           ),
         ),
@@ -965,6 +1053,113 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                     ),
                                   );
                                 },
+                              ),
+                              const SizedBox(height: 14),
+                              _buildResponsivePair(
+                                isWide: isWide,
+                                first: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'LOAN SANCTION DATE *',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    TextFormField(
+                                      controller: _loanSanctionDateController,
+                                      readOnly: true,
+                                      onTap: _pickLoanSanctionDate,
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+                                      decoration: _getInputDecoration(
+                                        hint: 'dd/mm/yyyy',
+                                        icon: Icons.calendar_today_rounded,
+                                      ).copyWith(
+                                        suffixIcon: IconButton(
+                                          icon: const Icon(Icons.date_range_rounded, color: Colors.black87, size: 20),
+                                          onPressed: _pickLoanSanctionDate,
+                                          tooltip: 'Pick Sanction Date',
+                                        ),
+                                      ),
+                                      validator: (val) {
+                                        if (val == null || val.trim().isEmpty) {
+                                          return 'Loan sanction date is required';
+                                        }
+                                        return null;
+                                      },
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      'Defaults to today, tap to change',
+                                      style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                                    ),
+                                  ],
+                                ),
+                                second: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Text(
+                                          'LOAN MATURITY DATE *',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                          decoration: BoxDecoration(
+                                            color: Colors.teal.shade50,
+                                            borderRadius: BorderRadius.circular(4),
+                                            border: Border.all(color: Colors.teal.shade200),
+                                          ),
+                                          child: Text(
+                                            '+5 Months',
+                                            style: TextStyle(
+                                              fontSize: 9.5,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.teal.shade900,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    TextFormField(
+                                      controller: _loanMaturityDateController,
+                                      readOnly: true,
+                                      onTap: _pickLoanMaturityDate,
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+                                      decoration: _getInputDecoration(
+                                        hint: 'dd/mm/yyyy',
+                                        icon: Icons.event_available_rounded,
+                                      ).copyWith(
+                                        suffixIcon: IconButton(
+                                          icon: const Icon(Icons.edit_calendar_rounded, color: Colors.teal, size: 20),
+                                          onPressed: _pickLoanMaturityDate,
+                                          tooltip: 'Edit Maturity Date',
+                                        ),
+                                      ),
+                                      validator: (val) {
+                                        if (val == null || val.trim().isEmpty) {
+                                          return 'Loan maturity date is required';
+                                        }
+                                        return null;
+                                      },
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      'Auto-calculated (5 months), tap to edit',
+                                      style: TextStyle(fontSize: 10.5, color: Colors.teal.shade700),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),

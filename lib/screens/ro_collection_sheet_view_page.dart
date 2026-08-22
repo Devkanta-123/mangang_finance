@@ -13,6 +13,8 @@ import '../models/collection_payment_model.dart';
 import '../services/supabase_service.dart';
 import '../services/bulk_collection_import_service.dart';
 import '../widgets/bulk_collection_upload_dialog.dart';
+import '../widgets/edit_collection_entry_dialog.dart';
+import '../widgets/edit_loanee_dialog.dart';
 
 class RoCollectionSheetViewPage extends StatefulWidget {
   final VoidCallback? onAddLoaneePressed;
@@ -467,6 +469,20 @@ class _RoCollectionSheetViewPageState
                       entry.route,
                       Icons.alt_route_rounded,
                     ),
+                    const Divider(height: 16),
+                    _buildDetailRow(
+                      'Loan Sanction Date',
+                      loanee?.formattedSanctionDate ?? 'N/A',
+                      Icons.calendar_today_rounded,
+                    ),
+                    const Divider(height: 16),
+                    _buildDetailRow(
+                      'Loan Maturity Date (5m)',
+                      loanee?.formattedMaturityDate ?? 'N/A',
+                      Icons.event_available_rounded,
+                      isBold: true,
+                      valueColor: Colors.teal.shade800,
+                    ),
                     if (todayPayment != null) ...[
                       const Divider(height: 16),
                       _buildDetailRow(
@@ -502,16 +518,76 @@ class _RoCollectionSheetViewPageState
                 ),
               ),
               if (isAdmin) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.amber.shade800,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          Future.delayed(const Duration(milliseconds: 100), () {
+                            if (context.mounted) {
+                              EditCollectionEntryDialog.show(context, entry);
+                            }
+                          });
+                        },
+                        icon: const Icon(Icons.edit_document, size: 15),
+                        label: const Text('Edit Card',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    if (loanee != null) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF8B1A1A),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            Future.delayed(const Duration(milliseconds: 100), () {
+                              if (context.mounted) {
+                                EditLoaneeDialog.show(context, loanee);
+                              }
+                            });
+                          },
+                          icon: const Icon(Icons.person_rounded, size: 15),
+                          label: const Text('Edit Loanee',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 8),
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.red.shade700,
                       side: BorderSide(color: Colors.red.shade300),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                     ),
                     onPressed: () async {
@@ -531,8 +607,8 @@ class _RoCollectionSheetViewPageState
                         );
                       }
                     },
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                    label: const Text('Delete Entry'),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 15),
+                    label: const Text('Delete Entry', style: TextStyle(fontSize: 12)),
                   ),
                 ),
               ],
@@ -1792,6 +1868,8 @@ class _RoCollectionSheetViewPageState
                 DataColumn(label: Text('Loanee Name')),
                 DataColumn(label: Text('ACNO')),
                 DataColumn(label: Text('Payable Amount')),
+                DataColumn(label: Text('Sanction Date')),
+                DataColumn(label: Text('Maturity Date')),
                 DataColumn(label: Text('Collected')),
                 DataColumn(label: Text('Late Fine')),
                 DataColumn(label: Text('Today')),
@@ -1872,6 +1950,50 @@ class _RoCollectionSheetViewPageState
                                 color: entry.isDaily
                                     ? Colors.blue.shade900
                                     : Colors.purple.shade900,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    DataCell(
+                      Builder(
+                        builder: (context) {
+                          final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                          final loanee = loaneeProvider.getLoaneeForUser(
+                            customerId: entry.customerId,
+                            mobileNo: entry.mobileNo,
+                            name: entry.loaneeName,
+                          );
+                          return Text(
+                            loanee?.formattedSanctionDate ?? 'N/A',
+                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),
+                          );
+                        },
+                      ),
+                    ),
+                    DataCell(
+                      Builder(
+                        builder: (context) {
+                          final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                          final loanee = loaneeProvider.getLoaneeForUser(
+                            customerId: entry.customerId,
+                            mobileNo: entry.mobileNo,
+                            name: entry.loaneeName,
+                          );
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.shade50,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.teal.shade200),
+                            ),
+                            child: Text(
+                              loanee?.formattedMaturityDate ?? 'N/A',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.teal.shade900,
                               ),
                             ),
                           );
@@ -2006,6 +2128,17 @@ class _RoCollectionSheetViewPageState
                                 _showPaymentHistoryModal(context, entry),
                           ),
                           if (isAdmin) ...[
+                            const SizedBox(width: 4),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.all(4),
+                              constraints: const BoxConstraints(),
+                              icon: Icon(Icons.edit_note_rounded,
+                                  size: 19, color: Colors.amber.shade900),
+                              tooltip: 'Edit Collection Card',
+                              onPressed: () =>
+                                  EditCollectionEntryDialog.show(context, entry),
+                            ),
                             const SizedBox(width: 4),
                             IconButton(
                               visualDensity: VisualDensity.compact,
@@ -2479,6 +2612,57 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
               ],
             ),
 
+            const SizedBox(height: 8),
+
+            Builder(
+              builder: (context) {
+                final loaneeProvider =
+                    Provider.of<LoaneeProvider>(context, listen: false);
+                final loanee = loaneeProvider.getLoaneeForUser(
+                  customerId: entry.customerId,
+                  mobileNo: entry.mobileNo,
+                  name: entry.loaneeName,
+                );
+
+                return Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today_rounded,
+                          size: 11, color: Colors.grey.shade700),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Sanction: ${loanee?.formattedSanctionDate ?? 'N/A'}',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.grey.shade800,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const Spacer(),
+                      Icon(Icons.event_available_rounded,
+                          size: 12, color: Colors.teal.shade800),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Maturity: ${loanee?.formattedMaturityDate ?? 'N/A'}',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.teal.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+
             const Divider(height: 20),
 
             // Action Buttons Row:
@@ -2522,25 +2706,53 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                     ],
                     Expanded(
                       child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF1E1E1E),
-                      side: BorderSide(color: Colors.grey.shade400),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF1E1E1E),
+                          side: BorderSide(color: Colors.grey.shade400),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: onTapView,
+                        icon: const Icon(Icons.visibility_rounded, size: 15),
+                        label: const Text(
+                          'View Details',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
-                    onPressed: onTapView,
-                    icon: const Icon(Icons.visibility_rounded, size: 16),
-                    label: const Text(
-                      'View Details',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                    if (isAdmin) ...[
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.amber.shade800,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          onPressed: () => EditCollectionEntryDialog.show(context, entry),
+                          icon: const Icon(Icons.edit_note_rounded, size: 15),
+                          label: const Text(
+                            'Edit Card',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ),
+                    ],
               ],
             );
           },

@@ -4,6 +4,7 @@ import '../models/user_model.dart';
 import '../models/loanee_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/loanee_provider.dart';
+import '../widgets/edit_loanee_dialog.dart';
 
 class LoaneeListPage extends StatefulWidget {
   final VoidCallback? onCreateLoaneePressed;
@@ -498,6 +499,36 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                                 ),
                               ),
                             ),
+                            if (isAdmin) ...[
+                              InkWell(
+                                onTap: () => EditLoaneeDialog.show(context, item),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.3)),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.edit_note_rounded, size: 14, color: Color(0xFF8B1A1A)),
+                                      SizedBox(width: 2),
+                                      Text(
+                                        'Edit',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF8B1A1A),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
                             // Interactive Status Toggle Pill & Switch
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
@@ -651,6 +682,28 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                   const SizedBox(width: 4),
                   Expanded(child: _buildMiniStat('Sanctioned', '₹ ${item.loanamount.toStringAsFixed(0)}', Icons.currency_rupee)),
                 ],
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '📅 Sanction: ${item.formattedSanctionDate}',
+                      style: TextStyle(fontSize: 10.5, color: Colors.grey.shade800),
+                    ),
+                    Text(
+                      '⏳ Maturity (5m): ${item.formattedMaturityDate}',
+                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.teal.shade900),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -842,7 +895,9 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                           _buildModalRow('11. PIN Code', currentLoanee.pincode),
                           _buildModalRow('12. Business Type', currentLoanee.businesstype),
                           _buildModalRow('13. Sanctioned Amount', '₹ ${currentLoanee.loanamount.toStringAsFixed(0)}'),
-                          _buildModalRow('14. Account Status', currentLoanee.status),
+                          _buildModalRow('14. Loan Sanction Date', currentLoanee.formattedSanctionDate),
+                          _buildModalRow('15. Loan Maturity Date (5m)', currentLoanee.formattedMaturityDate),
+                          _buildModalRow('16. Account Status', currentLoanee.status),
                         ],
                       ),
                     ),
@@ -887,13 +942,37 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                 ),
               ),
               actions: [
+                if (isAdmin)
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF8B1A1A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      Future.delayed(const Duration(milliseconds: 100), () {
+                        if (context.mounted) {
+                          EditLoaneeDialog.show(context, currentLoanee);
+                        }
+                      });
+                    },
+                    icon: const Icon(Icons.edit_note_rounded, size: 15),
+                    label: const Text('Edit Loanee', style: TextStyle(fontSize: 12)),
+                  ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.black,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Close', style: TextStyle(color: Colors.white)),
+                  child: const Text('Close', style: TextStyle(color: Colors.white, fontSize: 12)),
                 ),
               ],
             ),

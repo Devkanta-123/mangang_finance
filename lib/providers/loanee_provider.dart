@@ -93,6 +93,38 @@ class LoaneeProvider extends ChangeNotifier {
     return success;
   }
 
+  /// Update entire Loanee record in-memory & in Supabase
+  Future<bool> updateLoanee(LoaneeAccount updatedLoanee) async {
+    final cleanCust = updatedLoanee.customerId.trim().toLowerCase();
+    int foundIndex = -1;
+    for (int i = 0; i < _loanees.length; i++) {
+      if (_loanees[i].customerId.trim().toLowerCase() == cleanCust ||
+          _loanees[i].accountNumber.trim().toLowerCase() == updatedLoanee.accountNumber.trim().toLowerCase()) {
+        foundIndex = i;
+        break;
+      }
+    }
+
+    if (foundIndex != -1) {
+      _loanees[foundIndex] = updatedLoanee;
+    } else {
+      _loanees.insert(0, updatedLoanee);
+    }
+    notifyListeners();
+
+    // Persist live to Supabase
+    final success = await SupabaseService.instance.saveLoaneeAccount(updatedLoanee);
+    return success;
+  }
+
+  /// Delete Loanee account
+  Future<bool> deleteLoanee(String customerId) async {
+    final cleanCust = customerId.trim().toLowerCase();
+    _loanees.removeWhere((l) => l.customerId.trim().toLowerCase() == cleanCust);
+    notifyListeners();
+    return await SupabaseService.instance.deleteLoaneeAccount(customerId);
+  }
+
   /// Toggle status between Active and Inactive
   Future<bool> toggleStatus(LoaneeAccount loanee) async {
     final nextStatus = loanee.isActive ? 'Inactive' : 'Active';
@@ -188,5 +220,36 @@ class LoaneeProvider extends ChangeNotifier {
         break;
       }
     }
+  }
+
+  // ==========================================
+  // REALTIME POSTGRES CHANGES HANDLERS
+  // ==========================================
+
+  void handleRealtimeLoaneeInsert(LoaneeAccount loanee) {
+    final cleanCust = loanee.customerId.trim().toLowerCase();
+    final index = _loanees.indexWhere((l) => l.customerId.trim().toLowerCase() == cleanCust);
+    if (index == -1) {
+      _loanees.insert(0, loanee);
+      notifyListeners();
+    }
+  }
+
+  void handleRealtimeLoaneeUpdate(LoaneeAccount loanee) {
+    final cleanCust = loanee.customerId.trim().toLowerCase();
+    final index = _loanees.indexWhere((l) => l.customerId.trim().toLowerCase() == cleanCust);
+    if (index != -1) {
+      _loanees[index] = loanee;
+      notifyListeners();
+    } else {
+      _loanees.insert(0, loanee);
+      notifyListeners();
+    }
+  }
+
+  void handleRealtimeLoaneeDelete(String customerId) {
+    final cleanCust = customerId.trim().toLowerCase();
+    _loanees.removeWhere((l) => l.customerId.trim().toLowerCase() == cleanCust);
+    notifyListeners();
   }
 }

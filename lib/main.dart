@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'models/user_model.dart';
+import 'models/notification_model.dart';
 import 'screens/splash_screen.dart';
 import 'screens/register_page.dart';
 import 'screens/otp_verification_page.dart';
@@ -23,8 +25,12 @@ import 'providers/loanee_provider.dart';
 import 'providers/ro_provider.dart';
 import 'providers/collection_sheet_provider.dart';
 import 'providers/settings_provider.dart';
+import 'providers/notification_provider.dart';
 import 'services/supabase_service.dart';
+import 'services/realtime_sync_service.dart';
 import 'widgets/app_drawer.dart';
+import 'widgets/notifications_sheet.dart';
+import 'services/sound_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,6 +50,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => RoProvider()),
         ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()),
       ],
       child: MaterialApp(
         title: 'Mangang Finance',
@@ -108,6 +115,101 @@ class MainPage extends StatefulWidget {
 class _MainPageState extends State<MainPage> {
   int _selectedIndex = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  StreamSubscription<AppNotification>? _notifSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initRealtimeAndNotifications();
+    });
+  }
+
+  void _initRealtimeAndNotifications() {
+    if (!mounted) return;
+    final collectionProvider = Provider.of<CollectionSheetProvider>(context, listen: false);
+    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    final notifProvider = Provider.of<NotificationProvider>(context, listen: false);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    RealtimeSyncService.instance.registerProviders(
+      collectionProvider: collectionProvider,
+      loaneeProvider: loaneeProvider,
+      notificationProvider: notifProvider,
+    );
+
+    notifProvider.initForUser(authProvider.currentUser);
+    RealtimeSyncService.instance.startRealtimeSubscription();
+
+    _notifSubscription?.cancel();
+    _notifSubscription = notifProvider.notificationStream.listen((notif) {
+      if (mounted) {
+        _showInAppNotificationBanner(notif);
+      }
+    });
+  }
+
+  void _showInAppNotificationBanner(AppNotification notif) {
+    SoundService.instance.playNotificationSound(isPayment: notif.isPayment);
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        backgroundColor: const Color(0xFF1E1E1E),
+        elevation: 8,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        duration: const Duration(seconds: 4),
+        content: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: notif.isPayment ? Colors.green.shade700 : const Color(0xFF8B1A1A),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                notif.isPayment ? Icons.payments_rounded : Icons.notifications_active_rounded,
+                color: Colors.white,
+                size: 17,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    notif.title,
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    notif.message,
+                    style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        action: SnackBarAction(
+          label: 'VIEW',
+          textColor: Colors.amber.shade300,
+          onPressed: () => NotificationsSheet.show(context),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _notifSubscription?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -224,6 +326,46 @@ class _MainPageState extends State<MainPage> {
           },
         ),
         actions: [
+          // Notification Bell Icon with Live Unread Badge
+          Consumer<NotificationProvider>(
+            builder: (context, notifProvider, _) {
+              final unread = notifProvider.unreadCount;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications_outlined, size: 23),
+                    tooltip: 'Notifications',
+                    onPressed: () => NotificationsSheet.show(context),
+                  ),
+                  if (unread > 0)
+                    Positioned(
+                      right: 7,
+                      top: 7,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Colors.amber,
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                        child: Text(
+                          unread > 99 ? '99+' : '$unread',
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(width: 2),
+
           // Active Role Level Badge in AppBar (Hidden for Loanee or when on Profile)
           if (authProvider.activeRole != UserType.loanee && _selectedIndex != 8)
             Container(
@@ -236,7 +378,7 @@ class _MainPageState extends State<MainPage> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.15),
+                    color: Colors.black.withValues(alpha: 0.15),
                     blurRadius: 4,
                   ),
                 ],

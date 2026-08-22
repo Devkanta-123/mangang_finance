@@ -104,7 +104,48 @@ class RoCollectionEntry {
     this.frequency,
   }) : createdAt = createdAt ?? DateTime.now();
 
+  double get initialBalance => loanAmount ?? actualPrincipal ?? 11500.0;
+
   bool get isDaily => collectionType.toLowerCase().trim() == 'daily';
+
+  RoCollectionEntry copyWith({
+    String? id,
+    String? customerId,
+    String? accountNumber,
+    String? loaneeName,
+    String? loaneeAddress,
+    String? collectionType,
+    String? route,
+    String? mobileNo,
+    DateTime? createdAt,
+    String? status,
+    double? payableAmount,
+    double? loanAmount,
+    double? actualPrincipal,
+    double? interestAmount,
+    double? interestRate,
+    String? frequency,
+    double? initialBalance,
+  }) {
+    return RoCollectionEntry(
+      id: id ?? this.id,
+      customerId: customerId ?? this.customerId,
+      accountNumber: accountNumber ?? this.accountNumber,
+      loaneeName: loaneeName ?? this.loaneeName,
+      loaneeAddress: loaneeAddress ?? this.loaneeAddress,
+      collectionType: collectionType ?? this.collectionType,
+      route: route ?? this.route,
+      mobileNo: mobileNo ?? this.mobileNo,
+      createdAt: createdAt ?? this.createdAt,
+      status: status ?? this.status,
+      payableAmount: payableAmount ?? this.payableAmount,
+      loanAmount: initialBalance ?? loanAmount ?? this.loanAmount,
+      actualPrincipal: actualPrincipal ?? this.actualPrincipal,
+      interestAmount: interestAmount ?? this.interestAmount,
+      interestRate: interestRate ?? this.interestRate,
+      frequency: frequency ?? this.frequency,
+    );
+  }
 
   /// Frequency label ('Day' for Daily, 'Week' for Weekly schemes)
   String get frequencyLabel {

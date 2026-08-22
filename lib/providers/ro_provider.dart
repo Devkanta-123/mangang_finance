@@ -93,6 +93,38 @@ class RoProvider extends ChangeNotifier {
     return success;
   }
 
+  /// Update entire RO account in-memory & in Supabase
+  Future<bool> updateRo(RoAccount updatedRo) async {
+    final cleanCust = updatedRo.customerId.trim().toLowerCase();
+    int foundIndex = -1;
+    for (int i = 0; i < _roAccounts.length; i++) {
+      if (_roAccounts[i].customerId.trim().toLowerCase() == cleanCust ||
+          _roAccounts[i].accountNumber.trim().toLowerCase() == updatedRo.accountNumber.trim().toLowerCase()) {
+        foundIndex = i;
+        break;
+      }
+    }
+
+    if (foundIndex != -1) {
+      _roAccounts[foundIndex] = updatedRo;
+    } else {
+      _roAccounts.insert(0, updatedRo);
+    }
+    notifyListeners();
+
+    // Persist live to Supabase
+    final success = await SupabaseService.instance.saveRoAccount(updatedRo);
+    return success;
+  }
+
+  /// Delete RO account
+  Future<bool> deleteRo(String customerId) async {
+    final cleanCust = customerId.trim().toLowerCase();
+    _roAccounts.removeWhere((r) => r.customerId.trim().toLowerCase() == cleanCust);
+    notifyListeners();
+    return await SupabaseService.instance.deleteRoAccount(customerId);
+  }
+
   /// Toggle status between Active and Inactive
   Future<bool> toggleStatus(RoAccount ro) async {
     final nextStatus = ro.isActive ? 'Inactive' : 'Active';

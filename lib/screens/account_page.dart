@@ -198,6 +198,20 @@ class AccountPage extends StatelessWidget {
                           value: '₹ ${loaneeAccount.loanamount.toStringAsFixed(2)}',
                         ),
                       ],
+                      const Divider(height: 20),
+                      _buildDetailRow(
+                        icon: Icons.calendar_today_rounded,
+                        label: 'Loan Sanction Date',
+                        value: loaneeAccount.formattedSanctionDate,
+                      ),
+                      const Divider(height: 20),
+                      _buildDetailRow(
+                        icon: Icons.event_available_rounded,
+                        label: 'Loan Maturity Date',
+                        value: loaneeAccount.formattedMaturityDate,
+                        badge: '5 MONTHS',
+                        badgeColor: Colors.teal.shade700,
+                      ),
                     ],
 
                     // For Admin and RO, show role info
