@@ -102,3 +102,22 @@ class CollectionPaymentModel {
     );
   }
 }
+
+/// Encapsulates paginated collection payment history results from query
+class PaginatedPaymentsResult {
+  final List<CollectionPaymentModel> payments;
+  final int totalCount;
+  final int page;
+  final int pageSize;
+  final int totalPages;
+
+  PaginatedPaymentsResult({
+    required this.payments,
+    required this.totalCount,
+    required this.page,
+    required this.pageSize,
+  }) : totalPages = totalCount > 0 ? (totalCount / pageSize).ceil() : 1;
+
+  bool get hasPreviousPage => page > 1;
+  bool get hasNextPage => page < totalPages;
+}

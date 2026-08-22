@@ -11,6 +11,8 @@ import '../providers/ro_provider.dart';
 import '../providers/settings_provider.dart';
 import '../models/collection_payment_model.dart';
 import '../services/supabase_service.dart';
+import '../services/historical_payment_import_service.dart';
+import '../widgets/historical_payment_import_dialog.dart';
 import '../widgets/edit_collection_entry_dialog.dart';
 import '../widgets/edit_loanee_dialog.dart';
 
@@ -60,6 +62,31 @@ class _RoCollectionSheetViewPageState
       _searchController.clear();
       _searchQuery = '';
     });
+  }
+
+  Future<void> _handleImportHistoricalPayments(BuildContext context) async {
+    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context, listen: false);
+    final settingsProvider =
+        Provider.of<SettingsProvider>(context, listen: false);
+
+    final preview = await HistoricalPaymentImportService.pickAndParseHistoricalPayments(
+      context: context,
+      loaneeProvider: loaneeProvider,
+      collectionProvider: collectionProvider,
+      settingsProvider: settingsProvider,
+    );
+
+    if (preview != null && context.mounted) {
+      final success = await HistoricalPaymentImportDialog.show(
+        context,
+        previewResult: preview,
+      );
+      if (success == true && context.mounted) {
+        await collectionProvider.fetchFromSupabase();
+      }
+    }
   }
 
   // SweetAlert style delete confirmation dialog
@@ -1218,13 +1245,13 @@ class _RoCollectionSheetViewPageState
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Section 1: Route Selection Cards
+                    // Section 1: Route Selection (Small Compact Cards)
                     _buildRouteSelectionCardsSection(
                         provider, availableRoutes),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
 
-                    // Section 2: Selected Route Title & Collection Types (Small Cards)
+                    // Section 2: Selected Route Title & Collection Types
                     if (_selectedRoute != null) ...[
                       _buildSelectedRouteHeaderBanner(
                           totalInSelectedRoute, totalFilteredAmount),
@@ -1257,7 +1284,7 @@ class _RoCollectionSheetViewPageState
   Widget _buildTopHeader(CollectionSheetProvider provider) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           colors: [Color(0xFF1E1E1E), Color(0xFF2C2C2C)],
@@ -1272,70 +1299,93 @@ class _RoCollectionSheetViewPageState
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade700,
-                  borderRadius: BorderRadius.circular(10),
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade700,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.table_chart_rounded,
+                      color: Colors.white, size: 18),
                 ),
-                child: const Icon(Icons.table_chart_rounded,
-                    color: Colors.white, size: 20),
-              ),
-              const SizedBox(width: 10),
-              const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Collection Sheet',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Collection Sheet",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        "Route-mapped collection ledger",
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.white70,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                  Text(
-                    'Route-mapped collection ledger',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.white70,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
+          const SizedBox(width: 8),
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              if (_selectedRoute != null)
-                TextButton.icon(
-                  onPressed: _resetFilters,
-                  icon: const Icon(Icons.refresh_rounded,
-                      size: 14, color: Colors.amber),
-                  label: const Text('Reset',
-                      style: TextStyle(
-                          color: Colors.amber,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold)),
-                  style: TextButton.styleFrom(
-                    backgroundColor: Colors.white.withOpacity(0.1),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              TextButton.icon(
+                onPressed: () => _handleImportHistoricalPayments(context),
+                icon: const Icon(Icons.upload_file_rounded,
+                    size: 13, color: Colors.white),
+                label: const Text(
+                  "Import Excel",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
+                style: TextButton.styleFrom(
+                  backgroundColor: const Color(0xFF8B1A1A),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: const BorderSide(color: Colors.white24, width: 1),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              if (_selectedRoute != null || _searchQuery.isNotEmpty) ...[
+                IconButton(
+                  icon: const Icon(Icons.refresh_rounded,
+                      size: 16, color: Colors.amber),
+                  tooltip: "Reset Filters",
+                  onPressed: _resetFilters,
+                ),
+              ],
               IconButton(
                 icon: provider.isSyncing
                     ? const SizedBox(
-                        width: 18,
-                        height: 18,
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           color: Colors.white,
                         ),
                       )
-                    : const Icon(Icons.sync_rounded, color: Colors.white),
-                tooltip: 'Sync Live Supabase Data',
+                    : const Icon(Icons.sync_rounded, size: 18, color: Colors.white),
+                tooltip: "Sync Live Supabase Data",
                 onPressed: () => provider.fetchFromSupabase(),
               ),
             ],
@@ -1346,7 +1396,7 @@ class _RoCollectionSheetViewPageState
   }
 
   // ==========================================
-  // 1. ROUTE SELECTION (SMALL CARDS WISE)
+  // 1. ROUTE SELECTION (SMALL COMPACT CARDS WISE)
   // ==========================================
   Widget _buildRouteSelectionCardsSection(
       CollectionSheetProvider provider, List<String> availableRoutes) {
@@ -1356,15 +1406,15 @@ class _RoCollectionSheetViewPageState
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
+            const Row(
               children: [
-                const Icon(Icons.alt_route_rounded,
-                    size: 16, color: Color(0xFF8B1A1A)),
-                const SizedBox(width: 6),
-                const Text(
-                  'SELECT ROUTE ZONE',
+                Icon(Icons.alt_route_rounded,
+                    size: 15, color: Color(0xFF8B1A1A)),
+                SizedBox(width: 5),
+                Text(
+                  "ROUTE ZONES",
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 11.5,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.8,
                     color: Color(0xFF8B1A1A),
@@ -1373,35 +1423,35 @@ class _RoCollectionSheetViewPageState
               ],
             ),
             Text(
-              '${availableRoutes.length} Routes Configured',
+              "${availableRoutes.length} Routes",
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 10.5,
                 fontWeight: FontWeight.w600,
                 color: Colors.grey.shade600,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
 
         if (availableRoutes.isEmpty)
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(10),
               border: Border.all(color: Colors.grey.shade300),
             ),
             child: Row(
               children: [
                 Icon(Icons.info_outline_rounded,
-                    color: Colors.amber.shade800, size: 20),
-                const SizedBox(width: 10),
+                    color: Colors.amber.shade800, size: 18),
+                const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
-                    'No routes found. Please add routes in Route Management or create collection sheet entries.',
-                    style: TextStyle(fontSize: 12, color: Colors.black87),
+                    "No routes found. Please add routes in Route Management or create collection sheet entries.",
+                    style: TextStyle(fontSize: 11.5, color: Colors.black87),
                   ),
                 ),
               ],
@@ -1409,153 +1459,205 @@ class _RoCollectionSheetViewPageState
           )
         else
           Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: availableRoutes.map((routeName) {
-              final isSelected = _selectedRoute == routeName;
-              final routeEntries = provider.collectionEntries
-                  .where((e) =>
-                      e.route.trim().toLowerCase() ==
-                      routeName.trim().toLowerCase())
-                  .toList();
-              final routeCollected = routeEntries.fold(
-                  0.0, (sum, e) => sum + provider.getTodayPaidForCollection(e.id));
-
-              return InkWell(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              // "All Routes" compact chip
+              InkWell(
                 onTap: () {
                   setState(() {
-                    _selectedRoute = routeName;
-                    _selectedType = 'Today';
-                    _searchQuery = '';
+                    _selectedRoute = null;
+                    _selectedType = "Today";
+                    _searchQuery = "";
                     _searchController.clear();
                   });
                 },
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(8),
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                   decoration: BoxDecoration(
-                    color: isSelected
+                    color: _selectedRoute == null
                         ? const Color(0xFF8B1A1A)
                         : Colors.white,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isSelected
+                      color: _selectedRoute == null
                           ? const Color(0xFF8B1A1A)
                           : Colors.grey.shade300,
-                      width: isSelected ? 2 : 1,
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: isSelected
-                            ? const Color(0xFF8B1A1A).withOpacity(0.2)
-                            : Colors.black.withOpacity(0.03),
-                        blurRadius: isSelected ? 8 : 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        isSelected
-                            ? Icons.check_circle_rounded
-                            : Icons.alt_route_rounded,
-                        size: 16,
-                        color: isSelected ? Colors.white : const Color(0xFF8B1A1A),
+                        Icons.grid_view_rounded,
+                        size: 13,
+                        color: _selectedRoute == null ? Colors.white : Colors.grey.shade700,
                       ),
-                      const SizedBox(width: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            routeName,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: isSelected ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${routeEntries.length} ${routeEntries.length == 1 ? 'Record' : 'Records'} • ₹${routeCollected >= 1000 ? (routeCollected / 1000).toStringAsFixed(1) + 'k' : routeCollected.toStringAsFixed(0)} today',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500,
-                              color: isSelected
-                                  ? Colors.amber.shade200
-                                  : Colors.grey.shade600,
-                            ),
-                          ),
-                        ],
+                      const SizedBox(width: 4),
+                      Text(
+                        "All Routes",
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: _selectedRoute == null ? Colors.white : Colors.black87,
+                        ),
                       ),
                     ],
                   ),
                 ),
-              );
-            }).toList(),
+              ),
+              ...availableRoutes.map((routeName) {
+                final isSelected = _selectedRoute == routeName;
+                final routeEntries = provider.collectionEntries
+                    .where((e) =>
+                        e.route.trim().toLowerCase() ==
+                        routeName.trim().toLowerCase())
+                    .toList();
+
+                return InkWell(
+                  onTap: () {
+                    setState(() {
+                      _selectedRoute = routeName;
+                      _selectedType = "Today";
+                      _searchQuery = "";
+                      _searchController.clear();
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? const Color(0xFF8B1A1A)
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isSelected
+                            ? const Color(0xFF8B1A1A)
+                            : Colors.grey.shade300,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isSelected
+                              ? Icons.check_circle_rounded
+                              : Icons.alt_route_rounded,
+                          size: 13,
+                          color: isSelected ? Colors.white : const Color(0xFF8B1A1A),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          routeName,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.white.withValues(alpha: 0.25)
+                                : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            "${routeEntries.length}",
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.bold,
+                              color: isSelected ? Colors.white : Colors.grey.shade700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
           ),
       ],
     );
   }
 
   // ==========================================
-  // 2. SELECTED ROUTE HEADER BANNER
+  // 2. SELECTED ROUTE TITLE & COLLECTION TYPES
   // ==========================================
   Widget _buildSelectedRouteHeaderBanner(
       int totalInRoute, double totalCollected) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.amber.shade50,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.amber.shade300, width: 1.5),
+        color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF8B1A1A).withValues(alpha: 0.2),
+        ),
       ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.amber.shade700,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.route_rounded,
-                color: Colors.white, size: 20),
-          ),
-          const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Text(
-                  'Selected ${_selectedRoute!} Route Collection sheet',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E1E1E),
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF8B1A1A),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.location_on_rounded,
+                    color: Colors.white,
+                    size: 16,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '$totalInRoute Loanee Accounts in Route • Today Collected: ₹ ${totalCollected.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.amber.shade900,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Selected ${_selectedRoute!} Route Collection sheet",
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E1E1E),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        "$totalInRoute Loanee Accounts • Today Collected: ₹ ${totalCollected.toStringAsFixed(2)}",
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.grey.shade700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close_rounded, size: 20, color: Colors.black54),
-            tooltip: 'Clear Selected Route',
+            icon: const Icon(Icons.close_rounded, size: 18),
+            tooltip: "Clear Selected Route",
             onPressed: () {
               setState(() {
                 _selectedRoute = null;
+                _selectedType = "Today";
+                _searchController.clear();
+                _searchQuery = "";
               });
             },
           ),
@@ -1565,122 +1667,115 @@ class _RoCollectionSheetViewPageState
   }
 
   // ==========================================
-  // 3. COLLECTION TYPE (SMALL CARDS WISE AFTER ROUTE)
+  // 3. COLLECTION TYPE FILTER CARDS (TODAY / MON / TUE ...)
   // ==========================================
   Widget _buildCollectionTypeCardsSection(CollectionSheetProvider provider) {
-    final collectionDayOptions = _getCollectionDayOptions();
+    final types = _getCollectionDayOptions();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.calendar_month_rounded,
-                size: 16, color: Color(0xFF8B1A1A)),
-            const SizedBox(width: 6),
-            const Text(
-              'COLLECTION FREQUENCY / DAY',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.8,
-                color: Color(0xFF8B1A1A),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: collectionDayOptions.map((type) {
-            final isSelected = _selectedType == type;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: types.map((type) {
+        final isSelected = _selectedType == type;
+        final count = provider
+            .getFilteredEntries(
+                selectedRoute: _selectedRoute, selectedType: type)
+            .length;
 
-            // Count for this type/day in currently selected route
-            final count = provider
-                .getFilteredEntries(
-                    selectedRoute: _selectedRoute, selectedType: type)
-                .length;
-
-            return InkWell(
-              onTap: () {
-                setState(() {
-                  _selectedType = type;
-                });
-              },
+        return InkWell(
+          onTap: () {
+            setState(() {
+              _selectedType = type;
+            });
+          },
+          borderRadius: BorderRadius.circular(10),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? const Color(0xFF8B1A1A)
+                  : Colors.white,
               borderRadius: BorderRadius.circular(10),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
+              border: Border.all(
+                color: isSelected
+                    ? const Color(0xFF8B1A1A)
+                    : Colors.grey.shade300,
+              ),
+              boxShadow: [
+                BoxShadow(
                   color: isSelected
-                      ? const Color(0xFF1E1E1E)
-                      : Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: isSelected
-                        ? const Color(0xFF1E1E1E)
-                        : Colors.grey.shade300,
+                      ? const Color(0xFF8B1A1A).withValues(alpha: 0.15)
+                      : Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  type == "Today"
+                      ? Icons.today_rounded
+                      : Icons.calendar_view_day_rounded,
+                  size: 13,
+                  color: isSelected ? Colors.white : Colors.grey.shade700,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  type,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: isSelected ? Colors.white : Colors.black87,
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      type,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight:
-                            isSelected ? FontWeight.bold : FontWeight.w600,
-                        color: isSelected ? Colors.white : Colors.black87,
-                      ),
+                const SizedBox(width: 5),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.white.withValues(alpha: 0.25)
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    "$count",
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected
+                          ? Colors.white
+                          : Colors.grey.shade800,
                     ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? Colors.amber.shade700
-                            : Colors.grey.shade200,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        '$count',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: isSelected
-                              ? Colors.white
-                              : Colors.grey.shade800,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            );
-          }).toList(),
-        ),
-      ],
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
+
   // ==========================================
-  // 4. NO ROUTE SELECTED STATE (LIST DOES NOT COME FIRST)
+  // 4. NO ROUTE SELECTED STATE
   // ==========================================
   Widget _buildNoRouteSelectedState(int routesCount) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 10,
           ),
         ],
@@ -1689,22 +1784,22 @@ class _RoCollectionSheetViewPageState
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: Colors.amber.shade50,
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.touch_app_rounded,
-              size: 42,
+              size: 36,
               color: Colors.amber.shade800,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           const Text(
-            'Select a Route Zone to Load Collection Sheet',
+            "Select a Route Zone to Load Collection Sheet",
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.bold,
               color: Color(0xFF1E1E1E),
             ),
@@ -1712,9 +1807,9 @@ class _RoCollectionSheetViewPageState
           ),
           const SizedBox(height: 6),
           Text(
-            'Click on any route card above to view and manage collection entries for that route.',
+            "Click on any route chip above to view and manage collection entries in the table ledger.",
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 11.5,
               color: Colors.grey.shade600,
             ),
             textAlign: TextAlign.center,
@@ -1749,7 +1844,7 @@ class _RoCollectionSheetViewPageState
                   });
                 },
                 decoration: InputDecoration(
-                  hintText: 'Search loanee, ID, mobile, account...',
+                  hintText: "Search loanee, ID, mobile, account...",
                   hintStyle:
                       TextStyle(color: Colors.grey.shade400, fontSize: 12),
                   prefixIcon: const Icon(Icons.search, size: 18),
@@ -1759,7 +1854,7 @@ class _RoCollectionSheetViewPageState
                           onPressed: () {
                             _searchController.clear();
                             setState(() {
-                              _searchQuery = '';
+                              _searchQuery = "";
                             });
                           },
                         )
@@ -1792,11 +1887,11 @@ class _RoCollectionSheetViewPageState
                 children: [
                   IconButton(
                     icon: Icon(Icons.table_rows_rounded,
-                        size: 20,
+                        size: 18,
                         color: _isTableView
                             ? const Color(0xFF8B1A1A)
                             : Colors.grey),
-                    tooltip: 'Table View',
+                    tooltip: "Table View",
                     onPressed: () {
                       setState(() {
                         _isTableView = true;
@@ -1805,11 +1900,11 @@ class _RoCollectionSheetViewPageState
                   ),
                   IconButton(
                     icon: Icon(Icons.view_agenda_rounded,
-                        size: 20,
+                        size: 18,
                         color: !_isTableView
                             ? const Color(0xFF8B1A1A)
                             : Colors.grey),
-                    tooltip: 'Cards View',
+                    tooltip: "Cards View",
                     onPressed: () {
                       setState(() {
                         _isTableView = false;
@@ -1822,31 +1917,34 @@ class _RoCollectionSheetViewPageState
           ],
         ),
 
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
 
         // Summary Bar
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: Colors.grey.shade50,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: Colors.grey.shade200),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
               Text(
-                'Showing ${entries.length} Records in ${_selectedRoute!}',
+                "Showing ${entries.length} Records in ${_selectedRoute!}",
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.bold,
                   color: Colors.grey.shade800,
                 ),
               ),
               Text(
-                'Today Collected: ₹ ${totalFilteredAmount.toStringAsFixed(2)}',
+                "Today Collected: ₹ ${totalFilteredAmount.toStringAsFixed(2)}",
                 style: const TextStyle(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.bold,
                   color: Color(0xFF8B1A1A),
                 ),
@@ -1869,19 +1967,19 @@ class _RoCollectionSheetViewPageState
             child: Column(
               children: [
                 Icon(Icons.search_off_rounded,
-                    size: 48, color: Colors.grey.shade400),
+                    size: 42, color: Colors.grey.shade400),
                 const SizedBox(height: 10),
                 Text(
-                  'No Collection Entries in ${_selectedRoute!} (${_selectedType})',
+                  "No Collection Entries in ${_selectedRoute!} ($_selectedType)",
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 13.5,
                     fontWeight: FontWeight.bold,
                     color: Colors.grey.shade700,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'No entries recorded for this route yet.',
+                  "No entries recorded for this route filter.",
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                 ),
               ],
@@ -1896,7 +1994,7 @@ class _RoCollectionSheetViewPageState
   }
 
   // ==========================================
-  // DATA TABLE WIDGET (RESPONSIVE, RED HEADING, COMPACT)
+  // DATA TABLE WIDGET (PRIMARY COLLECTION SHEET VIEW)
   // ==========================================
   Widget _buildDataTableWidget(
     List<RoCollectionEntry> entries,
@@ -1912,7 +2010,7 @@ class _RoCollectionSheetViewPageState
         border: Border.all(color: Colors.grey.shade300),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 6,
           ),
         ],
@@ -1936,16 +2034,16 @@ class _RoCollectionSheetViewPageState
               columnSpacing: 12,
               horizontalMargin: 10,
               columns: const [
-                DataColumn(label: Text('#')),
-                DataColumn(label: Text('Loanee Name')),
-                DataColumn(label: Text('ACNO')),
-                DataColumn(label: Text('Payable Amount')),
-                DataColumn(label: Text('Overdue')),
-                DataColumn(label: Text('Sanction Date')),
-                DataColumn(label: Text('Maturity Date')),
-                DataColumn(label: Text('Collected')),
-                DataColumn(label: Text('Today')),
-                DataColumn(label: Text('Actions')),
+                DataColumn(label: Text("#")),
+                DataColumn(label: Text("Loanee Name")),
+                DataColumn(label: Text("ACNO")),
+                DataColumn(label: Text("Payable Amount")),
+                DataColumn(label: Text("Overdue")),
+                DataColumn(label: Text("Sanction Date")),
+                DataColumn(label: Text("Maturity Date")),
+                DataColumn(label: Text("Collected")),
+                DataColumn(label: Text("Today")),
+                DataColumn(label: Text("Actions")),
               ],
               rows: entries.asMap().entries.map((mapEntry) {
                 final idx = mapEntry.key + 1;
@@ -1963,7 +2061,7 @@ class _RoCollectionSheetViewPageState
                         : Colors.white;
                   }),
                   cells: [
-                    DataCell(Text('$idx',
+                    DataCell(Text("$idx",
                         style: const TextStyle(
                             fontSize: 11, fontWeight: FontWeight.bold))),
                     DataCell(
@@ -2007,7 +2105,7 @@ class _RoCollectionSheetViewPageState
                                 : postMaturity.postMaturityPayableAmount.toStringAsFixed(2);
 
                             return Tooltip(
-                              message: 'PAST MATURITY: ${postMaturity.explanation}',
+                              message: "PAST MATURITY: ${postMaturity.explanation}",
                               child: InkWell(
                                 onTap: () => _showViewDetailsModal(context, entry),
                                 child: Container(
@@ -2021,14 +2119,14 @@ class _RoCollectionSheetViewPageState
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Text(
-                                        '₹ $formattedTotal',
+                                        "₹ $formattedTotal",
                                         style: TextStyle(
                                           fontSize: 10.5,
                                           fontWeight: FontWeight.bold,
                                           color: Colors.red.shade900,
                                         ),
                                       ),
-                                      const SizedBox(width: 3.5),
+                                      const SizedBox(width: 4),
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
                                         decoration: BoxDecoration(
@@ -2036,7 +2134,7 @@ class _RoCollectionSheetViewPageState
                                           borderRadius: BorderRadius.circular(3),
                                         ),
                                         child: Text(
-                                          '${postMaturity.overdueMonths > 0 ? "${postMaturity.overdueMonths}M " : ""}MATURED',
+                                          "${postMaturity.overdueMonths > 0 ? "${postMaturity.overdueMonths}M " : ""}MATURED",
                                           style: const TextStyle(
                                             fontSize: 7.5,
                                             fontWeight: FontWeight.bold,
@@ -2059,29 +2157,12 @@ class _RoCollectionSheetViewPageState
                             configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
                           );
 
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: entry.isDaily
-                                  ? Colors.blue.shade50
-                                  : Colors.purple.shade50,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                color: entry.isDaily
-                                    ? Colors.blue.shade200
-                                    : Colors.purple.shade200,
-                              ),
-                            ),
-                            child: Text(
-                              payableText,
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.bold,
-                                color: entry.isDaily
-                                    ? Colors.blue.shade900
-                                    : Colors.purple.shade900,
-                              ),
+                          return Text(
+                            payableText,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF8B1A1A),
                             ),
                           );
                         },
@@ -2108,46 +2189,19 @@ class _RoCollectionSheetViewPageState
 
                           if (postMaturity != null && postMaturity.isPastMaturity) {
                             return Tooltip(
-                              message: 'Post-Maturity Overdue Interest: ₹${postMaturity.postMaturityInterestAmount.toStringAsFixed(2)} accrued (${postMaturity.overdueMonths} month(s) overdue)',
-                              child: InkWell(
-                                onTap: () => _showViewDetailsModal(context, entry),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 5, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.shade50,
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: Colors.red.shade300),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        '+ ₹ ${postMaturity.postMaturityInterestAmount.toStringAsFixed(0)}',
-                                        style: TextStyle(
-                                          fontSize: 9.5,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.red.shade900,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 2.5),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 3, vertical: 0.5),
-                                        decoration: BoxDecoration(
-                                          color: Colors.red.shade900,
-                                          borderRadius: BorderRadius.circular(2),
-                                        ),
-                                        child: const Text(
-                                          'OVERDUE INT',
-                                          style: TextStyle(
-                                            fontSize: 7,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                              message: "7% Overdue Interest post-maturity: ₹${postMaturity.postMaturityInterestAmount.toStringAsFixed(0)}",
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade900,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  "+₹${postMaturity.postMaturityInterestAmount.toStringAsFixed(0)}",
+                                  style: const TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
                                   ),
                                 ),
                               ),
@@ -2155,118 +2209,87 @@ class _RoCollectionSheetViewPageState
                           }
 
                           if (breakdown.lateUnits > 0) {
-                            return Tooltip(
-                              message: 'Late Payment Amount: ${breakdown.lateUnits} ${entry.isDaily ? "day(s)" : "week(s)"} overdue (₹${breakdown.overdueMissedAmount.toStringAsFixed(0)}) + Today (₹${breakdown.currentInstallment.toStringAsFixed(0)}) = ₹${breakdown.totalPayableAmount.toStringAsFixed(0)}',
-                              child: InkWell(
-                                onTap: () => _showViewDetailsModal(context, entry),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 5, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.shade50,
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: Colors.red.shade300),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        '₹ ${breakdown.totalPayableAmount.toStringAsFixed(0)}',
-                                        style: TextStyle(
-                                          fontSize: 9.5,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.red.shade900,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 2.5),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 3, vertical: 0.5),
-                                        decoration: BoxDecoration(
-                                          color: Colors.red.shade700,
-                                          borderRadius: BorderRadius.circular(2.5),
-                                        ),
-                                        child: Text(
-                                          '${breakdown.lateUnits}${entry.isDaily ? "D" : "W"}',
-                                          style: const TextStyle(
-                                            fontSize: 7.5,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.red.shade300),
+                              ),
+                              child: Text(
+                                "${breakdown.lateUnits}${entry.isDaily ? "d" : "w"} (₹${breakdown.totalPayableAmount.toStringAsFixed(0)})",
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red.shade900,
                                 ),
                               ),
                             );
                           }
 
-                          return Text(
-                            '₹ 0',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.green.shade800,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    DataCell(
-                      Builder(
-                        builder: (context) {
-                          final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
-                          final loanee = loaneeProvider.getLoaneeForUser(
-                            customerId: entry.customerId,
-                            mobileNo: entry.mobileNo,
-                            name: entry.loaneeName,
-                          );
-                          return Text(
-                            loanee?.formattedSanctionDate ?? 'N/A',
-                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),
-                          );
-                        },
-                      ),
-                    ),
-                    DataCell(
-                      Builder(
-                        builder: (context) {
-                          final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
-                          final loanee = loaneeProvider.getLoaneeForUser(
-                            customerId: entry.customerId,
-                            mobileNo: entry.mobileNo,
-                            name: entry.loaneeName,
-                          );
-                          return Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.teal.shade50,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: Colors.teal.shade200),
-                            ),
-                            child: Text(
-                              loanee?.formattedMaturityDate ?? 'N/A',
+                          return Text("-",
                               style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.teal.shade900,
-                              ),
+                                  fontSize: 11, color: Colors.grey.shade400));
+                        },
+                      ),
+                    ),
+                    DataCell(
+                      Builder(
+                        builder: (context) {
+                          final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                          final loanee = loaneeProvider.getLoaneeForUser(
+                            customerId: entry.customerId,
+                            mobileNo: entry.mobileNo,
+                            name: entry.loaneeName,
+                          );
+                          return Text(
+                            loanee?.formattedSanctionDate ?? "N/A",
+                            style: const TextStyle(fontSize: 10.5),
+                          );
+                        },
+                      ),
+                    ),
+                    DataCell(
+                      Builder(
+                        builder: (context) {
+                          final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                          final loanee = loaneeProvider.getLoaneeForUser(
+                            customerId: entry.customerId,
+                            mobileNo: entry.mobileNo,
+                            name: entry.loaneeName,
+                          );
+                          return Text(
+                            loanee?.formattedMaturityDate ?? "N/A",
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: Colors.teal.shade900,
+                              fontWeight: FontWeight.w600,
                             ),
                           );
                         },
                       ),
                     ),
-                    DataCell(Text(
-                      '₹ ${todayCollected.toStringAsFixed(0)}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: todayCollected > 0
-                            ? Colors.green.shade800
-                            : Colors.grey.shade700,
+                    DataCell(
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "₹ ${todayCollected.toStringAsFixed(2)}",
+                            style: const TextStyle(
+                                fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                          if (todayLateFine > 0)
+                            Text(
+                              "Fine: ₹${todayLateFine.toStringAsFixed(0)}",
+                              style: TextStyle(
+                                  fontSize: 8.5,
+                                  color: Colors.red.shade700,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                        ],
                       ),
-                    )),
+                    ),
                     DataCell(
                       hasPaidToday
                           ? Container(
@@ -2274,8 +2297,8 @@ class _RoCollectionSheetViewPageState
                                   horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
                                 color: Colors.green.shade50,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: Colors.green.shade300),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.green.shade200),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -2284,7 +2307,7 @@ class _RoCollectionSheetViewPageState
                                       size: 11, color: Colors.green.shade700),
                                   const SizedBox(width: 2),
                                   Text(
-                                    'Paid',
+                                    "Paid",
                                     style: TextStyle(
                                         fontSize: 9,
                                         fontWeight: FontWeight.bold,
@@ -2293,110 +2316,138 @@ class _RoCollectionSheetViewPageState
                                 ],
                               ),
                             )
-                          : Text('Pending',
+                          : Text("Pending",
                               style: TextStyle(
                                   fontSize: 10,
                                   color: Colors.orange.shade800,
                                   fontWeight: FontWeight.w600)),
                     ),
+                    // ACTIONS DROPDOWN (KEEP ALL ACTIONS UNDER DROPDOWN + ADD VIEW HISTORY)
                     DataCell(
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                        Builder(
-                          builder: (context) {
-                            final bool isOffice = CollectionSheetProvider.isOfficeRoute(entry.route);
-                            final bool canRecordPayment = isAdmin || isRoPanel;
-
-                            if (canRecordPayment && !hasPaidToday) {
-                              return Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    visualDensity: VisualDensity.compact,
-                                    padding: const EdgeInsets.all(4),
-                                    constraints: const BoxConstraints(),
-                                    icon: Icon(
-                                      isAdmin
-                                          ? (isOffice ? Icons.domain_add_rounded : Icons.admin_panel_settings_rounded)
-                                          : Icons.add_card_rounded,
-                                      size: 17,
-                                      color: isAdmin
-                                          ? const Color(0xFF8B1A1A)
-                                          : Colors.green.shade700,
-                                    ),
-                                    tooltip: isAdmin
-                                        ? 'Admin Payment Entry (${entry.route})'
-                                        : 'Record Payment (RO)',
-                                    onPressed: () =>
-                                        _showAddPaymentEntryModal(context, entry),
-                                  ),
-                                  const SizedBox(width: 4),
-                                ],
-                              );
-                            }
-                            return const SizedBox.shrink();
-                          },
+                      PopupMenuButton<String>(
+                        icon: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.grey.shade300),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                "Actions",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1E1E1E),
+                                ),
+                              ),
+                              SizedBox(width: 2),
+                              Icon(Icons.arrow_drop_down_rounded, size: 16, color: Color(0xFF1E1E1E)),
+                            ],
+                          ),
                         ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.all(4),
-                            constraints: const BoxConstraints(),
-                            icon: const Icon(Icons.visibility_rounded,
-                                size: 17, color: Color(0xFF1E1E1E)),
-                            tooltip: 'View Details',
-                            onPressed: () =>
-                                _showViewDetailsModal(context, entry),
-                          ),
-                          const SizedBox(width: 4),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.all(4),
-                            constraints: const BoxConstraints(),
-                            icon: const Icon(Icons.history_rounded,
-                                size: 17, color: Color(0xFF8B1A1A)),
-                            tooltip: 'Today\'s Payment Record',
-                            onPressed: () =>
-                                _showPaymentHistoryModal(context, entry),
-                          ),
-                          if (isAdmin) ...[
-                            const SizedBox(width: 4),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.all(4),
-                              constraints: const BoxConstraints(),
-                              icon: Icon(Icons.edit_note_rounded,
-                                  size: 19, color: Colors.amber.shade900),
-                              tooltip: 'Edit Collection Card',
-                              onPressed: () =>
-                                  EditCollectionEntryDialog.show(context, entry),
+                        tooltip: "Actions Menu for ${entry.loaneeName}",
+                        onSelected: (action) async {
+                          switch (action) {
+                            case "payment":
+                              _showAddPaymentEntryModal(context, entry);
+                              break;
+                            case "view_details":
+                              _showViewDetailsModal(context, entry);
+                              break;
+                            case "view_history":
+                              _LoanPaymentHistoryDialog.show(context, entry);
+                              break;
+                            case "edit_card":
+                              EditCollectionEntryDialog.show(context, entry);
+                              break;
+                            case "edit_loanee":
+                              final loanee = Provider.of<LoaneeProvider>(context, listen: false)
+                                  .getLoaneeForUser(
+                                customerId: entry.customerId,
+                                mobileNo: entry.mobileNo,
+                                name: entry.loaneeName,
+                              );
+                              if (loanee != null) {
+                                EditLoaneeDialog.show(context, loanee);
+                              }
+                              break;
+                            case "delete":
+                              final confirmed =
+                                  await _showSweetAlertDeleteConfirm(context, entry);
+                              if (confirmed && context.mounted) {
+                                provider.deleteCollectionEntry(entry.id);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text("Entry for ${entry.loaneeName} deleted."),
+                                    backgroundColor: Colors.red.shade700,
+                                  ),
+                                );
+                              }
+                              break;
+                          }
+                        },
+                        itemBuilder: (ctx) {
+                          final bool canRecordPayment = isAdmin || isRoPanel;
+
+                          return [
+                            if (canRecordPayment && !hasPaidToday)
+                              const PopupMenuItem(
+                                value: "payment",
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.add_card_rounded, size: 16, color: Colors.green),
+                                    SizedBox(width: 8),
+                                    Text("Payment", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                  ],
+                                ),
+                              ),
+                            const PopupMenuItem(
+                              value: "view_details",
+                              child: Row(
+                                children: [
+                                  Icon(Icons.visibility_rounded, size: 16, color: Color(0xFF1E1E1E)),
+                                  SizedBox(width: 8),
+                                  Text("Collection", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
                             ),
-                            const SizedBox(width: 4),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.all(4),
-                              constraints: const BoxConstraints(),
-                              icon: Icon(Icons.delete_outline_rounded,
-                                  size: 17, color: Colors.red.shade700),
-                              tooltip: 'Delete Entry',
-                              onPressed: () async {
-                                final confirmed =
-                                    await _showSweetAlertDeleteConfirm(
-                                        context, entry);
-                                if (confirmed && context.mounted) {
-                                  provider.deleteCollectionEntry(entry.id);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                          'Entry for ${entry.loaneeName} deleted.'),
-                                      backgroundColor: Colors.red.shade700,
-                                    ),
-                                  );
-                                }
-                              },
+                            const PopupMenuItem(
+                              value: "view_history",
+                              child: Row(
+                                children: [
+                                  Icon(Icons.history_edu_rounded, size: 16, color: Color(0xFF8B1A1A)),
+                                  SizedBox(width: 8),
+                                  Text("View History", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
+                                ],
+                              ),
                             ),
-                          ],
-                        ],
+                            if (isAdmin) ...[
+                              const PopupMenuItem(
+                                value: "edit_card",
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit_note_rounded, size: 16, color: Colors.amber),
+                                    SizedBox(width: 8),
+                                    Text("Edit", style: TextStyle(fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: "delete",
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.delete_outline_rounded, size: 16, color: Colors.red),
+                                    SizedBox(width: 8),
+                                    Text("Delete", style: TextStyle(fontSize: 12, color: Colors.red)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ];
+                        },
                       ),
                     ),
                   ],
@@ -2430,6 +2481,20 @@ class _RoCollectionSheetViewPageState
           isRoPanel: isRoPanel,
           onTapView: () => _showViewDetailsModal(context, entry),
           onTapAddPayment: () => _showAddPaymentEntryModal(context, entry),
+          onTapViewHistory: () => _LoanPaymentHistoryDialog.show(context, entry),
+          onTapEditCard: isAdmin ? () => EditCollectionEntryDialog.show(context, entry) : null,
+          onTapDelete: isAdmin ? () async {
+            final confirmed = await _showSweetAlertDeleteConfirm(context, entry);
+            if (confirmed && context.mounted) {
+              provider.deleteCollectionEntry(entry.id);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("Entry for ${entry.loaneeName} deleted."),
+                  backgroundColor: Colors.red.shade700,
+                ),
+              );
+            }
+          } : null,
         );
 
         if (!isAdmin) {
@@ -2451,7 +2516,7 @@ class _RoCollectionSheetViewPageState
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Text(
-                  'Delete Record',
+                  "Delete Record",
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -2474,7 +2539,7 @@ class _RoCollectionSheetViewPageState
             provider.deleteCollectionEntry(entry.id);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Entry for ${entry.loaneeName} deleted.'),
+                content: Text("Entry for ${entry.loaneeName} deleted."),
                 backgroundColor: Colors.red.shade700,
               ),
             );
@@ -2489,13 +2554,13 @@ class _RoCollectionSheetViewPageState
     Color bg;
     Color fg;
     switch (type.toLowerCase()) {
-      case 'daily':
+      case "daily":
         bg = Colors.purple.shade50;
         fg = Colors.purple.shade800;
         break;
-      case 'mon':
-      case 'tue':
-      case 'wed':
+      case "mon":
+      case "tue":
+      case "wed":
         bg = Colors.blue.shade50;
         fg = Colors.blue.shade800;
         break;
@@ -2543,7 +2608,7 @@ class _RoCollectionSheetViewPageState
           ),
           const SizedBox(width: 4),
           Text(
-            isOffice ? 'Office (Master)' : route,
+            isOffice ? "Office (Master)" : route,
             style: TextStyle(
               color: isOffice ? const Color(0xFF8B1A1A) : Colors.grey.shade800,
               fontSize: 10,
@@ -2556,18 +2621,24 @@ class _RoCollectionSheetViewPageState
   }
 }
 
-/// Item Card Component with Action Buttons under each collection item
+/// Item Card Component for Cards View option
 class _RoCollectionEntryItemCard extends StatelessWidget {
   final RoCollectionEntry entry;
   final bool isRoPanel;
   final VoidCallback onTapView;
   final VoidCallback onTapAddPayment;
+  final VoidCallback? onTapViewHistory;
+  final VoidCallback? onTapEditCard;
+  final VoidCallback? onTapDelete;
 
   const _RoCollectionEntryItemCard({
     required this.entry,
     required this.isRoPanel,
     required this.onTapView,
     required this.onTapAddPayment,
+    this.onTapViewHistory,
+    this.onTapEditCard,
+    this.onTapDelete,
   });
 
   @override
@@ -2580,21 +2651,20 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
     final bool isOfficeRoute = CollectionSheetProvider.isOfficeRoute(entry.route);
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
       ),
-      elevation: 2,
+      elevation: 1.5,
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(14.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
                     color: Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(6),
@@ -2602,142 +2672,36 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                   child: Text(
                     entry.customerId,
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.bold,
                       color: Colors.blue.shade900,
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
                     color: Colors.grey.shade100,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    'ACNO: ${entry.accountNumber}',
+                    "ACNO: ${entry.accountNumber}",
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w600,
                       color: Colors.grey.shade700,
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Builder(
-                  builder: (context) {
-                    final loaneeProvider =
-                        Provider.of<LoaneeProvider>(context, listen: false);
-                    final settingsProvider =
-                        Provider.of<SettingsProvider>(context, listen: false);
-                    final loanee = loaneeProvider.getLoaneeForUser(
-                      customerId: entry.customerId,
-                      mobileNo: entry.mobileNo,
-                      name: entry.loaneeName,
-                    );
-                    final collectionProvider =
-                        Provider.of<CollectionSheetProvider>(context, listen: false);
-                    final payments = collectionProvider.getPaymentsForCollection(entry.id);
-                    final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
-                      entry: entry,
-                      payments: payments,
-                      loaneeLoanAmount: loanee?.loanAmount,
-                      maturityDate: loanee?.loanMaturityDate,
-                    );
-                    final postMaturity = breakdown.postMaturityBreakdown;
-
-                    if (postMaturity != null && postMaturity.isPastMaturity) {
-                      final formattedTotal = (postMaturity.postMaturityPayableAmount % 1 == 0)
-                          ? postMaturity.postMaturityPayableAmount.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')
-                          : postMaturity.postMaturityPayableAmount.toStringAsFixed(2);
-
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade50,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.red.shade300),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '₹ $formattedTotal',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.red.shade900,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 3.5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade900,
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                              child: Text(
-                                '${postMaturity.overdueMonths > 0 ? "${postMaturity.overdueMonths}M " : ""}MATURED',
-                                style: const TextStyle(
-                                  fontSize: 7.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-
-                    final payableText = entry.getFormattedPayableAmount(
-                      loaneeLoanAmount: loanee?.loanAmount,
-                      configuredInterestRate: settingsProvider.investmentInterestRate,
-                      configuredBasePrincipal: settingsProvider.investmentBaseAmount,
-                      configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
-                      configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
-                    );
-
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: entry.isDaily
-                            ? Colors.blue.shade50
-                            : Colors.purple.shade50,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: entry.isDaily
-                              ? Colors.blue.shade200
-                              : Colors.purple.shade200,
-                        ),
-                      ),
-                      child: Text(
-                        payableText,
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.bold,
-                          color: entry.isDaily
-                              ? Colors.blue.shade900
-                              : Colors.purple.shade900,
-                        ),
-                      ),
-                    );
-                  },
-                ),
                 const Spacer(),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
                     color: hasPaidToday
                         ? Colors.green.shade50
                         : Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(6),
                     border: Border.all(
                       color: hasPaidToday
                           ? Colors.green.shade300
@@ -2751,16 +2715,16 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                         hasPaidToday
                             ? Icons.check_circle_rounded
                             : Icons.access_time_rounded,
-                        size: 12,
+                        size: 11,
                         color: hasPaidToday
                             ? Colors.green.shade700
                             : Colors.orange.shade800,
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        hasPaidToday ? 'Paid Today' : 'Pending Today',
+                        hasPaidToday ? "Paid Today" : "Pending Today",
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9.5,
                           fontWeight: FontWeight.bold,
                           color: hasPaidToday
                               ? Colors.green.shade800
@@ -2773,24 +2737,24 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
               ],
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
 
             Row(
               children: [
                 CircleAvatar(
-                  radius: 18,
+                  radius: 16,
                   backgroundColor: isOfficeRoute
                       ? const Color(0xFF8B1A1A).withValues(alpha: 0.1)
                       : Colors.amber.shade100,
                   child: Icon(
                     isOfficeRoute ? Icons.shield_rounded : Icons.person_rounded,
-                    size: 18,
+                    size: 16,
                     color: isOfficeRoute
                       ? const Color(0xFF8B1A1A)
                       : Colors.amber.shade900,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2798,354 +2762,471 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                       Text(
                         entry.loaneeName,
                         style: const TextStyle(
-                          fontSize: 15,
+                          fontSize: 14,
                           fontWeight: FontWeight.bold,
                           color: Colors.black87,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Icon(Icons.phone_android_rounded,
-                              size: 12, color: Colors.grey.shade600),
-                          const SizedBox(width: 4),
-                          Text(
-                            entry.mobileNo,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade700,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        "${entry.mobileNo} • ${entry.route}",
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
                     ],
                   ),
                 ),
-                Builder(
-                  builder: (context) {
-                    final todayCollected =
-                        collectionProvider.getTodayPaidForCollection(entry.id);
-                    final todayLateFine =
-                        collectionProvider.getTodayLateFineForCollection(entry.id);
-                    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
-                    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-                    final loanee = loaneeProvider.getLoaneeForUser(
-                      customerId: entry.customerId,
-                      mobileNo: entry.mobileNo,
-                      name: entry.loaneeName,
-                    );
-                    final payments = collectionProvider.getPaymentsForCollection(entry.id);
-                    final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
-                      entry: entry,
-                      payments: payments,
-                      loaneeLoanAmount: loanee?.loanAmount,
-                      maturityDate: loanee?.loanMaturityDate,
-                    );
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '₹ ${todayCollected.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        Text(
-                          'Collected Today',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                        if (breakdown.lateUnits > 0)
-                          Container(
-                            margin: const EdgeInsets.only(top: 2),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 5, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade50,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: Colors.red.shade300),
-                            ),
-                            child: Text(
-                              'Late Amount: ₹${breakdown.totalPayableAmount.toStringAsFixed(0)} (${breakdown.lateUnits}${entry.isDaily ? "d" : "w"})',
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.red.shade900,
-                              ),
-                            ),
-                          )
-                        else if (todayLateFine > 0)
-                          Container(
-                            margin: const EdgeInsets.only(top: 2),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 5, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade50,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: Colors.red.shade200),
-                            ),
-                            child: Text(
-                              'Late Fee: ₹${todayLateFine.toStringAsFixed(0)} (Paid)',
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.red.shade800,
-                              ),
-                            ),
-                          ),
-                      ],
-                    );
+                // Dropdown menu in card view
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert_rounded, size: 20),
+                  tooltip: "Actions",
+                  onSelected: (action) {
+                    if (action == "payment") onTapAddPayment();
+                    if (action == "view_details") onTapView();
+                    if (action == "view_history" && onTapViewHistory != null) onTapViewHistory!();
+                    if (action == "edit_card" && onTapEditCard != null) onTapEditCard!();
+                    if (action == "delete" && onTapDelete != null) onTapDelete!();
                   },
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-
-            Row(
-              children: [
-                Icon(Icons.location_on_outlined,
-                    size: 14, color: Colors.grey.shade500),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    entry.loaneeAddress,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _buildRouteBadge(entry.route),
-                const SizedBox(width: 4),
-                _buildCollectionTypeBadge(entry.collectionType),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-
-            Builder(
-              builder: (context) {
-                final loaneeProvider =
-                    Provider.of<LoaneeProvider>(context, listen: false);
-                final loanee = loaneeProvider.getLoaneeForUser(
-                  customerId: entry.customerId,
-                  mobileNo: entry.mobileNo,
-                  name: entry.loaneeName,
-                );
-
-                return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.calendar_today_rounded,
-                          size: 11, color: Colors.grey.shade700),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Sanction: ${loanee?.formattedSanctionDate ?? 'N/A'}',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: Colors.grey.shade800,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const Spacer(),
-                      Icon(Icons.event_available_rounded,
-                          size: 12, color: Colors.teal.shade800),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Maturity: ${loanee?.formattedMaturityDate ?? 'N/A'}',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.teal.shade900,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-
-            const Divider(height: 20),
-
-            // Action Buttons Row:
-            // - Admin can record payments for ALL routes
-            // - RO officer can record payments for assigned / field routes
-            Builder(
-              builder: (context) {
-                final bool canRecordPayment = isAdmin || isRoPanel;
-
-                return Row(
-                  children: [
-                    if (canRecordPayment && !hasPaidToday) ...[
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isAdmin
-                                ? const Color(0xFF8B1A1A)
-                                : Colors.amber.shade700,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            elevation: 1,
-                          ),
-                          onPressed: onTapAddPayment,
-                          icon: Icon(
-                            isAdmin
-                                ? (isOfficeRoute ? Icons.domain_add_rounded : Icons.admin_panel_settings_rounded)
-                                : Icons.add_card_rounded,
-                            size: 16,
-                          ),
-                          label: Text(
-                            isAdmin ? 'Admin Payment Entry' : '+ Add Payment',
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF1E1E1E),
-                          side: BorderSide(color: Colors.grey.shade400),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        onPressed: onTapView,
-                        icon: const Icon(Icons.visibility_rounded, size: 15),
-                        label: const Text(
-                          'View Details',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
+                  itemBuilder: (ctx) => [
+                    if ((isAdmin || isRoPanel) && !hasPaidToday)
+                      const PopupMenuItem(value: "payment", child: Text("Payment")),
+                    const PopupMenuItem(value: "view_details", child: Text("Collection")),
+                    const PopupMenuItem(value: "view_history", child: Text("View History")),
                     if (isAdmin) ...[
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.amber.shade800,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          onPressed: () => EditCollectionEntryDialog.show(context, entry),
-                          icon: const Icon(Icons.edit_note_rounded, size: 15),
-                          label: const Text(
-                            'Edit Card',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
+                      const PopupMenuItem(value: "edit_card", child: Text("Edit")),
+                      const PopupMenuItem(value: "delete", child: Text("Delete")),
                     ],
+                  ],
+                ),
               ],
-            );
-          },
-        ),
-      ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCollectionTypeBadge(String type) {
-    Color bg;
-    Color fg;
-    switch (type.toLowerCase()) {
-      case 'daily':
-        bg = Colors.purple.shade50;
-        fg = Colors.purple.shade800;
-        break;
-      case 'mon':
-      case 'tue':
-      case 'wed':
-        bg = Colors.blue.shade50;
-        fg = Colors.blue.shade800;
-        break;
-      default:
-        bg = Colors.teal.shade50;
-        fg = Colors.teal.shade800;
-        break;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        type,
-        style: TextStyle(
-          color: fg,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRouteBadge(String route) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.alt_route_rounded, size: 12, color: Colors.grey.shade700),
-          const SizedBox(width: 4),
-          Text(
-            route,
-            style: TextStyle(
-              color: Colors.grey.shade800,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
+
+/// Loan-Specific Paginated Payment History Dialog (Per-Loan Only)
+class _LoanPaymentHistoryDialog extends StatefulWidget {
+  final RoCollectionEntry entry;
+  final CollectionSheetProvider collectionProvider;
+  final LoaneeProvider? loaneeProvider;
+
+  const _LoanPaymentHistoryDialog({
+    required this.entry,
+    required this.collectionProvider,
+    this.loaneeProvider,
+  });
+
+  static Future<void> show(BuildContext context, RoCollectionEntry entry) {
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context, listen: false);
+    LoaneeProvider? loaneeProvider;
+    try {
+      loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    } catch (_) {}
+
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => _LoanPaymentHistoryDialog(
+        entry: entry,
+        collectionProvider: collectionProvider,
+        loaneeProvider: loaneeProvider,
+      ),
+    );
+  }
+
+  @override
+  State<_LoanPaymentHistoryDialog> createState() => _LoanPaymentHistoryDialogState();
+}
+
+class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
+  int _page = 1;
+  final int _pageSize = 5;
+  int _totalCount = 0;
+  int _totalPages = 1;
+  List<CollectionPaymentModel> _payments = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory(page: 1);
+  }
+
+  Future<void> _loadHistory({int? page}) async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      if (page != null) _page = page;
+    });
+
+    // Strictly query only this specific loan collection entry ID
+    final result = await widget.collectionProvider.getPaginatedPaymentHistory(
+      collectionId: widget.entry.id,
+      page: _page,
+      pageSize: _pageSize,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _payments = result.payments;
+      _totalCount = result.totalCount;
+      _totalPages = result.totalPages;
+      _page = result.page;
+      _isLoading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = widget.entry;
+    final loanee = widget.loaneeProvider?.getLoaneeForUser(
+      customerId: entry.customerId,
+      mobileNo: entry.mobileNo,
+      name: entry.loaneeName,
+    );
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Dialog Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.history_edu_rounded,
+                              color: Color(0xFF8B1A1A), size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "${entry.loaneeName} - Payment History",
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1E1E1E),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                "Account: ${entry.accountNumber} • ID: ${entry.customerId} • Route: ${entry.route} (${entry.collectionType})",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 14),
+
+              // Loan Metrics Banner
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildMetricItem(
+                      label: "Loan Amount",
+                      value: "₹ ${(loanee?.loanAmount ?? entry.loanAmount ?? 11500.0).toStringAsFixed(0)}",
+                    ),
+                    _buildMetricItem(
+                      label: "Sanction Date",
+                      value: loanee?.formattedSanctionDate ?? "N/A",
+                    ),
+                    _buildMetricItem(
+                      label: "Maturity Date",
+                      value: loanee?.formattedMaturityDate ?? "N/A",
+                    ),
+                    _buildMetricItem(
+                      label: "Total Transactions",
+                      value: "$_totalCount",
+                      valueColor: const Color(0xFF8B1A1A),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Payments Table
+              if (_isLoading)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 40),
+                    child: CircularProgressIndicator(color: Color(0xFF8B1A1A)),
+                  ),
+                )
+              else if (_payments.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 36),
+                  alignment: Alignment.center,
+                  child: Column(
+                    children: [
+                      Icon(Icons.history_toggle_off_rounded,
+                          size: 38, color: Colors.grey.shade400),
+                      const SizedBox(height: 8),
+                      Text(
+                        "No payment transactions recorded for this loan yet.",
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 640),
+                    child: DataTable(
+                      headingRowColor: WidgetStateProperty.all(const Color(0xFF8B1A1A)),
+                      headingTextStyle: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        fontSize: 11,
+                      ),
+                      dataRowMaxHeight: 48,
+                      dataRowMinHeight: 40,
+                      columnSpacing: 16,
+                      horizontalMargin: 12,
+                      columns: const [
+                        DataColumn(label: Text("Payment Date")),
+                        DataColumn(label: Text("Amount")),
+                        DataColumn(label: Text("Remaining Outstanding")),
+                        DataColumn(label: Text("Late Fine")),
+                        DataColumn(label: Text("Mode")),
+                        DataColumn(label: Text("Collected By")),
+                        DataColumn(label: Text("Status")),
+                      ],
+                      rows: _payments.map((p) {
+                        final d = p.createdAt;
+                        final formattedDate =
+                            "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
+                        final roName = (p.roName?.isNotEmpty == true) ? p.roName! : "RO Officer";
+
+                        return DataRow(
+                          cells: [
+                            DataCell(
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.calendar_today_rounded,
+                                      size: 12, color: Colors.grey.shade600),
+                                  const SizedBox(width: 5),
+                                  Text(formattedDate,
+                                      style: const TextStyle(
+                                          fontSize: 11, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                "₹ ${p.paymentAmount.toStringAsFixed(2)}",
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green,
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                "₹ ${p.remainingBalance.toStringAsFixed(2)}",
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                "₹ ${p.lateFine.toStringAsFixed(2)}",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: p.lateFine > 0 ? Colors.red.shade700 : Colors.grey.shade700,
+                                  fontWeight: p.lateFine > 0 ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  p.paymentType,
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade900,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                roName,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ),
+                            DataCell(
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_circle_rounded,
+                                      size: 12, color: Colors.green.shade700),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    p.status,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green.shade800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+
+              const SizedBox(height: 14),
+
+              // Pagination Controls: [Previous] Page X of Y [Next]
+              if (_totalPages > 0)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _page > 1 && !_isLoading
+                            ? const Color(0xFF8B1A1A)
+                            : Colors.grey.shade300,
+                        foregroundColor: _page > 1 && !_isLoading
+                            ? Colors.white
+                            : Colors.grey.shade600,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        elevation: 0,
+                      ),
+                      onPressed: _page > 1 && !_isLoading
+                          ? () => _loadHistory(page: _page - 1)
+                          : null,
+                      icon: const Icon(Icons.chevron_left_rounded, size: 16),
+                      label: const Text("Previous", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    ),
+                    Text(
+                      "Page $_page of $_totalPages ($_totalCount records)",
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _page < _totalPages && !_isLoading
+                            ? const Color(0xFF8B1A1A)
+                            : Colors.grey.shade300,
+                        foregroundColor: _page < _totalPages && !_isLoading
+                            ? Colors.white
+                            : Colors.grey.shade600,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        elevation: 0,
+                      ),
+                      onPressed: _page < _totalPages && !_isLoading
+                          ? () => _loadHistory(page: _page + 1)
+                          : null,
+                      label: const Text("Next", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      icon: const Icon(Icons.chevron_right_rounded, size: 16),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMetricItem({
+    required String label,
+    required String value,
+    Color? valueColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: valueColor ?? Colors.black87,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 
 /// Modal Content Component for Add Payment Entry Form Modal
 class _AddPaymentEntryModalContent extends StatefulWidget {

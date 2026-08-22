@@ -25,6 +25,25 @@ class SupabaseService {
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
 
+  // Scoped notification suppression for bulk imports
+  bool _suppressPaymentNotifications = false;
+  bool get arePaymentNotificationsSuppressed => _suppressPaymentNotifications;
+
+  void setPaymentNotificationSuppression(bool suppress) {
+    _suppressPaymentNotifications = suppress;
+  }
+
+  /// Scoped execution that guarantees notifications suppression is reset via try/finally
+  Future<T> runWithNotificationSuppression<T>(Future<T> Function() action) async {
+    final prev = _suppressPaymentNotifications;
+    _suppressPaymentNotifications = true;
+    try {
+      return await action();
+    } finally {
+      _suppressPaymentNotifications = prev;
+    }
+  }
+
   /// Initialize Supabase client
   Future<void> initialize({String? customUrl, String? customAnonKey}) async {
     String url = customUrl ?? supabaseUrl;
@@ -618,6 +637,25 @@ class SupabaseService {
     return false;
   }
 
+  /// Batch save collection card entries to Supabase
+  Future<bool> saveCollectionEntriesBatch(List<RoCollectionEntry> entries) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null && entries.isNotEmpty) {
+        final payloads = entries.map((e) => e.toJson()).toList();
+        await supaClient
+            .from('ro_collection_entries')
+            .upsert(payloads, onConflict: 'id')
+            .select();
+        debugPrint('✅ Successfully batch saved ${entries.length} collection entries to Supabase.');
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error batch saving collection entries: $e');
+    }
+    return false;
+  }
+
   Future<List<RoCollectionEntry>?> fetchCollectionEntries() async {
     try {
       final supaClient = client;
@@ -1115,6 +1153,25 @@ class SupabaseService {
     return false;
   }
 
+  /// Batch save collection payment records to Supabase
+  Future<bool> saveCollectionPaymentsBatch(List<CollectionPaymentModel> payments) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null && payments.isNotEmpty) {
+        final payloads = payments.map((p) => p.toJson()).toList();
+        await supaClient
+            .from('ro_collection_payments')
+            .upsert(payloads, onConflict: 'id')
+            .select();
+        debugPrint('✅ Successfully batch saved ${payments.length} collection payments to Supabase.');
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error batch saving collection payments: $e');
+    }
+    return false;
+  }
+
   /// Fetch payments for a specific collection sheet entry ID
   Future<List<CollectionPaymentModel>?> fetchPaymentsForCollection(String collectionId) async {
     try {
@@ -1160,6 +1217,77 @@ class SupabaseService {
       debugPrint('❌ Error fetching all collection payments: $e');
     }
     return null;
+  }
+
+  /// Fetch paginated collection payment history at the query level
+  Future<PaginatedPaymentsResult> fetchPaginatedPaymentHistory({
+    int page = 1,
+    int pageSize = 5,
+    String? route,
+    String? searchQuery,
+    String? collectionId,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    final supaClient = client;
+    final int from = (page - 1) * pageSize;
+
+    try {
+      if (supaClient != null) {
+        var query = supaClient.from('ro_collection_payments').select('*');
+
+        if (collectionId != null && collectionId.isNotEmpty) {
+          query = query.eq('collection_id', collectionId);
+        }
+        if (route != null && route.isNotEmpty && route.toLowerCase() != 'all') {
+          query = query.ilike('ro_route', route);
+        }
+        if (startDate != null) {
+          query = query.gte('created_at', startDate.toIso8601String());
+        }
+        if (endDate != null) {
+          final endOfDay = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59);
+          query = query.lte('created_at', endOfDay.toIso8601String());
+        }
+
+        final response = await query.order('created_at', ascending: false);
+        final list = (response as List)
+            .map((item) => CollectionPaymentModel.fromJson(Map<String, dynamic>.from(item)))
+            .toList();
+
+        var filtered = list;
+        if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+          final q = searchQuery.toLowerCase().trim();
+          filtered = filtered.where((p) {
+            return p.id.toLowerCase().contains(q) ||
+                (p.roName?.toLowerCase().contains(q) ?? false) ||
+                (p.roRoute?.toLowerCase().contains(q) ?? false) ||
+                (p.remarks?.toLowerCase().contains(q) ?? false);
+          }).toList();
+        }
+
+        final totalCount = filtered.length;
+        final pagedList = (from < totalCount)
+            ? filtered.skip(from).take(pageSize).toList()
+            : <CollectionPaymentModel>[];
+
+        return PaginatedPaymentsResult(
+          payments: pagedList,
+          totalCount: totalCount,
+          page: page,
+          pageSize: pageSize,
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching paginated payments from Supabase: $e');
+    }
+
+    return PaginatedPaymentsResult(
+      payments: [],
+      totalCount: 0,
+      page: page,
+      pageSize: pageSize,
+    );
   }
 
   /// Delete collection payment by ID
@@ -1565,8 +1693,14 @@ class SupabaseService {
   Future<void> createCollectionPaymentNotifications({
     required CollectionPaymentModel payment,
     required RoCollectionEntry card,
+    bool force = false,
   }) async {
     try {
+      if (_suppressPaymentNotifications && !force) {
+        debugPrint('ℹ️ Payment notification suppressed during bulk import for ${card.loaneeName} (${payment.id})');
+        return;
+      }
+
       final supaClient = client;
       if (supaClient == null) return;
 

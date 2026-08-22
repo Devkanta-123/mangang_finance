@@ -213,7 +213,10 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
   /// Add dedicated payment record strictly to 'ro_collection_payments' table
-  Future<bool> addCollectionPayment(CollectionPaymentModel payment) async {
+  Future<bool> addCollectionPayment(
+    CollectionPaymentModel payment, {
+    bool suppressNotification = false,
+  }) async {
     // Strictly prevent duplicate payment entry for the same collection card on the same date
     if (hasPaymentForDate(payment.collectionId, payment.createdAt)) {
       debugPrint(
@@ -226,7 +229,7 @@ class CollectionSheetProvider extends ChangeNotifier {
 
     // Save payment to Supabase table ro_collection_payments
     final success = await SupabaseService.instance.saveCollectionPayment(payment);
-    if (success) {
+    if (success && !suppressNotification && !SupabaseService.instance.arePaymentNotificationsSuppressed) {
       final parentCard = getCollectionEntryById(payment.collectionId);
       if (parentCard != null) {
         // Trigger notification creation fallback
@@ -236,7 +239,103 @@ class CollectionSheetProvider extends ChangeNotifier {
         );
       }
     }
-    return success;
+    return true;
+  }
+
+  /// Delete collection payment by ID
+  Future<bool> deleteCollectionPayment(String paymentId) async {
+    _payments.removeWhere((p) => p.id == paymentId);
+    notifyListeners();
+    if (SupabaseService.instance.isInitialized) {
+      return await SupabaseService.instance.deleteCollectionPayment(paymentId);
+    }
+    return true;
+  }
+
+
+  /// Query paginated payment history across ALL dates with query-level pagination (default 5 per page)
+  Future<PaginatedPaymentsResult> getPaginatedPaymentHistory({
+    int page = 1,
+    int pageSize = 5,
+    String? route,
+    String? searchQuery,
+    String? collectionId,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    // 1. Try fetching via database-level query from Supabase
+    if (SupabaseService.instance.isInitialized) {
+      final remoteResult = await SupabaseService.instance.fetchPaginatedPaymentHistory(
+        page: page,
+        pageSize: pageSize,
+        route: route,
+        searchQuery: searchQuery,
+        collectionId: collectionId,
+        startDate: startDate,
+        endDate: endDate,
+      );
+      if (remoteResult.totalCount > 0 || remoteResult.payments.isNotEmpty) {
+        return remoteResult;
+      }
+    }
+
+    // 2. In-memory fallback from provider payment store across all dates
+    var filtered = List<CollectionPaymentModel>.from(_payments);
+
+    if (collectionId != null && collectionId.isNotEmpty) {
+      filtered = filtered.where((p) => p.collectionId == collectionId).toList();
+    }
+
+    if (route != null && route.isNotEmpty && route.toLowerCase() != 'all') {
+      filtered = filtered.where((p) {
+        if (p.roRoute != null && p.roRoute!.isNotEmpty) {
+          return p.roRoute!.toLowerCase().trim() == route.toLowerCase().trim();
+        }
+        final card = getCollectionEntryById(p.collectionId);
+        return card?.route.toLowerCase().trim() == route.toLowerCase().trim();
+      }).toList();
+    }
+
+    if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+      final q = searchQuery.toLowerCase().trim();
+      filtered = filtered.where((p) {
+        final card = getCollectionEntryById(p.collectionId);
+        return p.id.toLowerCase().contains(q) ||
+            (p.roName?.toLowerCase().contains(q) ?? false) ||
+            (p.roRoute?.toLowerCase().contains(q) ?? false) ||
+            (card?.loaneeName.toLowerCase().contains(q) ?? false) ||
+            (card?.accountNumber.toLowerCase().contains(q) ?? false) ||
+            (card?.customerId.toLowerCase().contains(q) ?? false);
+      }).toList();
+    }
+
+    if (startDate != null) {
+      filtered = filtered.where((p) => !p.createdAt.isBefore(startDate)).toList();
+    }
+    if (endDate != null) {
+      final endOfDay = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59);
+      filtered = filtered.where((p) => !p.createdAt.isAfter(endOfDay)).toList();
+    }
+
+    // Stable Sort: Payment date descending, then ID descending
+    filtered.sort((a, b) {
+      final dateCmp = b.createdAt.compareTo(a.createdAt);
+      if (dateCmp != 0) return dateCmp;
+      return b.id.compareTo(a.id);
+    });
+
+    final totalCount = filtered.length;
+    final int from = (page - 1) * pageSize;
+    final paged = (from < totalCount)
+        ? filtered.skip(from).take(pageSize).toList()
+        : <CollectionPaymentModel>[];
+
+    return PaginatedPaymentsResult(
+      payments: paged,
+      totalCount: totalCount,
+      page: page,
+      pageSize: pageSize,
+    );
   }
 
   // ==========================================
