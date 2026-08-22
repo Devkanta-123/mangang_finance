@@ -401,12 +401,10 @@ class _RoCollectionSheetViewPageState
                           configuredBaseDailyAmount: settings.baseDailyAmount,
                           configuredWeeklyInstallment: settings.weeklyInstallmentAmount,
                         );
-                        final payableStr = entry.getFormattedPayableAmount(
+                        final latePayable = settings.getLatePayableBreakdownForEntry(
+                          entry: entry,
+                          payments: payments,
                           loaneeLoanAmount: loanee?.loanAmount,
-                          configuredInterestRate: settings.investmentInterestRate,
-                          configuredBasePrincipal: settings.investmentBaseAmount,
-                          configuredBaseDailyAmount: settings.baseDailyAmount,
-                          configuredWeeklyInstallment: settings.weeklyInstallmentAmount,
                         );
 
                         return Column(
@@ -420,11 +418,74 @@ class _RoCollectionSheetViewPageState
                             ),
                             const Divider(height: 16),
                             _buildDetailRow(
-                              'Payable Amount (${entry.frequencyLabel})',
-                              payableStr,
+                              'Base Installment (${entry.frequencyLabel})',
+                              '₹ ${latePayable.currentInstallment.toStringAsFixed(2)} / ${entry.frequencyLabel}',
                               Icons.schedule_rounded,
                               isBold: true,
                               valueColor: entry.isDaily ? Colors.blue.shade800 : Colors.purple.shade800,
+                            ),
+                            const Divider(height: 16),
+                            _buildDetailRow(
+                              'Total Payable Today (Auto)',
+                              '₹ ${latePayable.totalPayableAmount.toStringAsFixed(2)}',
+                              Icons.payment_rounded,
+                              isBold: true,
+                              valueColor: latePayable.isOverdue ? Colors.red.shade800 : Colors.green.shade800,
+                            ),
+                            const Divider(height: 16),
+                            _buildDetailRow(
+                              'Late Payment Fee (Auto)',
+                              '₹ ${latePayable.calculatedLateFine.toStringAsFixed(2)}',
+                              Icons.timer_off_outlined,
+                              isBold: true,
+                              valueColor: latePayable.calculatedLateFine > 0 ? Colors.red.shade800 : Colors.grey.shade700,
+                            ),
+                            const Divider(height: 16),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(10),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              decoration: BoxDecoration(
+                                color: latePayable.isOverdue ? Colors.amber.shade50 : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: latePayable.isOverdue ? Colors.amber.shade300 : Colors.grey.shade300,
+                                ),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.info_outline_rounded,
+                                    size: 16,
+                                    color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Payable Amount Rationale',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.black87,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          latePayable.explanation,
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                             const Divider(height: 16),
                           ],
@@ -620,6 +681,7 @@ class _RoCollectionSheetViewPageState
   }
 
   // Popup Modal for Add Payment Entry (Admin or RO, single entry per date)
+  // Admin is authorized to record payments for ALL master routes!
   void _showAddPaymentEntryModal(
       BuildContext context, RoCollectionEntry entry) async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -641,30 +703,6 @@ class _RoCollectionSheetViewPageState
               Expanded(
                 child: Text(
                   'Access Restricted: "${entry.route}" is an Office route. Only Administrator can record payment entries for Office accounts.',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: Colors.red.shade800,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-      return;
-    }
-
-    // RULE 2: For all other routes, Administrator cannot do payment entry; only assigned RO officer can do it!
-    if (!isOfficeRoute && isAdmin) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.lock_outline_rounded, color: Colors.white, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Access Restricted: Administrator can only record payment entries for the "Office" route. For "${entry.route}", payment entry must be recorded by the assigned RO officer.',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                 ),
               ),
@@ -948,7 +986,7 @@ class _RoCollectionSheetViewPageState
                                             size: 12, color: Colors.red.shade700),
                                         const SizedBox(width: 3),
                                         Text(
-                                          'Late Fine: ₹${p.lateFine.toStringAsFixed(2)}',
+                                          'Late Payment Fee: ₹${p.lateFine.toStringAsFixed(2)}',
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
@@ -1868,10 +1906,10 @@ class _RoCollectionSheetViewPageState
                 DataColumn(label: Text('Loanee Name')),
                 DataColumn(label: Text('ACNO')),
                 DataColumn(label: Text('Payable Amount')),
+                DataColumn(label: Text('Late Payment Fee')),
                 DataColumn(label: Text('Sanction Date')),
                 DataColumn(label: Text('Maturity Date')),
                 DataColumn(label: Text('Collected')),
-                DataColumn(label: Text('Late Fine')),
                 DataColumn(label: Text('Today')),
                 DataColumn(label: Text('Actions')),
               ],
@@ -1960,6 +1998,79 @@ class _RoCollectionSheetViewPageState
                       Builder(
                         builder: (context) {
                           final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                          final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                          final loanee = loaneeProvider.getLoaneeForUser(
+                            customerId: entry.customerId,
+                            mobileNo: entry.mobileNo,
+                            name: entry.loaneeName,
+                          );
+                          final payments = provider.getPaymentsForCollection(entry.id);
+                          final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
+                            entry: entry,
+                            payments: payments,
+                            loaneeLoanAmount: loanee?.loanAmount,
+                          );
+
+                          if (breakdown.lateUnits > 0) {
+                            return Tooltip(
+                              message: 'Late Payment Amount: ${breakdown.lateUnits} ${entry.isDaily ? "day(s)" : "week(s)"} overdue (₹${breakdown.overdueMissedAmount.toStringAsFixed(0)}) + Today (₹${breakdown.currentInstallment.toStringAsFixed(0)}) = ₹${breakdown.totalPayableAmount.toStringAsFixed(0)}',
+                              child: InkWell(
+                                onTap: () => _showViewDetailsModal(context, entry),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.red.shade300),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '₹ ${breakdown.totalPayableAmount.toStringAsFixed(0)}',
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.red.shade900,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 2.5),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 3, vertical: 0.5),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.shade700,
+                                          borderRadius: BorderRadius.circular(2.5),
+                                        ),
+                                        child: Text(
+                                          '${breakdown.lateUnits}${entry.isDaily ? "D" : "W"}',
+                                          style: const TextStyle(
+                                            fontSize: 7.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
+                          return Text('₹ 0',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey.shade500,
+                              ));
+                        },
+                      ),
+                    ),
+                    DataCell(
+                      Builder(
+                        builder: (context) {
+                          final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
                           final loanee = loaneeProvider.getLoaneeForUser(
                             customerId: entry.customerId,
                             mobileNo: entry.mobileNo,
@@ -2011,31 +2122,6 @@ class _RoCollectionSheetViewPageState
                       ),
                     )),
                     DataCell(
-                      todayLateFine > 0
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.red.shade200),
-                              ),
-                              child: Text(
-                                '₹ ${todayLateFine.toStringAsFixed(0)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.red.shade800,
-                                ),
-                              ),
-                            )
-                          : Text('₹ 0',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey.shade600,
-                              )),
-                    ),
-                    DataCell(
                       hasPaidToday
                           ? Container(
                               padding: const EdgeInsets.symmetric(
@@ -2074,7 +2160,7 @@ class _RoCollectionSheetViewPageState
                         Builder(
                           builder: (context) {
                             final bool isOffice = CollectionSheetProvider.isOfficeRoute(entry.route);
-                            final bool canRecordPayment = (isAdmin && isOffice) || (isRoPanel && !isOffice);
+                            final bool canRecordPayment = isAdmin || isRoPanel;
 
                             if (canRecordPayment && !hasPaidToday) {
                               return Row(
@@ -2085,16 +2171,16 @@ class _RoCollectionSheetViewPageState
                                     padding: const EdgeInsets.all(4),
                                     constraints: const BoxConstraints(),
                                     icon: Icon(
-                                      isOffice
-                                          ? Icons.domain_add_rounded
+                                      isAdmin
+                                          ? (isOffice ? Icons.domain_add_rounded : Icons.admin_panel_settings_rounded)
                                           : Icons.add_card_rounded,
                                       size: 17,
-                                      color: isOffice
+                                      color: isAdmin
                                           ? const Color(0xFF8B1A1A)
-                                          : Colors.green,
+                                          : Colors.green.shade700,
                                     ),
-                                    tooltip: isOffice
-                                        ? 'Admin Office Payment Entry'
+                                    tooltip: isAdmin
+                                        ? 'Admin Payment Entry (${entry.route})'
                                         : 'Record Payment (RO)',
                                     onPressed: () =>
                                         _showAddPaymentEntryModal(context, entry),
@@ -2407,14 +2493,10 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                     );
                     final payableText = entry.getFormattedPayableAmount(
                       loaneeLoanAmount: loanee?.loanAmount,
-                      configuredInterestRate:
-                          settingsProvider.investmentInterestRate,
-                      configuredBasePrincipal:
-                          settingsProvider.investmentBaseAmount,
-                      configuredBaseDailyAmount:
-                          settingsProvider.baseDailyAmount,
-                      configuredWeeklyInstallment:
-                          settingsProvider.weeklyInstallmentAmount,
+                      configuredInterestRate: settingsProvider.investmentInterestRate,
+                      configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+                      configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+                      configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
                     );
 
                     return Container(
@@ -2501,8 +2583,8 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                     isOfficeRoute ? Icons.shield_rounded : Icons.person_rounded,
                     size: 18,
                     color: isOfficeRoute
-                        ? const Color(0xFF8B1A1A)
-                        : Colors.amber.shade900,
+                      ? const Color(0xFF8B1A1A)
+                      : Colors.amber.shade900,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -2543,6 +2625,19 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                         collectionProvider.getTodayPaidForCollection(entry.id);
                     final todayLateFine =
                         collectionProvider.getTodayLateFineForCollection(entry.id);
+                    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                    final loanee = loaneeProvider.getLoaneeForUser(
+                      customerId: entry.customerId,
+                      mobileNo: entry.mobileNo,
+                      name: entry.loaneeName,
+                    );
+                    final payments = collectionProvider.getPaymentsForCollection(entry.id);
+                    final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
+                      entry: entry,
+                      payments: payments,
+                      loaneeLoanAmount: loanee?.loanAmount,
+                    );
 
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
@@ -2562,20 +2657,39 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                             color: Colors.grey.shade600,
                           ),
                         ),
-                        if (todayLateFine > 0)
+                        if (breakdown.lateUnits > 0)
                           Container(
-                            margin: const EdgeInsets.only(top: 3),
+                            margin: const EdgeInsets.only(top: 2),
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
+                                horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.red.shade300),
+                            ),
+                            child: Text(
+                              'Late Amount: ₹${breakdown.totalPayableAmount.toStringAsFixed(0)} (${breakdown.lateUnits}${entry.isDaily ? "d" : "w"})',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red.shade900,
+                              ),
+                            ),
+                          )
+                        else if (todayLateFine > 0)
+                          Container(
+                            margin: const EdgeInsets.only(top: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1.5),
                             decoration: BoxDecoration(
                               color: Colors.red.shade50,
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(color: Colors.red.shade200),
                             ),
                             child: Text(
-                              'Late Fine: ₹${todayLateFine.toStringAsFixed(0)}',
+                              'Late Fee: ₹${todayLateFine.toStringAsFixed(0)} (Paid)',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 9,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.red.shade800,
                               ),
@@ -2666,11 +2780,11 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
             const Divider(height: 20),
 
             // Action Buttons Row:
-            // - Admin can ONLY record payments for Office route
-            // - RO officer can record payments for non-Office routes
+            // - Admin can record payments for ALL routes
+            // - RO officer can record payments for assigned / field routes
             Builder(
               builder: (context) {
-                final bool canRecordPayment = (isAdmin && isOfficeRoute) || (isRoPanel && !isOfficeRoute);
+                final bool canRecordPayment = isAdmin || isRoPanel;
 
                 return Row(
                   children: [
@@ -2678,7 +2792,7 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                       Expanded(
                         child: ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: isOfficeRoute
+                            backgroundColor: isAdmin
                                 ? const Color(0xFF8B1A1A)
                                 : Colors.amber.shade700,
                             foregroundColor: Colors.white,
@@ -2690,11 +2804,13 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                           ),
                           onPressed: onTapAddPayment,
                           icon: Icon(
-                            isOfficeRoute ? Icons.domain_add_rounded : Icons.add_card_rounded,
+                            isAdmin
+                                ? (isOfficeRoute ? Icons.domain_add_rounded : Icons.admin_panel_settings_rounded)
+                                : Icons.add_card_rounded,
                             size: 16,
                           ),
                           label: Text(
-                            isOfficeRoute ? 'Admin Office Entry' : '+ Add Payment',
+                            isAdmin ? 'Admin Payment Entry' : '+ Add Payment',
                             style: const TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.bold,
@@ -2851,7 +2967,7 @@ class __AddPaymentEntryModalContentState
   bool _initializedBalance = false;
   int _lateUnits = 0;
   double _calculatedFine = 0.0;
-  String _fineFormulaText = '';
+  CollectionLatePayableBreakdown? _payableBreakdown;
 
   String _selectedPaymentType = 'Cash';
   bool _isSubmitting = false;
@@ -2906,54 +3022,27 @@ class __AddPaymentEntryModalContentState
                 : 0.0);
       }
 
-      // Dynamic Late Fine Calculation based on SettingsProvider rates
-      _calculatedFine = settingsProvider.calculateLateFineForEntry(
-        entry: widget.entry,
-        payments: payments,
-      );
-      _lateUnits = settingsProvider.calculateLateUnits(
-        entry: widget.entry,
-        payments: payments,
-      );
-
-      final isDaily = widget.entry.collectionType.toLowerCase().trim() == 'daily';
       final loanee = loaneeProvider.getLoaneeForUser(
         customerId: widget.entry.customerId,
         mobileNo: widget.entry.mobileNo,
         name: widget.entry.loaneeName,
       );
 
-      if (isDaily) {
-        _fineFormulaText = 'Daily: ₹${settingsProvider.dailyLateFine.toStringAsFixed(2)}/day × $_lateUnits late days = ₹${_calculatedFine.toStringAsFixed(2)}';
-        if (_paymentAmountController.text.trim().isEmpty) {
-          final dailyPayable = widget.entry.getCalculatedPayableAmount(
-            loaneeLoanAmount: loanee?.loanAmount,
-            configuredInterestRate: settingsProvider.investmentInterestRate,
-            configuredBasePrincipal: settingsProvider.investmentBaseAmount,
-            configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
-            configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
-          );
-          _paymentAmountController.text = dailyPayable.toStringAsFixed(2);
-        }
-      } else {
-        final breakdown = settingsProvider.getWeeklyBreakdown(
-          entry: widget.entry,
-          payments: payments,
-        );
-        _fineFormulaText = 'Weekly (₹${breakdown.weeklyInstallment.toStringAsFixed(0)}/wk for ${breakdown.tenureWeeks} wks): ${breakdown.lateWeeks} wks overdue × ₹${breakdown.lateFineRate.toStringAsFixed(2)} = ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)}';
-        if (_paymentAmountController.text.trim().isEmpty) {
-          final weeklyPayable = widget.entry.getCalculatedPayableAmount(
-            loaneeLoanAmount: loanee?.loanAmount,
-            configuredInterestRate: settingsProvider.investmentInterestRate,
-            configuredBasePrincipal: settingsProvider.investmentBaseAmount,
-            configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
-            configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
-          );
-          _paymentAmountController.text = weeklyPayable.toStringAsFixed(2);
-        }
-      }
+      // Auto-calculate full Late Breakdown: Missed overdue days + today's installment + late penalty fee
+      final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
+        entry: widget.entry,
+        payments: payments,
+        loaneeLoanAmount: loanee?.loanAmount,
+      );
 
-      _lateFineController.text = _calculatedFine.toStringAsFixed(2);
+      _payableBreakdown = breakdown;
+      _lateUnits = breakdown.lateUnits;
+      _calculatedFine = breakdown.calculatedLateFine;
+
+      if (_paymentAmountController.text.trim().isEmpty) {
+        _paymentAmountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
+      }
+      _lateFineController.text = breakdown.calculatedLateFine.toStringAsFixed(2);
       _updateRemainingBalanceDisplay();
     }
   }
@@ -3535,19 +3624,19 @@ class __AddPaymentEntryModalContentState
                       builder: (context) {
                         final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
                         final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                        final collectionProvider = Provider.of<CollectionSheetProvider>(context, listen: false);
                         final loanee = loaneeProvider.getLoaneeForUser(
                           customerId: widget.entry.customerId,
                           mobileNo: widget.entry.mobileNo,
                           name: widget.entry.loaneeName,
                         );
-                        final breakdown = widget.entry.getLoanBreakdown(
+                        final payments = collectionProvider.getPaymentsForCollection(widget.entry.id);
+                        final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
+                          entry: widget.entry,
+                          payments: payments,
                           loaneeLoanAmount: loanee?.loanAmount,
-                          configuredInterestRate: settingsProvider.investmentInterestRate,
-                          configuredBasePrincipal: settingsProvider.investmentBaseAmount,
-                          configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
-                          configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
                         );
-                        final payableStr = widget.entry.getFormattedPayableAmount(
+                        final loanBreakdown = widget.entry.getLoanBreakdown(
                           loaneeLoanAmount: loanee?.loanAmount,
                           configuredInterestRate: settingsProvider.investmentInterestRate,
                           configuredBasePrincipal: settingsProvider.investmentBaseAmount,
@@ -3561,30 +3650,92 @@ class __AddPaymentEntryModalContentState
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text('Loan Amount (incl. interest):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
-                                Text('₹ ${breakdown.loanAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
+                                Text('₹ ${loanBreakdown.loanAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
                               ],
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 6),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('Payable Amount:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                Text('Base Installment (${widget.entry.frequencyLabel}):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                Text('₹ ${breakdown.currentInstallment.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF1E1E1E))),
+                              ],
+                            ),
+                            if (breakdown.lateUnits > 0) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Missed Overdue (${breakdown.lateUnits} ${breakdown.isDaily ? "days" : "weeks"} late):',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.red.shade800),
+                                  ),
+                                  Text(
+                                    '+ ₹ ${breakdown.overdueMissedAmount.toStringAsFixed(2)}',
+                                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.red.shade800),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Total Payable:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: breakdown.isOverdue ? Colors.red.shade900 : Colors.green.shade900)),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: widget.entry.isDaily ? Colors.blue.shade50 : Colors.purple.shade50,
+                                    color: breakdown.isOverdue ? Colors.red.shade50 : Colors.green.shade50,
                                     borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: breakdown.isOverdue ? Colors.red.shade300 : Colors.green.shade300),
                                   ),
                                   child: Text(
-                                    payableStr,
+                                    '₹ ${breakdown.totalPayableAmount.toStringAsFixed(2)}',
                                     style: TextStyle(
-                                      fontSize: 11,
+                                      fontSize: 12,
                                       fontWeight: FontWeight.bold,
-                                      color: widget.entry.isDaily ? Colors.blue.shade900 : Colors.purple.shade900,
+                                      color: breakdown.isOverdue ? Colors.red.shade900 : Colors.green.shade900,
                                     ),
                                   ),
                                 ),
                               ],
+                            ),
+                            if (breakdown.calculatedLateFine > 0) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Late Payment Fee:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900)),
+                                  Text('₹ ${breakdown.calculatedLateFine.toStringAsFixed(2)}', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.orange.shade900)),
+                                ],
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: breakdown.isOverdue ? Colors.amber.shade50 : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: breakdown.isOverdue ? Colors.amber.shade300 : Colors.grey.shade300),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(Icons.lightbulb_outline_rounded, size: 14, color: breakdown.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Why this amount: ${breakdown.explanation}',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: breakdown.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                             const Divider(height: 12),
                           ],
@@ -3801,7 +3952,7 @@ class __AddPaymentEntryModalContentState
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildFieldLabel('Late Fine (₹)'),
+                        _buildFieldLabel('Late Payment Fee (₹)'),
                         const SizedBox(height: 4),
                         TextFormField(
                           controller: _lateFineController,
@@ -3832,19 +3983,6 @@ class __AddPaymentEntryModalContentState
                             ),
                           ),
                         ),
-                        if (_fineFormulaText.isNotEmpty) ...[
-                          const SizedBox(height: 3),
-                          Text(
-                            _fineFormulaText,
-                            style: TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w600,
-                              color: _calculatedFine > 0
-                                  ? Colors.red.shade700
-                                  : Colors.grey.shade600,
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),

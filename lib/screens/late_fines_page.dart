@@ -377,15 +377,17 @@ class _LateFinesPageState extends State<LateFinesPage> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    'Fine: ₹ ${status.calculatedLateFine.toStringAsFixed(2)}',
+                    'Payable: ₹ ${(status.latePayableBreakdown?.totalPayableAmount ?? 0.0).toStringAsFixed(0)}',
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.bold,
-                      color: hasFine ? Colors.red.shade700 : Colors.green.shade700,
+                      color: hasFine ? Colors.red.shade800 : Colors.green.shade800,
                     ),
                   ),
                   Text(
-                    '${status.overdueUnits} ${isDaily ? "days" : "weeks"} late',
+                    hasFine
+                        ? '${status.overdueUnits} ${isDaily ? "days" : "weeks"} late (+₹${status.calculatedLateFine.toStringAsFixed(0)} fee)'
+                        : 'On Time',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
@@ -406,18 +408,16 @@ class _LateFinesPageState extends State<LateFinesPage> {
             child: Row(
               children: [
                 Icon(
-                  status.hasPaymentsInTable ? Icons.check_circle_outline : Icons.info_outline,
+                  hasFine ? Icons.lightbulb_outline_rounded : (status.hasPaymentsInTable ? Icons.check_circle_outline : Icons.info_outline),
                   size: 12,
-                  color: status.hasPaymentsInTable ? Colors.green.shade800 : Colors.orange.shade800,
+                  color: hasFine ? Colors.amber.shade900 : (status.hasPaymentsInTable ? Colors.green.shade800 : Colors.orange.shade800),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    status.hasPaymentsInTable
-                        ? 'Table ro_collection_payments: ${status.paymentRecordsCount} payments found • Last: ${SettingsProvider.formatDate(status.lastPaymentDate!)}'
-                        : 'Table ro_collection_payments: No payment record since start ${SettingsProvider.formatDate(status.loanStartDate)}',
+                    status.latePayableBreakdown?.explanation ?? status.calculationExplanation,
                     style: TextStyle(fontSize: 10, color: Colors.grey.shade700),
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),

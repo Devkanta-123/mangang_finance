@@ -870,6 +870,87 @@ class HomePage extends StatelessWidget {
 
                 const SizedBox(height: 12),
 
+                // Auto-Calculated Payable & Late Fee Summary Row
+                Builder(
+                  builder: (context) {
+                    final settings = Provider.of<SettingsProvider>(context, listen: false);
+                    final primaryEntry = loaneeEntries.isNotEmpty ? loaneeEntries.first : null;
+
+                    if (primaryEntry == null) return const SizedBox.shrink();
+
+                    final breakdown = settings.getLatePayableBreakdownForEntry(
+                      entry: primaryEntry,
+                      payments: loaneePayments,
+                      loaneeLoanAmount: realLoanAmount,
+                    );
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.schedule_rounded, size: 13, color: Colors.white70),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    'Base: ₹${breakdown.currentInstallment.toStringAsFixed(0)}/${primaryEntry.frequencyLabel}',
+                                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
+                              Row(
+                                children: [
+                                  Icon(
+                                    breakdown.isOverdue ? Icons.warning_amber_rounded : Icons.check_circle_outline_rounded,
+                                    size: 13,
+                                    color: breakdown.isOverdue ? Colors.amberAccent : Colors.lightGreenAccent,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    breakdown.isOverdue
+                                        ? 'Payable Today: ₹${breakdown.totalPayableAmount.toStringAsFixed(2)} (${breakdown.lateUnits}${primaryEntry.isDaily ? "d" : "w"} late)'
+                                        : 'Payable Today: ₹${breakdown.totalPayableAmount.toStringAsFixed(2)}',
+                                    style: TextStyle(
+                                      color: breakdown.isOverdue ? Colors.amberAccent : Colors.lightGreenAccent,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          if (breakdown.calculatedLateFine > 0) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Late Payment Fee (${breakdown.lateUnits} ${breakdown.isDaily ? "days" : "weeks"} @ ₹${breakdown.lateFineRate.toStringAsFixed(0)}/${breakdown.isDaily ? "day" : "wk"}):',
+                                  style: const TextStyle(color: Colors.white70, fontSize: 10),
+                                ),
+                                Text(
+                                  '₹ ${breakdown.calculatedLateFine.toStringAsFixed(2)}',
+                                  style: const TextStyle(color: Colors.amberAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                ),
+
                 // Loan Sanction & Maturity Date Section
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2467,42 +2548,63 @@ class _LoaneeLateFineAcknowledgmentSectionState
                       child: Column(
                         children: [
                           _buildBreakdownItem(
-                            'Admin Fine Rate (${status.isDaily ? 'Daily' : 'Weekly'})',
+                            'Base Installment (${status.isDaily ? 'Daily' : 'Weekly'})',
+                            '₹ ${(status.latePayableBreakdown?.baseInstallment ?? (status.isDaily ? 100.0 : 650.0)).toStringAsFixed(2)} / ${status.isDaily ? 'day' : 'wk'}',
+                          ),
+                          const Divider(height: 1),
+                          _buildBreakdownItem(
+                            'Late Elapsed Duration',
+                            '${status.overdueUnits} ${status.isDaily ? (status.overdueUnits == 1 ? "Late Day" : "Late Days") : (status.overdueUnits == 1 ? "Late Week" : "Late Weeks")}',
+                          ),
+                          if (status.overdueUnits > 0) ...[
+                            const Divider(height: 1),
+                            _buildBreakdownItem(
+                              'Missed Overdue Installments (${status.overdueUnits} × ₹${(status.latePayableBreakdown?.baseInstallment ?? (status.isDaily ? 100.0 : 650.0)).toStringAsFixed(0)})',
+                              '₹ ${(status.latePayableBreakdown?.overdueMissedAmount ?? (status.overdueUnits * (status.isDaily ? 100.0 : 650.0))).toStringAsFixed(2)}',
+                              valueColor: Colors.red.shade800,
+                            ),
+                          ],
+                          const Divider(height: 1),
+                          _buildBreakdownItem(
+                            'Today\'s Scheduled Installment',
+                            '₹ ${(status.latePayableBreakdown?.currentInstallment ?? (status.isDaily ? 100.0 : 650.0)).toStringAsFixed(2)}',
+                            valueColor: Colors.teal.shade800,
+                          ),
+                          const Divider(height: 1),
+                          _buildBreakdownItem(
+                            'Late Payment Fine Rate',
                             '₹ ${status.lateFineRate.toStringAsFixed(2)} / ${status.isDaily ? 'day' : 'wk'}',
                           ),
                           const Divider(height: 1),
                           _buildBreakdownItem(
-                            'Overdue Elapsed Duration',
-                            '${status.overdueUnits} ${status.isDaily ? 'Days' : 'Weeks'}',
-                          ),
-                          const Divider(height: 1),
-                          _buildBreakdownItem(
-                            'Calculated Late Fine Penalty',
+                            'System Late Payment Fine Penalty',
                             '₹ ${status.calculatedLateFine.toStringAsFixed(2)}',
                             valueColor: Colors.red.shade800,
                             isBold: true,
                           ),
-                          if (!status.isDaily) ...[
-                            const Divider(height: 1),
-                            _buildBreakdownItem(
-                              'Overdue Installment Principal',
-                              '₹ ${status.overdueEmiAmount.toStringAsFixed(2)}',
-                            ),
-                          ],
                           const Divider(height: 1),
                           Container(
                             padding: const EdgeInsets.all(12),
                             color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            child: Column(
                               children: [
-                                const Text(
-                                  'Total Overdue Payable',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF8B1A1A)),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text(
+                                      'Total Payable Today (incl. Late Days)',
+                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF8B1A1A)),
+                                    ),
+                                    Text(
+                                      '₹ ${(status.latePayableBreakdown?.totalPayableAmount ?? (status.totalOverdueAmount)).toStringAsFixed(2)}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF8B1A1A)),
+                                    ),
+                                  ],
                                 ),
+                                const SizedBox(height: 6),
                                 Text(
-                                  '₹ ${status.totalOverdueAmount.toStringAsFixed(2)}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF8B1A1A)),
+                                  status.latePayableBreakdown?.explanation ?? status.calculationExplanation,
+                                  style: TextStyle(fontSize: 10, color: Colors.grey.shade700, fontStyle: FontStyle.italic),
                                 ),
                               ],
                             ),

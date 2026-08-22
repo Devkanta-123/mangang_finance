@@ -438,31 +438,17 @@ class _TransactionPageState extends State<TransactionPage> {
                                   if (val != null) {
                                     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
                                     final payments = collectionProvider.getPaymentsForCollection(val.id);
-                                    final fine = settingsProvider.calculateLateFineForEntry(
+                                    final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                                       entry: val,
                                       payments: payments,
                                     );
-                                    final units = settingsProvider.calculateLateUnits(
-                                      entry: val,
-                                      payments: payments,
-                                    );
-                                    final isDaily = val.collectionType.toLowerCase().trim() == 'daily';
-                                    if (isDaily) {
-                                      _lateFineFormulaText = 'Daily: ₹${settingsProvider.dailyLateFine.toStringAsFixed(2)}/day × $units late days = ₹${fine.toStringAsFixed(2)}';
-                                    } else {
-                                      final breakdown = settingsProvider.getWeeklyBreakdown(
-                                        entry: val,
-                                        payments: payments,
-                                      );
-                                      _lateFineFormulaText = 'Weekly (₹${breakdown.weeklyInstallment.toStringAsFixed(0)}/wk for ${breakdown.tenureWeeks} wks): ${breakdown.lateWeeks} wks overdue × ₹${breakdown.lateFineRate.toStringAsFixed(2)} = ₹${fine.toStringAsFixed(2)}';
-                                      if (_amountController.text.trim().isEmpty) {
-                                        _amountController.text = breakdown.weeklyInstallment.toStringAsFixed(2);
-                                      }
-                                    }
-                                    _lateFineController.text = fine.toStringAsFixed(2);
+                                    _amountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
+                                    _lateFineController.text = breakdown.calculatedLateFine.toStringAsFixed(2);
+                                    _lateFineFormulaText = breakdown.explanation;
                                   } else {
                                     _lateFineFormulaText = '';
                                     _lateFineController.text = '0.00';
+                                    _amountController.clear();
                                   }
                                 });
                               },

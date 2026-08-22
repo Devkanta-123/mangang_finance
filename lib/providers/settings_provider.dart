@@ -30,6 +30,39 @@ class WeeklyBreakdown {
   });
 }
 
+/// Comprehensive breakdown for auto-calculated Late Payment Fee and Payable Amount
+class CollectionLatePayableBreakdown {
+  final double baseInstallment; // e.g. ₹100.00 / day or ₹650.00 / week
+  final int lateUnits; // e.g. 2 late days or 1 late week
+  final bool isDaily; // true if daily, false if weekly
+  final String frequencyLabel; // 'Day' or 'Week'
+  final double overdueMissedAmount; // lateUnits * baseInstallment (e.g. 2 * 100 = ₹200.00)
+  final double currentInstallment; // today's installment = baseInstallment (e.g. ₹100.00)
+  final double totalPayableAmount; // overdueMissedAmount + currentInstallment (e.g. ₹200 + ₹100 = ₹300.00)
+  final double lateFineRate; // e.g. ₹3.00/day or ₹25.00/week
+  final double calculatedLateFine; // lateUnits * lateFineRate (e.g. 2 * 3 = ₹6.00)
+  final double grandTotalWithPenalty; // totalPayableAmount + calculatedLateFine (e.g. ₹306.00)
+  final String explanation; // Plain-English rationale
+  final String shortSummary; // Short summary for table chips
+
+  CollectionLatePayableBreakdown({
+    required this.baseInstallment,
+    required this.lateUnits,
+    required this.isDaily,
+    required this.frequencyLabel,
+    required this.overdueMissedAmount,
+    required this.currentInstallment,
+    required this.totalPayableAmount,
+    required this.lateFineRate,
+    required this.calculatedLateFine,
+    required this.grandTotalWithPenalty,
+    required this.explanation,
+    required this.shortSummary,
+  });
+
+  bool get isOverdue => lateUnits > 0;
+}
+
 /// Comprehensive Status Model for Loanee Late Fine and Overdue Assessment
 class LoaneeLateFineStatus {
   final String collectionId;
@@ -50,6 +83,7 @@ class LoaneeLateFineStatus {
   final double totalOverdueAmount; // overdueEmiAmount + calculatedLateFine
   final String calculationExplanation;
   final WeeklyBreakdown? weeklyBreakdown;
+  final CollectionLatePayableBreakdown? latePayableBreakdown;
 
   LoaneeLateFineStatus({
     required this.collectionId,
@@ -70,6 +104,7 @@ class LoaneeLateFineStatus {
     required this.totalOverdueAmount,
     required this.calculationExplanation,
     this.weeklyBreakdown,
+    this.latePayableBreakdown,
   });
 
   bool get isOverdue => overdueUnits > 0 || calculatedLateFine > 0;
@@ -428,10 +463,74 @@ class SettingsProvider extends ChangeNotifier {
     return '${date.day.toString().padLeft(2, '0')} ${months[date.month - 1]} ${date.year}';
   }
 
+  /// Comprehensive calculation of Late Payment Fee and Payable Amount Breakdown
+  /// e.g. Base Payable ₹100, 2 days late -> Missed 2 days (₹200) + Today (₹100) = ₹300 Total Payable (+ Late Fine: 2 * ₹3 = ₹6)
+  CollectionLatePayableBreakdown getLatePayableBreakdownForEntry({
+    required RoCollectionEntry entry,
+    required List<CollectionPaymentModel> payments,
+    double? loaneeLoanAmount,
+    DateTime? asOfDate,
+  }) {
+    final type = entry.collectionType.toLowerCase().trim();
+    final isDaily = type == 'daily';
+    final freq = entry.frequencyLabel;
+
+    final double baseInstallment = entry.getCalculatedPayableAmount(
+      loaneeLoanAmount: loaneeLoanAmount,
+      configuredInterestRate: investmentInterestRate,
+      configuredBasePrincipal: investmentBaseAmount,
+      configuredBaseDailyAmount: baseDailyAmount,
+      configuredWeeklyInstallment: weeklyInstallmentAmount,
+    );
+
+    final int lateUnits = calculateLateUnits(
+      entry: entry,
+      payments: payments,
+      asOfDate: asOfDate,
+    );
+
+    final double overdueMissedAmount = lateUnits * baseInstallment;
+    final double currentInstallment = baseInstallment;
+    final double totalPayable = overdueMissedAmount + currentInstallment;
+
+    final double fineRate = isDaily ? _dailyLateFine : _weeklyLateFine;
+    final double calculatedFine = lateUnits * fineRate;
+    final double grandTotal = totalPayable + calculatedFine;
+
+    final String unitName = isDaily ? (lateUnits == 1 ? 'day' : 'days') : (lateUnits == 1 ? 'week' : 'weeks');
+
+    final String explanation;
+    final String shortSummary;
+
+    if (lateUnits > 0) {
+      explanation = '$lateUnits $unitName late: $lateUnits missed ${isDaily ? "days" : "weeks"} (₹${overdueMissedAmount.toStringAsFixed(2)}) + ${isDaily ? "Today's" : "This week's"} installment (₹${currentInstallment.toStringAsFixed(2)}) = ₹${totalPayable.toStringAsFixed(2)} Total Due Today. System Late Payment Fee: $lateUnits $unitName × ₹${fineRate.toStringAsFixed(2)}/${isDaily ? "day" : "wk"} = ₹${calculatedFine.toStringAsFixed(2)} penalty.';
+      shortSummary = '₹${totalPayable.toStringAsFixed(0)} ($lateUnits $unitName late + today)';
+    } else {
+      explanation = 'On Time: Scheduled ${isDaily ? "daily" : "weekly"} installment = ₹${currentInstallment.toStringAsFixed(2)}. Late Payment Fee: ₹0.00.';
+      shortSummary = '₹${currentInstallment.toStringAsFixed(0)} / $freq';
+    }
+
+    return CollectionLatePayableBreakdown(
+      baseInstallment: baseInstallment,
+      lateUnits: lateUnits,
+      isDaily: isDaily,
+      frequencyLabel: freq,
+      overdueMissedAmount: overdueMissedAmount,
+      currentInstallment: currentInstallment,
+      totalPayableAmount: totalPayable,
+      lateFineRate: fineRate,
+      calculatedLateFine: calculatedFine,
+      grandTotalWithPenalty: grandTotal,
+      explanation: explanation,
+      shortSummary: shortSummary,
+    );
+  }
+
   /// Get comprehensive late fine & overdue status for an individual collection entry
   LoaneeLateFineStatus getLateFineStatusForEntry({
     required RoCollectionEntry entry,
     required List<CollectionPaymentModel> payments,
+    double? loaneeLoanAmount,
     DateTime? asOfDate,
   }) {
     final now = asOfDate ?? DateTime.now();
@@ -445,9 +544,16 @@ class SettingsProvider extends ChangeNotifier {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     final lastPaymentDate = sortedPayments.isNotEmpty ? sortedPayments.first.createdAt : null;
 
+    final payableBreakdown = getLatePayableBreakdownForEntry(
+      entry: entry,
+      payments: payments,
+      loaneeLoanAmount: loaneeLoanAmount,
+      asOfDate: asOfDate,
+    );
+
     if (isDaily) {
       DateTime baseDate;
-      int overdueDays = 0;
+      int overdueDays = payableBreakdown.lateUnits;
 
       if (hasPayments && lastPaymentDate != null) {
         baseDate = lastPaymentDate;
@@ -463,8 +569,8 @@ class SettingsProvider extends ChangeNotifier {
 
       final lateFine = overdueDays * _dailyLateFine;
       final String explanation = hasPayments
-          ? 'Payment data found in ro_collection_payments (${payments.length} payments, last on ${formatDate(lastPaymentDate!)}). $overdueDays overdue days × ₹${_dailyLateFine.toStringAsFixed(2)}/day fine = ₹${lateFine.toStringAsFixed(2)} penalty.'
-          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. $overdueDays overdue days × ₹${_dailyLateFine.toStringAsFixed(2)}/day fine = ₹${lateFine.toStringAsFixed(2)} penalty.';
+          ? 'Payment data found in ro_collection_payments (${payments.length} payments, last on ${formatDate(lastPaymentDate!)}). $overdueDays overdue days: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Today\'s ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee: $overdueDays days × ₹${_dailyLateFine.toStringAsFixed(2)}/day = ₹${lateFine.toStringAsFixed(2)} penalty.'
+          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. $overdueDays overdue days: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Today\'s ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee: $overdueDays days × ₹${_dailyLateFine.toStringAsFixed(2)}/day = ₹${lateFine.toStringAsFixed(2)} penalty.';
 
       return LoaneeLateFineStatus(
         collectionId: entry.id,
@@ -481,10 +587,11 @@ class SettingsProvider extends ChangeNotifier {
         overdueUnits: overdueDays,
         lateFineRate: _dailyLateFine,
         calculatedLateFine: lateFine,
-        overdueEmiAmount: 0.0,
-        totalOverdueAmount: lateFine,
+        overdueEmiAmount: payableBreakdown.overdueMissedAmount,
+        totalOverdueAmount: payableBreakdown.totalPayableAmount + lateFine,
         calculationExplanation: explanation,
         weeklyBreakdown: null,
+        latePayableBreakdown: payableBreakdown,
       );
     } else {
       // Weekly scheme
@@ -495,11 +602,11 @@ class SettingsProvider extends ChangeNotifier {
       );
 
       final overdueEmi = breakdown.lateWeeks * breakdown.weeklyInstallment;
-      final totalOverdue = overdueEmi + breakdown.totalCalculatedFine;
+      final totalOverdue = payableBreakdown.totalPayableAmount + breakdown.totalCalculatedFine;
 
       final String explanation = hasPayments
-          ? 'Payment data found in ro_collection_payments (₹${breakdown.totalPaid.toStringAsFixed(2)} paid across ${payments.length} transactions, covering ${breakdown.weeksPaid}/${breakdown.expectedWeeks} expected weeks). ${breakdown.lateWeeks} overdue weeks × ₹${breakdown.lateFineRate.toStringAsFixed(2)}/wk fine = ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.'
-          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. ${breakdown.lateWeeks} overdue weeks × ₹${breakdown.lateFineRate.toStringAsFixed(2)}/wk fine = ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.';
+          ? 'Payment data found in ro_collection_payments (₹${breakdown.totalPaid.toStringAsFixed(2)} paid across ${payments.length} transactions, covering ${breakdown.weeksPaid}/${breakdown.expectedWeeks} expected weeks). ${breakdown.lateWeeks} overdue weeks: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Current ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee: ${breakdown.lateWeeks} wks × ₹${breakdown.lateFineRate.toStringAsFixed(2)}/wk = ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.'
+          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. ${breakdown.lateWeeks} overdue weeks: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Current ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee: ${breakdown.lateWeeks} wks × ₹${breakdown.lateFineRate.toStringAsFixed(2)}/wk = ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.';
 
       return LoaneeLateFineStatus(
         collectionId: entry.id,
@@ -520,6 +627,7 @@ class SettingsProvider extends ChangeNotifier {
         totalOverdueAmount: totalOverdue,
         calculationExplanation: explanation,
         weeklyBreakdown: breakdown,
+        latePayableBreakdown: payableBreakdown,
       );
     }
   }
@@ -543,6 +651,24 @@ class SettingsProvider extends ChangeNotifier {
       final cleanStart = DateTime(startDate.year, startDate.month, startDate.day);
       final daysDiff = today.difference(cleanStart).inDays.clamp(0, 365);
       final fine = daysDiff * _dailyLateFine;
+      final baseAmt = baseDailyAmount;
+      final overdueMissed = daysDiff * baseAmt;
+      final totalPayable = overdueMissed + baseAmt;
+
+      final fallbackBreakdown = CollectionLatePayableBreakdown(
+        baseInstallment: baseAmt,
+        lateUnits: daysDiff,
+        isDaily: true,
+        frequencyLabel: 'Day',
+        overdueMissedAmount: overdueMissed,
+        currentInstallment: baseAmt,
+        totalPayableAmount: totalPayable,
+        lateFineRate: _dailyLateFine,
+        calculatedLateFine: fine,
+        grandTotalWithPenalty: totalPayable + fine,
+        explanation: 'Calculated from registration date ${formatDate(startDate)}: $daysDiff days late × ₹${baseAmt.toStringAsFixed(2)} = ₹${overdueMissed.toStringAsFixed(2)} missed + Today ₹${baseAmt.toStringAsFixed(2)} = ₹${totalPayable.toStringAsFixed(2)} payable. Late fine: $daysDiff days × ₹${_dailyLateFine.toStringAsFixed(2)} = ₹${fine.toStringAsFixed(2)}.',
+        shortSummary: '₹${totalPayable.toStringAsFixed(0)} ($daysDiff days late + today)',
+      );
 
       return LoaneeLateFineStatus(
         collectionId: 'PENDING-ENTRY',
@@ -559,10 +685,11 @@ class SettingsProvider extends ChangeNotifier {
         overdueUnits: daysDiff,
         lateFineRate: _dailyLateFine,
         calculatedLateFine: fine,
-        overdueEmiAmount: 0.0,
-        totalOverdueAmount: fine,
-        calculationExplanation: 'No active collection sheet card or ro_collection_payments record found. Overdue calculated from registration date ${formatDate(startDate)}: $daysDiff days × ₹${_dailyLateFine.toStringAsFixed(2)}/day = ₹${fine.toStringAsFixed(2)}.',
+        overdueEmiAmount: overdueMissed,
+        totalOverdueAmount: totalPayable + fine,
+        calculationExplanation: fallbackBreakdown.explanation,
         weeklyBreakdown: null,
+        latePayableBreakdown: fallbackBreakdown,
       );
     }
 
@@ -571,6 +698,7 @@ class SettingsProvider extends ChangeNotifier {
       return getLateFineStatusForEntry(
         entry: entries.first,
         payments: entryPayments,
+        loaneeLoanAmount: fallbackLoanAmount,
         asOfDate: asOfDate,
       );
     }
@@ -583,14 +711,17 @@ class SettingsProvider extends ChangeNotifier {
     int totalOverdueUnits = 0;
     DateTime? latestPaymentDate;
     final List<String> types = [];
+    CollectionLatePayableBreakdown? firstBreakdown;
 
     for (final entry in entries) {
       final entryPayments = payments.where((p) => p.collectionId == entry.id).toList();
       final status = getLateFineStatusForEntry(
         entry: entry,
         payments: entryPayments,
+        loaneeLoanAmount: fallbackLoanAmount,
         asOfDate: asOfDate,
       );
+      firstBreakdown ??= status.latePayableBreakdown;
       totalFine += status.calculatedLateFine;
       totalOverdueEmi += status.overdueEmiAmount;
       totalPaid += status.totalPaidAmount;
@@ -627,6 +758,7 @@ class SettingsProvider extends ChangeNotifier {
       totalOverdueAmount: totalOverdueEmi + totalFine,
       calculationExplanation: 'Combined assessment across ${entries.length} loan accounts: ₹${totalFine.toStringAsFixed(2)} late fine penalty total.',
       weeklyBreakdown: null,
+      latePayableBreakdown: firstBreakdown,
     );
   }
 
