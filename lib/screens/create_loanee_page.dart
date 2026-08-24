@@ -5,7 +5,8 @@ import 'package:provider/provider.dart';
 import '../models/loanee_model.dart';
 import '../providers/loanee_provider.dart';
 import '../providers/settings_provider.dart';
-import '../services/supabase_service.dart';
+import '../services/loanee_excel_import_service.dart';
+import '../widgets/loanee_excel_upload_dialog.dart';
 
 class CreateLoaneePage extends StatefulWidget {
   final VoidCallback? onAccountCreated;
@@ -63,8 +64,8 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
   bool _isWitnessCustomRelationship = false;
 
   bool _isSubmitting = false;
-  bool _isTestingConnection = false;
-  bool? _connectionStatus;
+  bool _isDownloadingTemplate = false;
+  bool _isUploadingExcel = false;
 
   final List<String> _businessCategories = [
     'Retail Grocery',
@@ -227,6 +228,38 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
     );
   }
 
+  Future<void> _handleDownloadTemplate() async {
+    setState(() => _isDownloadingTemplate = true);
+    await LoaneeExcelImportService.downloadTemplate(context);
+    if (mounted) {
+      setState(() => _isDownloadingTemplate = false);
+    }
+  }
+
+  Future<void> _handleUploadExcel() async {
+    setState(() => _isUploadingExcel = true);
+    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    final parsedResult = await LoaneeExcelImportService.pickAndParseLoaneeExcel(
+      context: context,
+      existingLoanees: loaneeProvider.loanees,
+    );
+    if (mounted) {
+      setState(() => _isUploadingExcel = false);
+    }
+
+    if (parsedResult != null && mounted) {
+      await LoaneeExcelUploadDialog.show(
+        context,
+        previewResult: parsedResult,
+        onImportSuccess: () {
+          if (widget.onAccountCreated != null) {
+            widget.onAccountCreated!();
+          }
+        },
+      );
+    }
+  }
+
   @override
   void dispose() {
     _customerIdController.dispose();
@@ -317,7 +350,6 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
 
       setState(() {
         _isSubmitting = false;
-        _connectionStatus = result['success'];
       });
 
       if (result['success'] == true) {
@@ -588,16 +620,14 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
 
   @override
   Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width >= 600;
+
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 600;
-
-            return SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Column(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          child: Column(
                 children: [
                   // Page Top Banner
                   Container(
@@ -661,6 +691,222 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                     ),
                   ),
 
+                  // Excel Bulk Import & Template Section
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey.shade200),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.grey.withOpacity(0.06),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: isWide
+                          ? Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.05),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.table_view_rounded,
+                                    color: Colors.black87,
+                                    size: 22,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Bulk Loanee Excel Import / Export',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                      SizedBox(height: 2),
+                                      Text(
+                                        'Download the standard loanee Excel template or upload filled data in bulk',
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                    side: BorderSide(color: Colors.grey.shade400),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  onPressed: _isDownloadingTemplate ? null : _handleDownloadTemplate,
+                                  icon: _isDownloadingTemplate
+                                      ? const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black87),
+                                        )
+                                      : const Icon(Icons.download_rounded, size: 18, color: Colors.black87),
+                                  label: const Text(
+                                    'Download Template',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.black,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  onPressed: _isUploadingExcel ? null : _handleUploadExcel,
+                                  icon: _isUploadingExcel
+                                      ? const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                        )
+                                      : const Icon(Icons.upload_file_rounded, size: 18),
+                                  label: const Text(
+                                    'Upload Excel',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.05),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: const Icon(
+                                        Icons.table_view_rounded,
+                                        color: Colors.black87,
+                                        size: 20,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    const Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Bulk Loanee Excel Import',
+                                            style: TextStyle(
+                                              fontSize: 13.5,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                          Text(
+                                            'Use template to import loanee records',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(vertical: 10),
+                                          side: BorderSide(color: Colors.grey.shade400),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(10),
+                                          ),
+                                        ),
+                                        onPressed: _isDownloadingTemplate ? null : _handleDownloadTemplate,
+                                        icon: _isDownloadingTemplate
+                                            ? const SizedBox(
+                                                width: 14,
+                                                height: 14,
+                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black87),
+                                              )
+                                            : const Icon(Icons.download_rounded, size: 16, color: Colors.black87),
+                                        label: const Text(
+                                          'Download Template',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.black,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(vertical: 10),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(10),
+                                          ),
+                                        ),
+                                        onPressed: _isUploadingExcel ? null : _handleUploadExcel,
+                                        icon: _isUploadingExcel
+                                            ? const SizedBox(
+                                                width: 14,
+                                                height: 14,
+                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                              )
+                                            : const Icon(Icons.upload_file_rounded, size: 16),
+                                        label: const Text(
+                                          'Upload Excel',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
 
                   // Responsive Form Area
                   Padding(
@@ -679,7 +925,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                 first: _buildFormField(
                                   controller: _customerIdController,
                                   label: 'CUSTOMER ID *',
-                                  hint: 'e.g. CUST-1004',
+                                  hint: 'e.g. CUST2026L000001',
                                   icon: Icons.badge_outlined,
                                   validator: (val) {
                                     if (val == null || val.trim().isEmpty) {
@@ -856,6 +1102,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                     ),
                                     const SizedBox(height: 6),
                                     DropdownButtonFormField<String>(
+                                    isExpanded: true,
                                       value: _districtController.text.isNotEmpty &&
                                               _districts.contains(_districtController.text)
                                           ? _districtController.text
@@ -937,6 +1184,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                   ),
                                   const SizedBox(height: 6),
                                   DropdownButtonFormField<String>(
+                                    isExpanded: true,
                                     value: _selectedBusinessType,
                                     decoration: _getInputDecoration(
                                       hint: 'Select Business Category',
@@ -1023,8 +1271,10 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        Wrap(
+                                          alignment: WrapAlignment.spaceBetween,
+                                          spacing: 8,
+                                          runSpacing: 4,
                                           children: [
                                             Text(
                                               'Interest (${calc.interestRate.toStringAsFixed(0)}%): ₹${calc.interestAmount.toStringAsFixed(0)}',
@@ -1101,7 +1351,10 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                 second: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Row(
+                                    Wrap(
+                                      crossAxisAlignment: WrapCrossAlignment.center,
+                                      spacing: 6,
+                                      runSpacing: 2,
                                       children: [
                                         const Text(
                                           'LOAN MATURITY DATE *',
@@ -1111,7 +1364,6 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                             color: Colors.black87,
                                           ),
                                         ),
-                                        const SizedBox(width: 6),
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                                           decoration: BoxDecoration(
@@ -1227,6 +1479,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                   ),
                                   const SizedBox(height: 6),
                                   DropdownButtonFormField<String>(
+                                    isExpanded: true,
                                     value: _selectedWitnessRelationship,
                                     decoration: _getInputDecoration(
                                       hint: 'Select Relationship',
@@ -1381,6 +1634,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                     ),
                                     const SizedBox(height: 6),
                                     DropdownButtonFormField<String>(
+                                    isExpanded: true,
                                       value: _witnessDistrictController.text.isNotEmpty &&
                                               _districts.contains(_witnessDistrictController.text)
                                           ? _witnessDistrictController.text
@@ -1455,6 +1709,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                   ),
                                   const SizedBox(height: 6),
                                   DropdownButtonFormField<String>(
+                                    isExpanded: true,
                                     value: _selectedWitnessBusinessType,
                                     decoration: _getInputDecoration(
                                       hint: 'Select Witness Business Category',
@@ -1584,9 +1839,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                   ),
                 ],
               ),
-            );
-          },
-        ),
+            ),
       ),
     );
   }
@@ -1644,26 +1897,27 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Icon(icon, color: Colors.black, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
-                    ),
+              Icon(icon, color: Colors.black, size: 19),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
                   ),
-                ],
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              if (headerTrailing != null) headerTrailing,
             ],
           ),
-          const Divider(height: 20),
+          if (headerTrailing != null) ...[
+            const SizedBox(height: 4),
+            headerTrailing,
+          ],
+          const Divider(height: 18),
           ...children,
         ],
       ),

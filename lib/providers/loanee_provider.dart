@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/loanee_model.dart';
+import '../services/customer_id_service.dart';
 import '../services/supabase_service.dart';
 
 class LoaneeProvider extends ChangeNotifier {
@@ -54,6 +55,51 @@ class LoaneeProvider extends ChangeNotifier {
         'success': false,
         'connectionFailed': false,
         'message': 'Connected to Supabase, but failed to insert record into table.',
+      };
+    }
+  }
+
+  /// Add multiple Loanees in batch (used during bulk import)
+  Future<Map<String, dynamic>> addLoaneesBatchWithConnectionCheck(List<LoaneeAccount> newLoanees) async {
+    if (newLoanees.isEmpty) {
+      return {'success': true, 'count': 0, 'connectionFailed': false};
+    }
+
+    final isConnected = await SupabaseService.instance.checkConnection();
+    if (!isConnected) {
+      return {
+        'success': false,
+        'connectionFailed': true,
+        'count': 0,
+        'message': 'Failed to connect to Supabase database! Table insert aborted.',
+      };
+    }
+
+    final saveSuccess = await SupabaseService.instance.saveLoaneeAccountsBatch(newLoanees);
+    if (saveSuccess) {
+      for (final loanee in newLoanees.reversed) {
+        final existingIndex = _loanees.indexWhere((l) =>
+            (l.customerId.isNotEmpty && l.customerId.trim().toLowerCase() == loanee.customerId.trim().toLowerCase()) ||
+            (l.accountNumber.isNotEmpty && l.accountNumber.trim().toLowerCase() == loanee.accountNumber.trim().toLowerCase()));
+        if (existingIndex != -1) {
+          _loanees[existingIndex] = loanee;
+        } else {
+          _loanees.insert(0, loanee);
+        }
+      }
+      notifyListeners();
+      return {
+        'success': true,
+        'connectionFailed': false,
+        'count': newLoanees.length,
+        'message': 'Successfully imported ${newLoanees.length} loanees!',
+      };
+    } else {
+      return {
+        'success': false,
+        'connectionFailed': false,
+        'count': 0,
+        'message': 'Connected to Supabase, but failed to batch insert loanee records.',
       };
     }
   }
@@ -131,9 +177,12 @@ class LoaneeProvider extends ChangeNotifier {
     return await updateStatus(loanee.customerId, nextStatus);
   }
 
-  String generateNextCustomerId() {
-    int nextId = 1001 + _loanees.length;
-    return 'CUST-$nextId';
+  String generateNextCustomerId({DateTime? now, Set<String>? reservedIds}) {
+    return CustomerIdService.generateLoaneeCustomerId(
+      existingLoanees: _loanees,
+      now: now,
+      reservedIds: reservedIds,
+    );
   }
 
   String generateNextAccountNumber() {

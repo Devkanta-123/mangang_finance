@@ -151,6 +151,64 @@ class SupabaseService {
     }
   }
 
+  /// Batch save loanee accounts to Supabase 'loanee_accounts' table & sync with 'user_auth'
+  Future<bool> saveLoaneeAccountsBatch(List<LoaneeAccount> loanees) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null && loanees.isNotEmpty) {
+        final payloads = loanees.map((l) => l.toJson()).toList();
+        try {
+          await supaClient
+              .from('loanee_accounts')
+              .upsert(payloads, onConflict: 'customerid')
+              .select();
+        } catch (colErr) {
+          debugPrint('⚠️ Batch upsert loanee_accounts fallback without dates: $colErr');
+          final safePayloads = payloads.map((p) {
+            return Map<String, dynamic>.from(p)
+              ..remove('loansanctiondate')
+              ..remove('loanmaturitydate');
+          }).toList();
+          await supaClient
+              .from('loanee_accounts')
+              .upsert(safePayloads, onConflict: 'customerid')
+              .select();
+        }
+
+        // Sync to user_auth table in batch
+        try {
+          final authPayloads = loanees.map((l) {
+            final authRecord = UserAuthRecord(
+              id: l.customerId.isNotEmpty ? l.customerId : l.mobileNo,
+              mobileNo: l.mobileNo,
+              customerId: l.customerId,
+              userType: UserType.loanee,
+              pin: l.pinCode.isNotEmpty ? l.pinCode : '1234',
+              name: l.loaneeName,
+              accountName: l.accountNumber,
+              status: l.status,
+            );
+            return authRecord.toSupabaseJson();
+          }).toList();
+
+          await supaClient
+              .from('user_auth')
+              .upsert(authPayloads, onConflict: 'id')
+              .select();
+        } catch (authErr) {
+          debugPrint('⚠️ Note batch syncing loanees to user_auth: $authErr');
+        }
+
+        debugPrint('✅ Successfully batch saved ${loanees.length} loanees to Supabase.');
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('❌ Error batch saving loanees to Supabase: $e');
+      return false;
+    }
+  }
+
   /// Fetch loanee accounts from Supabase 'loanee_accounts' table & cross-check with 'user_auth'
   Future<List<LoaneeAccount>?> fetchLoaneeAccounts() async {
     try {

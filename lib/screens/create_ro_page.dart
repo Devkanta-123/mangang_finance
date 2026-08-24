@@ -452,7 +452,7 @@ class _CreateRoPageState extends State<CreateRoPage> {
                                 first: _buildFormField(
                                   controller: _customerIdController,
                                   label: 'CUSTOMER ID *',
-                                  hint: 'e.g. RO-CUST-5001',
+                                  hint: 'e.g. CUST2026RO001',
                                   icon: Icons.badge_outlined,
                                   validator: (val) {
                                     if (val == null || val.trim().isEmpty) {

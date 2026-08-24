@@ -1,6 +1,7 @@
 // lib/providers/ro_provider.dart
 import 'package:flutter/material.dart';
 import '../models/ro_model.dart';
+import '../services/customer_id_service.dart';
 import '../services/supabase_service.dart';
 
 class RoProvider extends ChangeNotifier {
@@ -131,9 +132,12 @@ class RoProvider extends ChangeNotifier {
     return await updateStatus(ro.customerId, nextStatus);
   }
 
-  String generateNextCustomerId() {
-    int nextId = 5001 + _roAccounts.length;
-    return 'RO-CUST-$nextId';
+  String generateNextCustomerId({DateTime? now, Set<String>? reservedIds}) {
+    return CustomerIdService.generateRoCustomerId(
+      existingRos: _roAccounts,
+      now: now,
+      reservedIds: reservedIds,
+    );
   }
 
   String generateNextAccountNumber() {

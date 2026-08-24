@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/route_model.dart';
 import '../models/ro_collection_entry_model.dart';
 import '../models/collection_payment_model.dart';
+import '../services/customer_id_service.dart';
 import '../services/supabase_service.dart';
 
 class CollectionSheetProvider extends ChangeNotifier {
@@ -412,8 +413,13 @@ class CollectionSheetProvider extends ChangeNotifier {
     return 'COL-${1000 + _collectionEntries.length + 1}';
   }
 
-  String generateNextCustomerId() {
-    return 'CUST-${1000 + _collectionEntries.length + 1}';
+  String generateNextCustomerId({DateTime? now, Set<String>? reservedIds}) {
+    final existingIds = _collectionEntries.map((e) => e.customerId).toSet();
+    return CustomerIdService.generateLoaneeCustomerId(
+      existingIds: existingIds,
+      now: now,
+      reservedIds: reservedIds,
+    );
   }
 
   String generateNextAccountNumber() {
