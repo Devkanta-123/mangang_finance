@@ -9,6 +9,7 @@ import '../models/user_model.dart';
 import '../models/collection_payment_model.dart';
 import '../models/investment_model.dart';
 import '../models/notification_model.dart';
+import 'customer_id_service.dart';
 
 class SupabaseService {
   static final SupabaseService instance = SupabaseService._internal();
@@ -126,7 +127,9 @@ class SupabaseService {
         // Also ensure UserAuthRecord exists in user_auth so Loanee can login with PIN / mobile
         try {
           final authRecord = UserAuthRecord(
-            id: loanee.customerId.isNotEmpty ? loanee.customerId : loanee.mobileNo,
+            id: loanee.customerId.isNotEmpty
+                ? loanee.customerId
+                : 'loanee_${loanee.mobileNo}_${loanee.accountNumber}',
             mobileNo: loanee.mobileNo,
             customerId: loanee.customerId,
             userType: UserType.loanee,
@@ -179,7 +182,9 @@ class SupabaseService {
         try {
           final authPayloads = loanees.map((l) {
             final authRecord = UserAuthRecord(
-              id: l.customerId.isNotEmpty ? l.customerId : l.mobileNo,
+              id: l.customerId.isNotEmpty
+                  ? l.customerId
+                  : 'loanee_${l.mobileNo}_${l.accountNumber}',
               mobileNo: l.mobileNo,
               customerId: l.customerId,
               userType: UserType.loanee,
@@ -263,10 +268,15 @@ class SupabaseService {
       final supaClient = client;
       if (supaClient != null) {
         final cleanCustId = customerId.trim();
+        final orConds = [
+          'customerid.eq.$cleanCustId',
+          'customer_id.eq.$cleanCustId',
+          if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+        ];
         await supaClient
             .from('loanee_accounts')
             .delete()
-            .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId');
+            .or(orConds.join(','));
             
         debugPrint('✅ Successfully deleted loanee $customerId');
         return true;
@@ -284,6 +294,12 @@ class SupabaseService {
       if (supaClient != null) {
         final cleanCustId = customerId.trim();
         final bool isActiveBool = newStatus.toLowerCase() != 'inactive';
+        final loaneeOr = [
+          'customerid.eq.$cleanCustId',
+          'customer_id.eq.$cleanCustId',
+          'mobileno.eq.$cleanCustId',
+          if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+        ].join(',');
 
         // 1. Update status in loanee_accounts (both status and is_active if column present)
         try {
@@ -293,13 +309,13 @@ class SupabaseService {
                 'status': newStatus,
                 'is_active': isActiveBool,
               })
-              .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobileno.eq.$cleanCustId');
+              .or(loaneeOr);
         } catch (_) {
           try {
             await supaClient
                 .from('loanee_accounts')
                 .update({'status': newStatus})
-                .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobileno.eq.$cleanCustId');
+                .or(loaneeOr);
           } catch (e1) {
             debugPrint('⚠️ Note updating loanee_accounts status: $e1');
           }
@@ -307,13 +323,19 @@ class SupabaseService {
 
         // 2. Sync status in user_auth table for matching record
         try {
+          final authOr = [
+            'customer_id.eq.$cleanCustId',
+            'mobile_no.eq.$cleanCustId',
+            if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+          ].join(',');
           await supaClient
               .from('user_auth')
               .update({
                 'status': newStatus,
                 'updated_at': DateTime.now().toIso8601String(),
               })
-              .or('customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobile_no.eq.$cleanCustId');
+              .eq('user_type', 'loanee')
+              .or(authOr);
         } catch (syncErr) {
           debugPrint('⚠️ Sync user_auth loanee status note: $syncErr');
         }
@@ -327,12 +349,12 @@ class SupabaseService {
                   'status': newStatus,
                   'is_active': isActiveBool,
                 })
-                .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobileno.eq.$cleanCustId');
+                .or(loaneeOr);
           } catch (_) {
             await supaClient
                 .from('ro_accounts')
                 .update({'status': newStatus})
-                .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobileno.eq.$cleanCustId');
+                .or(loaneeOr);
           }
         } catch (_) {}
 
@@ -384,7 +406,9 @@ class SupabaseService {
         // Also ensure UserAuthRecord exists in user_auth so RO can login with PIN / mobile
         try {
           final authRecord = UserAuthRecord(
-            id: ro.customerId.isNotEmpty ? ro.customerId : ro.mobileNo,
+            id: ro.customerId.isNotEmpty
+                ? ro.customerId
+                : 'ro_${ro.mobileNo}',
             mobileNo: ro.mobileNo,
             customerId: ro.customerId,
             userType: UserType.ro,
@@ -537,10 +561,15 @@ class SupabaseService {
       final supaClient = client;
       if (supaClient != null) {
         final cleanCustId = customerId.trim();
+        final orConds = [
+          'customerid.eq.$cleanCustId',
+          'customer_id.eq.$cleanCustId',
+          if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+        ];
         await supaClient
             .from('ro_accounts')
             .delete()
-            .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId');
+            .or(orConds.join(','));
             
         debugPrint('✅ Successfully deleted RO $customerId');
         return true;
@@ -558,6 +587,12 @@ class SupabaseService {
       if (supaClient != null) {
         final cleanCustId = customerId.trim();
         final bool isActiveBool = newStatus.toLowerCase() != 'inactive';
+        final roOr = [
+          'customerid.eq.$cleanCustId',
+          'customer_id.eq.$cleanCustId',
+          'mobileno.eq.$cleanCustId',
+          if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+        ].join(',');
 
         // 1. Update status in ro_accounts (both status and is_active if column present)
         try {
@@ -567,13 +602,13 @@ class SupabaseService {
                 'status': newStatus,
                 'is_active': isActiveBool,
               })
-              .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobileno.eq.$cleanCustId');
+              .or(roOr);
         } catch (_) {
           try {
             await supaClient
                 .from('ro_accounts')
                 .update({'status': newStatus})
-                .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobileno.eq.$cleanCustId');
+                .or(roOr);
           } catch (e1) {
             debugPrint('⚠️ Note updating ro_accounts status: $e1');
           }
@@ -581,13 +616,19 @@ class SupabaseService {
 
         // 2. Sync status in user_auth table if matching record exists
         try {
+          final authOr = [
+            'customer_id.eq.$cleanCustId',
+            'mobile_no.eq.$cleanCustId',
+            if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+          ].join(',');
           await supaClient
               .from('user_auth')
               .update({
                 'status': newStatus,
                 'updated_at': DateTime.now().toIso8601String(),
               })
-              .or('customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobile_no.eq.$cleanCustId');
+              .eq('user_type', 'ro')
+              .or(authOr);
         } catch (syncErr) {
           debugPrint('⚠️ Sync user_auth RO status note: $syncErr');
         }
@@ -601,12 +642,12 @@ class SupabaseService {
                   'status': newStatus,
                   'is_active': isActiveBool,
                 })
-                .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobileno.eq.$cleanCustId');
+                .or(roOr);
           } catch (_) {
             await supaClient
                 .from('loanee_accounts')
                 .update({'status': newStatus})
-                .or('customerid.eq.$cleanCustId,customer_id.eq.$cleanCustId,id.eq.$cleanCustId,mobileno.eq.$cleanCustId');
+                .or(roOr);
           }
         } catch (_) {}
 
@@ -749,20 +790,172 @@ class SupabaseService {
   }
 
   // ==========================================
+  // ==========================================
   // USER AUTH & SECURITY PIN METHODS
   // ==========================================
 
-  /// Save or Update User Auth Record in Supabase 'user_auth' table
-  Future<bool> saveUserAuthRecord(UserAuthRecord record) async {
+  /// Check if a user authentication record already exists matching (mobile_no, user_type) OR customer_id
+  Future<Map<String, dynamic>> checkUserAuthDuplicate({
+    required String mobileNo,
+    required UserType userType,
+    String? customerId,
+    String? excludeId,
+  }) async {
     try {
       final supaClient = client;
       if (supaClient != null) {
-        await supaClient
+        final cleanMobile = mobileNo.trim();
+        final cleanCustId = customerId?.trim() ?? '';
+
+        // 1. Check if same (mobile_no, user_type) exists
+        var query = supaClient
             .from('user_auth')
-            .upsert(record.toSupabaseJson(), onConflict: 'id')
-            .select();
-        debugPrint('✅ Saved User Auth Record (${record.userType.name}) for ${record.mobileNo} to Supabase.');
-        return true;
+            .select('id,mobile_no,user_type,customer_id,name')
+            .eq('mobile_no', cleanMobile)
+            .eq('user_type', userType.name);
+
+        if (excludeId != null && excludeId.isNotEmpty) {
+          query = query.neq('id', excludeId);
+        }
+
+        final List<dynamic> res = await query;
+        if (res.isNotEmpty) {
+          final existing = res.first;
+          final existingCustId = existing['customer_id']?.toString() ?? '';
+          return {
+            'isDuplicate': true,
+            'type': 'mobile_and_role',
+            'message': 'An account with Mobile Number +91 $cleanMobile is already registered as ${userType.name.toUpperCase()}${existingCustId.isNotEmpty ? ' ($existingCustId)' : ''}.',
+          };
+        }
+
+        // 2. Check if customer_id already exists in user_auth
+        if (cleanCustId.isNotEmpty) {
+          var custQuery = supaClient
+              .from('user_auth')
+              .select('id,customer_id,user_type,mobile_no,name')
+              .eq('customer_id', cleanCustId);
+
+          if (excludeId != null && excludeId.isNotEmpty) {
+            custQuery = custQuery.neq('id', excludeId);
+          }
+
+          final List<dynamic> custRes = await custQuery;
+          if (custRes.isNotEmpty) {
+            final existing = custRes.first;
+            final existingRole = existing['user_type']?.toString().toUpperCase() ?? '';
+            final existingMobile = existing['mobile_no']?.toString() ?? '';
+            return {
+              'isDuplicate': true,
+              'type': 'customer_id',
+              'message': 'Customer ID "$cleanCustId" is already registered as $existingRole (Mobile: +91 $existingMobile).',
+            };
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error checking duplicate user auth: $e');
+    }
+    return {'isDuplicate': false};
+  }
+
+  /// Check if a user authentication record already exists for a specific (mobile_no, user_type)
+  Future<bool> checkUserAuthExists({
+    required String mobileNo,
+    required UserType userType,
+    String? customerId,
+    String? excludeId,
+  }) async {
+    final dup = await checkUserAuthDuplicate(
+      mobileNo: mobileNo,
+      userType: userType,
+      customerId: customerId,
+      excludeId: excludeId,
+    );
+    return dup['isDuplicate'] == true;
+  }
+
+  /// Get next sequential Customer ID for Admin (ADM-01, ADM-02...) or Manager (MGR-01, MGR-02...)
+  Future<String> fetchNextRoleCustomerId(UserType userType) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        final response = await supaClient
+            .from('user_auth')
+            .select('customer_id')
+            .eq('user_type', userType.name);
+        final existingIds = (response as List)
+            .map((r) => r['customer_id']?.toString() ?? '')
+            .where((id) => id.isNotEmpty);
+        if (userType == UserType.admin) {
+          return CustomerIdService.generateAdminCustomerId(existingIds: existingIds);
+        } else if (userType == UserType.manager) {
+          return CustomerIdService.generateManagerCustomerId(existingIds: existingIds);
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching next role customer ID: $e');
+    }
+    return userType == UserType.manager ? 'MGR-01' : 'ADM-01';
+  }
+
+  /// Save or Update User Auth Record in Supabase 'user_auth' table
+  /// - id is auto-incremented by PostgreSQL as integer (1, 2, 3...)
+  /// - customer_id is assigned sequentially (ADM-01, ADM-02 / MGR-01, MGR-02)
+  /// - Follows composite uniqueness rule: (mobile_no, user_type)
+  Future<bool> saveUserAuthRecord(UserAuthRecord record, {bool allowUpdate = true}) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        final cleanMobile = record.mobileNo.trim();
+
+        // 1. Resolve sequential customerId if not already set
+        String? resolvedCustomerId = record.customerId?.trim();
+        if (resolvedCustomerId == null ||
+            resolvedCustomerId.isEmpty ||
+            resolvedCustomerId == 'ADM-01' ||
+            resolvedCustomerId == 'MGR-01') {
+          if (record.userType == UserType.admin || record.userType == UserType.manager) {
+            resolvedCustomerId = await fetchNextRoleCustomerId(record.userType);
+          }
+        }
+
+        final finalRecord = record.copyWith(
+          mobileNo: cleanMobile,
+          customerId: resolvedCustomerId,
+        );
+
+        final jsonPayload = finalRecord.toSupabaseJson();
+
+        try {
+          await supaClient
+              .from('user_auth')
+              .upsert(jsonPayload, onConflict: 'mobile_no,user_type')
+              .select();
+          debugPrint('✅ Saved User Auth Record (${finalRecord.userType.name}) for ${finalRecord.mobileNo} (Customer ID: $resolvedCustomerId) to Supabase.');
+          return true;
+        } catch (upsertErr) {
+          final errStr = upsertErr.toString();
+          debugPrint('⚠️ Upsert with onConflict (mobile_no, user_type) note: $errStr, attempting update fallback');
+
+          if (allowUpdate) {
+            try {
+              final updateRes = await supaClient
+                  .from('user_auth')
+                  .update(jsonPayload)
+                  .eq('mobile_no', cleanMobile)
+                  .eq('user_type', finalRecord.userType.name)
+                  .select();
+              if (updateRes.isNotEmpty) {
+                debugPrint('✅ Updated existing user_auth record for $cleanMobile (${finalRecord.userType.name}).');
+                return true;
+              }
+            } catch (updErr) {
+              debugPrint('⚠️ Fallback update failed: $updErr');
+            }
+          }
+          rethrow;
+        }
       }
     } catch (e) {
       debugPrint('❌ Error saving user auth record to Supabase: $e');
@@ -772,60 +965,24 @@ class SupabaseService {
 
   /// Verify and fetch User Auth Record by 6-Digit PIN from Supabase tables
   Future<UserAuthRecord?> fetchUserAuthByPin(String pin) async {
+    final cleanPin = pin.trim();
     try {
       final supaClient = client;
       if (supaClient != null) {
         // 1. Check primary 'user_auth' table
         try {
-          final response = await supaClient
+          final List<dynamic> response = await supaClient
               .from('user_auth')
               .select('*')
-              .eq('pin', pin)
-              .maybeSingle();
+              .eq('pin', cleanPin);
 
-          if (response != null && response.isNotEmpty) {
-            final authRecord = UserAuthRecord.fromJson(Map<String, dynamic>.from(response));
-            final custId = (authRecord.customerId ?? authRecord.id).trim();
-            final mobile = authRecord.mobileNo.trim();
-
-            // If user_auth says Inactive, IT IS STRICTLY INACTIVE (Login blocked)
-            bool isInactive = authRecord.status.trim().toLowerCase() == 'inactive';
-
-            // Also cross-check if ro_accounts or loanee_accounts marks it Inactive
-            if (!isInactive && authRecord.userType == UserType.ro) {
-              try {
-                var roQuery = supaClient.from('ro_accounts').select('status');
-                if (custId.isNotEmpty) {
-                  roQuery = roQuery.or('customerid.eq.$custId,customer_id.eq.$custId,id.eq.$custId,mobileno.eq.$mobile');
-                } else {
-                  roQuery = roQuery.eq('mobileno', mobile);
-                }
-                final roData = await roQuery.maybeSingle();
-                if (roData != null && roData['status'] != null) {
-                  if (roData['status'].toString().trim().toLowerCase() == 'inactive') {
-                    isInactive = true;
-                  }
-                }
-              } catch (_) {}
-            } else if (!isInactive && authRecord.userType == UserType.loanee) {
-              try {
-                var loaneeQuery = supaClient.from('loanee_accounts').select('status');
-                if (custId.isNotEmpty) {
-                  loaneeQuery = loaneeQuery.or('customerid.eq.$custId,customer_id.eq.$custId,id.eq.$custId,mobileno.eq.$mobile');
-                } else {
-                  loaneeQuery = loaneeQuery.eq('mobileno', mobile);
-                }
-                final loaneeData = await loaneeQuery.maybeSingle();
-                if (loaneeData != null && loaneeData['status'] != null) {
-                  if (loaneeData['status'].toString().trim().toLowerCase() == 'inactive') {
-                    isInactive = true;
-                  }
-                }
-              } catch (_) {}
-            }
-
-            final effectiveStatus = isInactive ? 'Inactive' : 'Active';
-            return authRecord.copyWith(status: effectiveStatus);
+          if (response.isNotEmpty) {
+            final dynamic matchJson = response.firstWhere(
+              (r) => r['status']?.toString().trim().toLowerCase() != 'inactive',
+              orElse: () => response.first,
+            );
+            final authRecord = UserAuthRecord.fromJson(Map<String, dynamic>.from(matchJson));
+            return _enrichAndCheckInactive(authRecord, supaClient);
           }
         } catch (e) {
           debugPrint('⚠️ user_auth check: $e');
@@ -836,7 +993,7 @@ class SupabaseService {
           final roResponse = await supaClient
               .from('ro_accounts')
               .select('*')
-              .or('pincode.eq.$pin,customerid.eq.$pin')
+              .or('pincode.eq.$cleanPin,customerid.eq.$cleanPin')
               .maybeSingle();
 
           if (roResponse != null && roResponse.isNotEmpty) {
@@ -846,35 +1003,12 @@ class SupabaseService {
             String roStatus = data['status']?.toString() ?? 'Active';
             bool isInactive = roStatus.trim().toLowerCase() == 'inactive';
 
-            // Verify user_auth table to ensure user_auth Inactive status is strictly honored
-            if (!isInactive) {
-              try {
-                final orClauses = [
-                  if (custId.isNotEmpty) 'customer_id.eq.$custId',
-                  if (custId.isNotEmpty) 'id.eq.$custId',
-                  if (mobile.isNotEmpty) 'mobile_no.eq.$mobile',
-                ];
-                if (orClauses.isNotEmpty) {
-                  final authCheck = await supaClient
-                      .from('user_auth')
-                      .select('status')
-                      .or(orClauses.join(','))
-                      .maybeSingle();
-                  if (authCheck != null && authCheck['status'] != null) {
-                    if (authCheck['status'].toString().trim().toLowerCase() == 'inactive') {
-                      isInactive = true;
-                    }
-                  }
-                }
-              } catch (_) {}
-            }
-
             return UserAuthRecord(
-              id: custId.isNotEmpty ? custId : mobile,
+              id: custId.isNotEmpty ? custId : (mobile.isNotEmpty ? mobile : 'ro_$cleanPin'),
               mobileNo: mobile,
               customerId: custId,
               userType: UserType.ro,
-              pin: pin,
+              pin: cleanPin,
               name: data['roname']?.toString() ?? 'RO Officer',
               roName: data['roname']?.toString(),
               status: isInactive ? 'Inactive' : 'Active',
@@ -889,7 +1023,7 @@ class SupabaseService {
           final loaneeResponse = await supaClient
               .from('loanee_accounts')
               .select('*')
-              .or('pincode.eq.$pin,customerid.eq.$pin')
+              .or('pincode.eq.$cleanPin,customerid.eq.$cleanPin')
               .maybeSingle();
 
           if (loaneeResponse != null && loaneeResponse.isNotEmpty) {
@@ -899,35 +1033,12 @@ class SupabaseService {
             String loaneeStatus = data['status']?.toString() ?? 'Active';
             bool isInactive = loaneeStatus.trim().toLowerCase() == 'inactive';
 
-            // Verify user_auth table to ensure user_auth Inactive status is strictly honored
-            if (!isInactive) {
-              try {
-                final orClauses = [
-                  if (custId.isNotEmpty) 'customer_id.eq.$custId',
-                  if (custId.isNotEmpty) 'id.eq.$custId',
-                  if (mobile.isNotEmpty) 'mobile_no.eq.$mobile',
-                ];
-                if (orClauses.isNotEmpty) {
-                  final authCheck = await supaClient
-                      .from('user_auth')
-                      .select('status')
-                      .or(orClauses.join(','))
-                      .maybeSingle();
-                  if (authCheck != null && authCheck['status'] != null) {
-                    if (authCheck['status'].toString().trim().toLowerCase() == 'inactive') {
-                      isInactive = true;
-                    }
-                  }
-                }
-              } catch (_) {}
-            }
-
             return UserAuthRecord(
-              id: custId.isNotEmpty ? custId : mobile,
+              id: custId.isNotEmpty ? custId : (mobile.isNotEmpty ? mobile : 'loanee_$cleanPin'),
               mobileNo: mobile,
               customerId: custId,
               userType: UserType.loanee,
-              pin: pin,
+              pin: cleanPin,
               name: data['loaneename']?.toString() ?? 'Loanee Account',
               accountName: data['accountnumber']?.toString(),
               status: isInactive ? 'Inactive' : 'Active',
@@ -943,10 +1054,67 @@ class SupabaseService {
     return null;
   }
 
-  /// Verify and fetch User Auth Record by Mobile Number (10 digits) and 6-Digit PIN
+  /// Helper to cross-check inactive status across ro_accounts and loanee_accounts tables
+  Future<UserAuthRecord> _enrichAndCheckInactive(UserAuthRecord authRecord, dynamic supaClient) async {
+    final custId = (authRecord.customerId ?? authRecord.id).trim();
+    final mobile = authRecord.mobileNo.trim();
+
+    bool isInactive = authRecord.status.trim().toLowerCase() == 'inactive';
+
+    if (!isInactive && authRecord.userType == UserType.ro) {
+      try {
+        var roQuery = supaClient.from('ro_accounts').select('status');
+        if (custId.isNotEmpty) {
+          final orClauses = [
+            'customerid.eq.$custId',
+            'customer_id.eq.$custId',
+            'mobileno.eq.$mobile',
+            if (int.tryParse(custId) != null) 'id.eq.$custId',
+          ];
+          roQuery = roQuery.or(orClauses.join(','));
+        } else {
+          roQuery = roQuery.eq('mobileno', mobile);
+        }
+        final roData = await roQuery.maybeSingle();
+        if (roData != null && roData['status'] != null) {
+          if (roData['status'].toString().trim().toLowerCase() == 'inactive') {
+            isInactive = true;
+          }
+        }
+      } catch (_) {}
+    } else if (!isInactive && authRecord.userType == UserType.loanee) {
+      try {
+        var loaneeQuery = supaClient.from('loanee_accounts').select('status');
+        if (custId.isNotEmpty) {
+          final orClauses = [
+            'customerid.eq.$custId',
+            'customer_id.eq.$custId',
+            'mobileno.eq.$mobile',
+            if (int.tryParse(custId) != null) 'id.eq.$custId',
+          ];
+          loaneeQuery = loaneeQuery.or(orClauses.join(','));
+        } else {
+          loaneeQuery = loaneeQuery.eq('mobileno', mobile);
+        }
+        final loaneeData = await loaneeQuery.maybeSingle();
+        if (loaneeData != null && loaneeData['status'] != null) {
+          if (loaneeData['status'].toString().trim().toLowerCase() == 'inactive') {
+            isInactive = true;
+          }
+        }
+      } catch (_) {}
+    }
+
+    final effectiveStatus = isInactive ? 'Inactive' : 'Active';
+    return authRecord.copyWith(status: effectiveStatus);
+  }
+
+  /// Verify and fetch User Auth Record by Mobile Number (10 digits), 6-Digit PIN, and optional UserType
+  /// Follows the rule: User identity is determined by (mobile_no, user_type), then PIN is validated.
   Future<UserAuthRecord?> fetchUserAuthByMobileAndPin({
     required String mobileNo,
     required String pin,
+    UserType? userType,
   }) async {
     final cleanMobile = mobileNo.trim();
     final cleanPin = pin.trim();
@@ -954,174 +1122,180 @@ class SupabaseService {
     try {
       final supaClient = client;
       if (supaClient != null) {
-        // 1. Check primary 'user_auth' table by matching mobile_no and pin
+        // 1. Check primary 'user_auth' table
         try {
-          final response = await supaClient
-              .from('user_auth')
-              .select('*')
-              .eq('pin', cleanPin)
-              .or('mobile_no.eq.$cleanMobile,id.eq.$cleanMobile')
-              .maybeSingle();
+          var query = supaClient.from('user_auth').select('*');
+          if (userType != null) {
+            // When userType is specified: identify strictly by (mobile_no, user_type)
+            query = query
+                .eq('mobile_no', cleanMobile)
+                .eq('user_type', userType.name);
+          } else {
+            // When userType is not specified: match by (mobile_no, pin)
+            query = query
+                .eq('pin', cleanPin)
+                .eq('mobile_no', cleanMobile);
+          }
 
-          if (response != null && response.isNotEmpty) {
-            final authRecord = UserAuthRecord.fromJson(Map<String, dynamic>.from(response));
-            final custId = (authRecord.customerId ?? authRecord.id).trim();
-            final mobile = authRecord.mobileNo.trim();
+          final List<dynamic> response = await query;
 
-            // If user_auth says Inactive, IT IS STRICTLY INACTIVE (Login blocked)
-            bool isInactive = authRecord.status.trim().toLowerCase() == 'inactive';
+          if (response.isNotEmpty) {
+            if (userType != null) {
+              // Validate PIN for the retrieved role record
+              final match = response.firstWhere(
+                (r) => r['pin']?.toString().trim() == cleanPin,
+                orElse: () => null,
+              );
+              if (match == null) {
+                debugPrint('⚠️ PIN does not match for mobile $cleanMobile and role ${userType.name}');
+                return null;
+              }
+              final authRecord = UserAuthRecord.fromJson(Map<String, dynamic>.from(match));
+              return _enrichAndCheckInactive(authRecord, supaClient);
+            } else {
+              // Sort deterministically: Active first, then Admin > Manager > RO > Loanee
+              const rolePriority = {'admin': 0, 'manager': 1, 'ro': 2, 'loanee': 3};
+              final sorted = List<dynamic>.from(response);
+              sorted.sort((a, b) {
+                final aInactive = a['status']?.toString().trim().toLowerCase() == 'inactive' ? 1 : 0;
+                final bInactive = b['status']?.toString().trim().toLowerCase() == 'inactive' ? 1 : 0;
+                if (aInactive != bInactive) return aInactive.compareTo(bInactive);
+                final aRole = rolePriority[a['user_type']?.toString().trim().toLowerCase()] ?? 99;
+                final bRole = rolePriority[b['user_type']?.toString().trim().toLowerCase()] ?? 99;
+                return aRole.compareTo(bRole);
+              });
 
-            // Also cross-check if ro_accounts or loanee_accounts marks it Inactive
-            if (!isInactive && authRecord.userType == UserType.ro) {
-              try {
-                var roQuery = supaClient.from('ro_accounts').select('status');
-                if (custId.isNotEmpty) {
-                  roQuery = roQuery.or('customerid.eq.$custId,customer_id.eq.$custId,id.eq.$custId,mobileno.eq.$mobile');
-                } else {
-                  roQuery = roQuery.eq('mobileno', mobile);
-                }
-                final roData = await roQuery.maybeSingle();
-                if (roData != null && roData['status'] != null) {
-                  if (roData['status'].toString().trim().toLowerCase() == 'inactive') {
-                    isInactive = true;
-                  }
-                }
-              } catch (_) {}
-            } else if (!isInactive && authRecord.userType == UserType.loanee) {
-              try {
-                var loaneeQuery = supaClient.from('loanee_accounts').select('status');
-                if (custId.isNotEmpty) {
-                  loaneeQuery = loaneeQuery.or('customerid.eq.$custId,customer_id.eq.$custId,id.eq.$custId,mobileno.eq.$mobile');
-                } else {
-                  loaneeQuery = loaneeQuery.eq('mobileno', mobile);
-                }
-                final loaneeData = await loaneeQuery.maybeSingle();
-                if (loaneeData != null && loaneeData['status'] != null) {
-                  if (loaneeData['status'].toString().trim().toLowerCase() == 'inactive') {
-                    isInactive = true;
-                  }
-                }
-              } catch (_) {}
+              final authRecord = UserAuthRecord.fromJson(Map<String, dynamic>.from(sorted.first));
+              return _enrichAndCheckInactive(authRecord, supaClient);
             }
-
-            final effectiveStatus = isInactive ? 'Inactive' : 'Active';
-            return authRecord.copyWith(status: effectiveStatus);
           }
         } catch (e) {
           debugPrint('⚠️ user_auth mobile & PIN check error: $e');
         }
 
-        // 2. Check 'ro_accounts' table fallback
-        try {
-          final roResponse = await supaClient
-              .from('ro_accounts')
-              .select('*')
-              .eq('mobileno', cleanMobile)
-              .maybeSingle();
+        // 2. Check 'ro_accounts' table fallback if applicable
+        if (userType == null || userType == UserType.ro) {
+          try {
+            final roResponse = await supaClient
+                .from('ro_accounts')
+                .select('*')
+                .eq('mobileno', cleanMobile)
+                .maybeSingle();
 
-          if (roResponse != null && roResponse.isNotEmpty) {
-            final data = Map<String, dynamic>.from(roResponse);
-            final custId = data['customerid']?.toString().trim() ?? '';
-            final mobile = data['mobileno']?.toString().trim() ?? '';
-            String roStatus = data['status']?.toString() ?? 'Active';
-            bool isInactive = roStatus.trim().toLowerCase() == 'inactive';
+            if (roResponse != null && roResponse.isNotEmpty) {
+              final data = Map<String, dynamic>.from(roResponse);
+              final custId = data['customerid']?.toString().trim() ?? '';
+              final mobile = data['mobileno']?.toString().trim() ?? '';
+              String roStatus = data['status']?.toString() ?? 'Active';
+              bool isInactive = roStatus.trim().toLowerCase() == 'inactive';
 
-            // Verify user_auth table to ensure user_auth Inactive status is strictly honored
-            if (!isInactive) {
-              try {
-                final orClauses = [
-                  if (custId.isNotEmpty) 'customer_id.eq.$custId',
-                  if (custId.isNotEmpty) 'id.eq.$custId',
-                  if (mobile.isNotEmpty) 'mobile_no.eq.$mobile',
-                ];
-                if (orClauses.isNotEmpty) {
-                  final authCheck = await supaClient
-                      .from('user_auth')
-                      .select('status,pin')
-                      .or(orClauses.join(','))
-                      .maybeSingle();
-                  if (authCheck != null) {
-                    if (authCheck['status'] != null && authCheck['status'].toString().trim().toLowerCase() == 'inactive') {
-                      isInactive = true;
-                    }
-                    if (authCheck['pin'] != null && authCheck['pin'].toString().trim() != cleanPin) {
-                      // PIN did not match
-                      return null;
+              // Verify user_auth table to ensure user_auth Inactive status is strictly honored
+              if (!isInactive) {
+                try {
+                  final orClauses = [
+                    if (custId.isNotEmpty) 'customer_id.eq.$custId',
+                    if (custId.isNotEmpty && int.tryParse(custId) != null) 'id.eq.$custId',
+                    if (mobile.isNotEmpty) 'mobile_no.eq.$mobile',
+                  ];
+                  if (orClauses.isNotEmpty) {
+                    final authCheck = await supaClient
+                        .from('user_auth')
+                        .select('status,pin')
+                        .eq('user_type', 'ro')
+                        .or(orClauses.join(','))
+                        .maybeSingle();
+                    if (authCheck != null) {
+                      if (authCheck['status'] != null && authCheck['status'].toString().trim().toLowerCase() == 'inactive') {
+                        isInactive = true;
+                      }
+                      if (authCheck['pin'] != null && authCheck['pin'].toString().trim() != cleanPin) {
+                        // PIN did not match
+                        return null;
+                      }
                     }
                   }
-                }
-              } catch (_) {}
-            }
+                } catch (_) {}
+              }
 
-            return UserAuthRecord(
-              id: custId.isNotEmpty ? custId : mobile,
-              mobileNo: mobile,
-              customerId: custId,
-              userType: UserType.ro,
-              pin: cleanPin,
-              name: data['roname']?.toString() ?? 'RO Officer',
-              roName: data['roname']?.toString(),
-              status: isInactive ? 'Inactive' : 'Active',
-            );
+              final dbPin = data['pincode']?.toString().trim() ?? '';
+              if (dbPin.isEmpty || dbPin == cleanPin || dbPin == '1234') {
+                return UserAuthRecord(
+                  id: custId.isNotEmpty ? custId : (mobile.isNotEmpty ? mobile : 'ro_$cleanMobile'),
+                  mobileNo: mobile.isNotEmpty ? mobile : cleanMobile,
+                  customerId: custId,
+                  userType: UserType.ro,
+                  pin: cleanPin,
+                  name: data['roname']?.toString() ?? 'RO Field Officer',
+                  roName: data['roname']?.toString(),
+                  status: isInactive ? 'Inactive' : 'Active',
+                );
+              }
+            }
+          } catch (e) {
+            debugPrint('⚠️ ro_accounts mobile check: $e');
           }
-        } catch (e) {
-          debugPrint('⚠️ ro_accounts mobile check: $e');
         }
 
-        // 3. Check 'loanee_accounts' table fallback
-        try {
-          final loaneeResponse = await supaClient
-              .from('loanee_accounts')
-              .select('*')
-              .eq('mobileno', cleanMobile)
-              .maybeSingle();
+        // 3. Check 'loanee_accounts' table fallback if applicable
+        if (userType == null || userType == UserType.loanee) {
+          try {
+            final loaneeResponse = await supaClient
+                .from('loanee_accounts')
+                .select('*')
+                .eq('mobileno', cleanMobile)
+                .maybeSingle();
 
-          if (loaneeResponse != null && loaneeResponse.isNotEmpty) {
-            final data = Map<String, dynamic>.from(loaneeResponse);
-            final custId = data['customerid']?.toString().trim() ?? '';
-            final mobile = data['mobileno']?.toString().trim() ?? '';
-            String loaneeStatus = data['status']?.toString() ?? 'Active';
-            bool isInactive = loaneeStatus.trim().toLowerCase() == 'inactive';
+            if (loaneeResponse != null && loaneeResponse.isNotEmpty) {
+              final data = Map<String, dynamic>.from(loaneeResponse);
+              final custId = data['customerid']?.toString().trim() ?? '';
+              final mobile = data['mobileno']?.toString().trim() ?? '';
+              String loaneeStatus = data['status']?.toString() ?? 'Active';
+              bool isInactive = loaneeStatus.trim().toLowerCase() == 'inactive';
 
-            // Verify user_auth table to ensure user_auth Inactive status is strictly honored
-            if (!isInactive) {
-              try {
-                final orClauses = [
-                  if (custId.isNotEmpty) 'customer_id.eq.$custId',
-                  if (custId.isNotEmpty) 'id.eq.$custId',
-                  if (mobile.isNotEmpty) 'mobile_no.eq.$mobile',
-                ];
-                if (orClauses.isNotEmpty) {
-                  final authCheck = await supaClient
-                      .from('user_auth')
-                      .select('status,pin')
-                      .or(orClauses.join(','))
-                      .maybeSingle();
-                  if (authCheck != null) {
-                    if (authCheck['status'] != null && authCheck['status'].toString().trim().toLowerCase() == 'inactive') {
-                      isInactive = true;
-                    }
-                    if (authCheck['pin'] != null && authCheck['pin'].toString().trim() != cleanPin) {
-                      return null;
+              // Verify user_auth table to ensure user_auth Inactive status is strictly honored
+              if (!isInactive) {
+                try {
+                  final orClauses = [
+                    if (custId.isNotEmpty) 'customer_id.eq.$custId',
+                    if (custId.isNotEmpty && int.tryParse(custId) != null) 'id.eq.$custId',
+                    if (mobile.isNotEmpty) 'mobile_no.eq.$mobile',
+                  ];
+                  if (orClauses.isNotEmpty) {
+                    final authCheck = await supaClient
+                        .from('user_auth')
+                        .select('status,pin')
+                        .eq('user_type', 'loanee')
+                        .or(orClauses.join(','))
+                        .maybeSingle();
+                    if (authCheck != null) {
+                      if (authCheck['status'] != null && authCheck['status'].toString().trim().toLowerCase() == 'inactive') {
+                        isInactive = true;
+                      }
+                      if (authCheck['pin'] != null && authCheck['pin'].toString().trim() != cleanPin) {
+                        return null;
+                      }
                     }
                   }
-                }
-              } catch (_) {}
-            }
+                } catch (_) {}
+              }
 
-            return UserAuthRecord(
-              id: custId.isNotEmpty ? custId : mobile,
-              mobileNo: mobile,
-              customerId: custId,
-              userType: UserType.loanee,
-              pin: cleanPin,
-              name: data['loaneename']?.toString() ?? 'Loanee Account',
-              accountName: data['accountnumber']?.toString(),
-              status: isInactive ? 'Inactive' : 'Active',
-            );
+              final dbPin = data['pincode']?.toString().trim() ?? '';
+              if (dbPin.isEmpty || dbPin == cleanPin || dbPin == '1234') {
+                return UserAuthRecord(
+                  id: custId.isNotEmpty ? custId : (mobile.isNotEmpty ? mobile : 'loanee_$cleanMobile'),
+                  mobileNo: mobile.isNotEmpty ? mobile : cleanMobile,
+                  customerId: custId,
+                  userType: UserType.loanee,
+                  pin: cleanPin,
+                  name: data['loaneename']?.toString() ?? 'Loanee Account',
+                  accountName: data['accountnumber']?.toString(),
+                  status: isInactive ? 'Inactive' : 'Active',
+                );
+              }
+            }
+          } catch (e) {
+            debugPrint('⚠️ loanee_accounts mobile check: $e');
           }
-        } catch (e) {
-          debugPrint('⚠️ loanee_accounts mobile check: $e');
         }
       }
     } catch (e) {
@@ -1130,45 +1304,321 @@ class SupabaseService {
     return null;
   }
 
+  /// Fetch user auth record by mobile number and specific user type
+  Future<UserAuthRecord?> fetchUserAuthByMobileAndRole({
+    required String mobileNo,
+    required UserType userType,
+  }) async {
+    final cleanMobile = mobileNo.trim();
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        final List<dynamic> response = await supaClient
+            .from('user_auth')
+            .select('*')
+            .eq('mobile_no', cleanMobile)
+            .eq('user_type', userType.name);
+
+        if (response.isNotEmpty) {
+          return UserAuthRecord.fromJson(Map<String, dynamic>.from(response.first));
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching user auth by mobile and role: $e');
+    }
+    return null;
+  }
+
+  /// Reset PIN strictly by Customer ID + Mobile Number verification.
+  /// Does NOT require User Type.
+  /// Verifies that both Customer ID and Mobile Number belong to the same user record.
+  /// Reset PIN strictly by Customer ID + Mobile Number (and optional User Type) verification.
+  /// Verifies that Customer ID, Mobile Number (and Role if specified) all match the same user record.
+  Future<Map<String, dynamic>> resetUserPinByCustomerIdAndMobile({
+    required String customerId,
+    required String mobileNo,
+    required String newPin,
+    UserType? userType,
+  }) async {
+    final cleanCustId = customerId.trim();
+    final cleanMobile = mobileNo.trim();
+    final cleanPin = newPin.trim();
+
+    if (cleanCustId.isEmpty || cleanMobile.isEmpty || cleanPin.length != 6) {
+      return {
+        'success': false,
+        'message': 'Customer ID, 10-digit Mobile Number, and 6-digit PIN are required.',
+      };
+    }
+
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        // 1. Check primary 'user_auth' table matching BOTH mobile_no and customer_id
+        try {
+          final orConditions = [
+            'customer_id.eq.$cleanCustId',
+            'customer_id.ilike.$cleanCustId',
+            if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+          ];
+
+          var query = supaClient
+              .from('user_auth')
+              .select('*')
+              .eq('mobile_no', cleanMobile)
+              .or(orConditions.join(','));
+
+          if (userType != null) {
+            query = query.eq('user_type', userType.name);
+          }
+
+          final List<dynamic> response = await query;
+
+          if (response.isNotEmpty) {
+            final match = Map<String, dynamic>.from(response.first);
+            final recordId = match['id'];
+            final userTypeStr = match['user_type']?.toString() ?? 'loanee';
+
+            await supaClient.from('user_auth').update({
+              'pin': cleanPin,
+              'updated_at': DateTime.now().toIso8601String(),
+            }).eq('id', recordId);
+
+            // Also update underlying table if applicable
+            final underlyingOr = [
+              'customerid.eq.$cleanCustId',
+              'customerid.ilike.$cleanCustId',
+              if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+            ].join(',');
+
+            if (userTypeStr == 'ro') {
+              try {
+                await supaClient
+                    .from('ro_accounts')
+                    .update({'pincode': cleanPin})
+                    .eq('mobileno', cleanMobile)
+                    .or(underlyingOr);
+              } catch (_) {}
+            } else if (userTypeStr == 'loanee') {
+              try {
+                await supaClient
+                    .from('loanee_accounts')
+                    .update({'pincode': cleanPin})
+                    .eq('mobileno', cleanMobile)
+                    .or(underlyingOr);
+              } catch (_) {}
+            }
+
+            debugPrint('✅ Reset PIN in Supabase for Customer ID $cleanCustId and Mobile $cleanMobile');
+            return {
+              'success': true,
+              'userType': userTypeStr,
+              'name': match['name']?.toString() ?? 'User',
+              'message': 'Security PIN updated successfully for $cleanCustId!',
+            };
+          }
+        } catch (e) {
+          debugPrint('⚠️ user_auth reset by Customer ID & Mobile error: $e');
+        }
+
+        final genericOr = [
+          'customerid.eq.$cleanCustId',
+          'customerid.ilike.$cleanCustId',
+          if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+        ].join(',');
+
+        // 2. Check fallback in ro_accounts
+        if (userType == null || userType == UserType.ro) {
+          try {
+            final roMatch = await supaClient
+                .from('ro_accounts')
+                .select('*')
+                .eq('mobileno', cleanMobile)
+                .or(genericOr)
+                .maybeSingle();
+
+            if (roMatch != null && roMatch.isNotEmpty) {
+              final roData = Map<String, dynamic>.from(roMatch);
+              await supaClient
+                  .from('ro_accounts')
+                  .update({'pincode': cleanPin})
+                  .eq('mobileno', cleanMobile)
+                  .or(genericOr);
+
+              // Sync to user_auth as well
+              await saveUserAuthRecord(
+                UserAuthRecord(
+                  id: '',
+                  mobileNo: cleanMobile,
+                  customerId: cleanCustId,
+                  userType: UserType.ro,
+                  pin: cleanPin,
+                  name: roData['roname']?.toString() ?? 'RO Field Officer',
+                  roName: roData['roname']?.toString(),
+                ),
+              );
+
+              return {
+                'success': true,
+                'userType': 'ro',
+                'name': roData['roname']?.toString() ?? 'RO Officer',
+                'message': 'Security PIN updated successfully for $cleanCustId!',
+              };
+            }
+          } catch (e) {
+            debugPrint('⚠️ ro_accounts reset check error: $e');
+          }
+        }
+
+        // 3. Check fallback in loanee_accounts
+        if (userType == null || userType == UserType.loanee) {
+          try {
+            final loaneeMatch = await supaClient
+                .from('loanee_accounts')
+                .select('*')
+                .eq('mobileno', cleanMobile)
+                .or(genericOr)
+                .maybeSingle();
+
+            if (loaneeMatch != null && loaneeMatch.isNotEmpty) {
+              final loaneeData = Map<String, dynamic>.from(loaneeMatch);
+              await supaClient
+                  .from('loanee_accounts')
+                  .update({'pincode': cleanPin})
+                  .eq('mobileno', cleanMobile)
+                  .or(genericOr);
+
+              // Sync to user_auth as well
+              await saveUserAuthRecord(
+                UserAuthRecord(
+                  id: '',
+                  mobileNo: cleanMobile,
+                  customerId: cleanCustId,
+                  userType: UserType.loanee,
+                  pin: cleanPin,
+                  name: loaneeData['loaneename']?.toString() ?? 'Loanee Account',
+                  accountName: loaneeData['accountnumber']?.toString(),
+                ),
+              );
+
+              return {
+                'success': true,
+                'userType': 'loanee',
+                'name': loaneeData['loaneename']?.toString() ?? 'Loanee Account',
+                'message': 'Security PIN updated successfully for $cleanCustId!',
+              };
+            }
+          } catch (e) {
+            debugPrint('⚠️ loanee_accounts reset check error: $e');
+          }
+        }
+
+        // Detailed mismatch diagnostics to provide clear, actionable error messages
+        try {
+          // Check if customer_id exists under ANY record
+          final custCheck = await supaClient
+              .from('user_auth')
+              .select('mobile_no,user_type,customer_id')
+              .eq('customer_id', cleanCustId);
+          if (custCheck.isNotEmpty) {
+            final rec = custCheck.first;
+            final recMobile = rec['mobile_no']?.toString() ?? '';
+            final recRole = rec['user_type']?.toString().toUpperCase() ?? '';
+            if (recMobile != cleanMobile) {
+              return {
+                'success': false,
+                'message': 'Customer ID "$cleanCustId" is registered with mobile number +91 $recMobile, which does not match the entered mobile number (+91 $cleanMobile).',
+              };
+            }
+            if (userType != null && recRole != userType.name.toUpperCase()) {
+              return {
+                'success': false,
+                'message': 'Customer ID "$cleanCustId" is registered as $recRole, not as ${userType.name.toUpperCase()}.',
+              };
+            }
+          }
+
+          // Check if mobile exists under ANY record
+          final mobileCheck = await supaClient
+              .from('user_auth')
+              .select('mobile_no,user_type,customer_id')
+              .eq('mobile_no', cleanMobile);
+          if (mobileCheck.isNotEmpty) {
+            final rec = mobileCheck.first;
+            final recCust = rec['customer_id']?.toString() ?? '';
+            final recRole = rec['user_type']?.toString().toUpperCase() ?? '';
+            if (recCust.isNotEmpty && recCust.toUpperCase() != cleanCustId.toUpperCase()) {
+              return {
+                'success': false,
+                'message': 'Mobile number +91 $cleanMobile is registered with Customer ID "$recCust", which does not match "$cleanCustId".',
+              };
+            }
+            if (userType != null && recRole != userType.name.toUpperCase()) {
+              return {
+                'success': false,
+                'message': 'Mobile number +91 $cleanMobile is registered as $recRole, not as ${userType.name.toUpperCase()}.',
+              };
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('❌ Error resetting PIN by Customer ID and Mobile: $e');
+    }
+
+    final roleText = userType != null ? ' ${userType.name.toUpperCase()}' : '';
+    return {
+      'success': false,
+      'message': 'No$roleText account found matching Customer ID "$cleanCustId" and Mobile Number "+91 $cleanMobile". Please verify your details.',
+    };
+  }
+
   /// Reset or Update Security PIN for a specific Role in Supabase
+  /// Changing a Manager PIN will strictly update ONLY the Manager record, leaving Admin PIN intact.
   Future<bool> resetUserPinInSupabase({
     required UserType userType,
     required String mobileNo,
     String? customerId,
     required String newPin,
   }) async {
+    final cleanMobile = mobileNo.trim();
+    final cleanPin = newPin.trim();
     try {
       final supaClient = client;
       if (supaClient != null) {
-        // Query matching user by mobile_no or customer_id
+        // Query matching user strictly by mobile_no AND user_type (or customer_id)
         var query = supaClient.from('user_auth').select('*');
         if (customerId != null && customerId.trim().isNotEmpty) {
           query = query.eq('customer_id', customerId.trim());
         } else {
-          query = query.eq('mobile_no', mobileNo.trim());
+          query = query.eq('mobile_no', cleanMobile).eq('user_type', userType.name);
         }
         
-        final response = await query;
+        final List<dynamic> response = await query;
         if (response.isNotEmpty) {
           final recordId = response.first['id'];
           await supaClient.from('user_auth').update({
-            'pin': newPin,
+            'pin': cleanPin,
             'user_type': userType.name,
             'updated_at': DateTime.now().toIso8601String(),
           }).eq('id', recordId);
-          debugPrint('✅ Reset PIN in Supabase for $mobileNo (${userType.name})');
+          debugPrint('✅ Reset PIN in Supabase for $cleanMobile (${userType.name})');
           return true;
         } else {
           // Create new record in Supabase if not previously registered
           final newRecord = UserAuthRecord(
-            id: customerId?.isNotEmpty == true ? customerId! : mobileNo,
-            mobileNo: mobileNo,
+            id: customerId?.isNotEmpty == true
+                ? customerId!
+                : '${userType.name}_$cleanMobile',
+            mobileNo: cleanMobile,
             customerId: customerId,
             userType: userType,
-            pin: newPin,
+            pin: cleanPin,
             name: userType == UserType.admin
                 ? 'Administrator'
-                : (userType == UserType.ro ? 'RO Officer' : 'Loanee Account'),
+                : (userType == UserType.manager
+                    ? 'Branch Manager'
+                    : (userType == UserType.ro ? 'RO Officer' : 'Loanee Account')),
           );
           return await saveUserAuthRecord(newRecord);
         }
@@ -1390,7 +1840,26 @@ class SupabaseService {
 
   /// Fetch all Admin & Manager users from Supabase 'user_auth' table
   Future<List<UserAuthRecord>> fetchAdminAndManagerUsers() async {
-    return (await fetchAdminUsers()) ?? [];
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        final response = await supaClient
+            .from('user_auth')
+            .select('*')
+            .or('user_type.eq.admin,user_type.eq.Admin,user_type.eq.ADMIN,user_type.ilike.admin,user_type.eq.manager,user_type.eq.Manager,user_type.eq.MANAGER,user_type.ilike.manager')
+            .order('created_at', ascending: false);
+
+        if (response.isNotEmpty) {
+          return (response as List)
+              .map((item) => UserAuthRecord.fromJson(Map<String, dynamic>.from(item)))
+              .where((u) => u.userType == UserType.admin || u.userType == UserType.manager)
+              .toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching admin & manager users from user_auth: $e');
+    }
+    return [];
   }
 
   /// Update user account status in 'user_auth' AND sync to 'ro_accounts' and 'loanee_accounts' tables
@@ -1409,49 +1878,41 @@ class SupabaseService {
         final cleanMobile = mobileNo?.trim() ?? '';
         final bool isActiveBool = newStatus.toLowerCase() != 'inactive';
 
-        // 1. Update status in 'user_auth' table
+        // 1. Update status in 'user_auth' table scoped strictly to the specific account
         try {
-          final List<String> authOrClauses = [
-            'id.eq.$cleanId',
-            'customer_id.eq.$cleanId',
-            'mobile_no.eq.$cleanId',
-          ];
-          if (cleanCustId.isNotEmpty && cleanCustId != cleanId) {
-            authOrClauses.add('customer_id.eq.$cleanCustId');
-            authOrClauses.add('id.eq.$cleanCustId');
-          }
-          if (cleanMobile.isNotEmpty && cleanMobile != cleanId) {
-            authOrClauses.add('mobile_no.eq.$cleanMobile');
-            authOrClauses.add('id.eq.$cleanMobile');
-          }
-
-          await supaClient.from('user_auth').update({
-            'status': newStatus,
-            'updated_at': DateTime.now().toIso8601String(),
-          }).or(authOrClauses.toSet().join(','));
-        } catch (eAuth) {
-          debugPrint('⚠️ Error updating user_auth status in Supabase: $eAuth');
-          try {
+          if (cleanId.isNotEmpty) {
             await supaClient.from('user_auth').update({
               'status': newStatus,
               'updated_at': DateTime.now().toIso8601String(),
             }).eq('id', cleanId);
-          } catch (_) {}
+          } else if (cleanMobile.isNotEmpty && userType != null) {
+            await supaClient.from('user_auth').update({
+              'status': newStatus,
+              'updated_at': DateTime.now().toIso8601String(),
+            }).eq('mobile_no', cleanMobile).eq('user_type', userType.name);
+          } else if (cleanCustId.isNotEmpty) {
+            await supaClient.from('user_auth').update({
+              'status': newStatus,
+              'updated_at': DateTime.now().toIso8601String(),
+            }).eq('customer_id', cleanCustId);
+          }
+        } catch (eAuth) {
+          debugPrint('⚠️ Error updating user_auth status in Supabase: $eAuth');
         }
 
         // Build match clause for related tables (ro_accounts and loanee_accounts)
         final List<String> matchOrClauses = [
           'customerid.eq.$cleanId',
           'customer_id.eq.$cleanId',
-          'id.eq.$cleanId',
           'mobileno.eq.$cleanId',
           'mobile_no.eq.$cleanId',
+          if (int.tryParse(cleanId) != null) 'id.eq.$cleanId',
         ];
         if (cleanCustId.isNotEmpty && cleanCustId != cleanId) {
           matchOrClauses.addAll([
             'customerid.eq.$cleanCustId',
             'customer_id.eq.$cleanCustId',
-            'id.eq.$cleanCustId',
+            if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
           ]);
         }
         if (cleanMobile.isNotEmpty && cleanMobile != cleanId) {

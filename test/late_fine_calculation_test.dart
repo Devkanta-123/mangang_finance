@@ -8,7 +8,7 @@ import 'package:mangang_finance/providers/settings_provider.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('SettingsProvider Late Fine & Overdue Calculations', () {
+  group('SettingsProvider Late Fine & Sunday Exclusion Calculations', () {
     late SettingsProvider settingsProvider;
 
     setUp(() async {
@@ -17,9 +17,156 @@ void main() {
       await settingsProvider.loadSettings();
     });
 
-    test('Case 1: Daily loan with NO data in ro_collection_payments table', () {
-      final now = DateTime(2026, 8, 17);
-      final startDate = now.subtract(const Duration(days: 10)); // 10 days ago
+    test('Example 1: Due date Saturday, Collection date Sunday -> 0 late days', () {
+      final saturday = DateTime(2026, 8, 22);
+      final sunday = DateTime(2026, 8, 23);
+
+      final lateDays = SettingsProvider.calculateDailyLateDays(
+        baseDate: saturday,
+        asOfDate: sunday,
+        hasPreviousPayment: false,
+      );
+
+      expect(lateDays, equals(0), reason: 'Sunday is a non-working day, expected 0 late days');
+
+      final lateDaysBetween = SettingsProvider.calculateLateDaysBetween(
+        dueDate: saturday,
+        collectionDate: sunday,
+      );
+      expect(lateDaysBetween, equals(0));
+    });
+
+    test('Example 2: Due date Saturday, Collection date Monday -> 1 late day (Sunday skipped)', () {
+      final saturday = DateTime(2026, 8, 22);
+      final monday = DateTime(2026, 8, 24);
+
+      final lateDays = SettingsProvider.calculateDailyLateDays(
+        baseDate: saturday,
+        asOfDate: monday,
+        hasPreviousPayment: false,
+      );
+
+      expect(lateDays, equals(1), reason: 'Saturday missed, Sunday skipped -> 1 late day');
+
+      final lateDaysBetween = SettingsProvider.calculateLateDaysBetween(
+        dueDate: saturday,
+        collectionDate: monday,
+      );
+      expect(lateDaysBetween, equals(1));
+    });
+
+    test('Example 3: Due date Friday (last paid Friday), Collection date Monday -> 1 late day (Saturday counted, Sunday skipped)', () {
+      final friday = DateTime(2026, 8, 21);
+      final monday = DateTime(2026, 8, 24);
+
+      // When last payment was Friday, next due was Saturday. Missed Saturday, Sunday skipped, collected Monday:
+      final lateDays = SettingsProvider.calculateDailyLateDays(
+        baseDate: friday,
+        asOfDate: monday,
+        hasPreviousPayment: true,
+      );
+
+      expect(lateDays, equals(1), reason: 'Saturday counted, Sunday skipped -> 1 late day');
+    });
+
+    test('Example 4: Due date Monday, Collection date Tuesday -> 1 late day', () {
+      final monday = DateTime(2026, 8, 17);
+      final tuesday = DateTime(2026, 8, 18);
+
+      final lateDays = SettingsProvider.calculateDailyLateDays(
+        baseDate: monday,
+        asOfDate: tuesday,
+        hasPreviousPayment: false,
+      );
+
+      expect(lateDays, equals(1), reason: 'Monday missed -> 1 late day on Tuesday');
+
+      final lateDaysBetween = SettingsProvider.calculateLateDaysBetween(
+        dueDate: monday,
+        collectionDate: tuesday,
+      );
+      expect(lateDaysBetween, equals(1));
+    });
+
+    test('Example 5: Due date Monday, Collection date Wednesday -> 2 late days', () {
+      final monday = DateTime(2026, 8, 17);
+      final wednesday = DateTime(2026, 8, 19);
+
+      final lateDays = SettingsProvider.calculateDailyLateDays(
+        baseDate: monday,
+        asOfDate: wednesday,
+        hasPreviousPayment: false,
+      );
+
+      expect(lateDays, equals(2), reason: 'Monday and Tuesday missed -> 2 late days on Wednesday');
+
+      final lateDaysBetween = SettingsProvider.calculateLateDaysBetween(
+        dueDate: monday,
+        collectionDate: wednesday,
+      );
+      expect(lateDaysBetween, equals(2));
+    });
+
+    test('Multi-week date range: Multiple Sundays are properly excluded', () {
+      // Monday Aug 3 to Monday Aug 24: 21 calendar days, contains 3 Sundays (Aug 9, Aug 16, Aug 23)
+      final startMonday = DateTime(2026, 8, 3);
+      final endMonday = DateTime(2026, 8, 24);
+
+      final lateDaysNoPayment = SettingsProvider.calculateDailyLateDays(
+        baseDate: startMonday,
+        asOfDate: endMonday,
+        hasPreviousPayment: false,
+      );
+      // 21 days - 3 Sundays = 18 late days
+      expect(lateDaysNoPayment, equals(18));
+
+      final lateDaysWithPayment = SettingsProvider.calculateDailyLateDays(
+        baseDate: startMonday,
+        asOfDate: endMonday,
+        hasPreviousPayment: true,
+      );
+      // 21 days - startDay(Mon Aug 3) - 3 Sundays = 17 late days
+      expect(lateDaysWithPayment, equals(17));
+    });
+
+    test('Multi-month boundary: Spans month end with Sunday exclusion intact', () {
+      // Friday Jul 31, 2026 to Tuesday Aug 4, 2026 (5 calendar days):
+      // Jul 31 (Fri), Aug 1 (Sat), Aug 2 (Sun - skipped), Aug 3 (Mon), Aug 4 (Tue)
+      final jul31 = DateTime(2026, 7, 31);
+      final aug4 = DateTime(2026, 8, 4);
+
+      final lateDays = SettingsProvider.calculateDailyLateDays(
+        baseDate: jul31,
+        asOfDate: aug4,
+        hasPreviousPayment: false,
+      );
+      // Days in [Jul 31, Aug 4): Jul 31, Aug 1, Aug 2 (Sun skipped), Aug 3 -> 3 late days
+      expect(lateDays, equals(3));
+    });
+
+    test('Sunday due date rule: Due on Sunday does not count Sunday itself as late day', () {
+      final sunday = DateTime(2026, 8, 23);
+      final monday = DateTime(2026, 8, 24);
+      final tuesday = DateTime(2026, 8, 25);
+
+      final mondayLate = SettingsProvider.calculateDailyLateDays(
+        baseDate: sunday,
+        asOfDate: monday,
+        hasPreviousPayment: false,
+      );
+      expect(mondayLate, equals(0), reason: 'Sunday skipped, paying on Monday is 0 late days');
+
+      final tuesdayLate = SettingsProvider.calculateDailyLateDays(
+        baseDate: sunday,
+        asOfDate: tuesday,
+        hasPreviousPayment: false,
+      );
+      expect(tuesdayLate, equals(1), reason: 'Sunday skipped, Monday missed -> 1 late day on Tuesday');
+    });
+
+    test('Case 1: Daily loan with NO data in ro_collection_payments table (Sunday excluded)', () {
+      final now = DateTime(2026, 8, 17); // Monday
+      final startDate = now.subtract(const Duration(days: 10)); // Friday Aug 7
 
       final entry = RoCollectionEntry(
         id: 'COL-1001',
@@ -44,17 +191,18 @@ void main() {
       expect(status.isDaily, isTrue);
       expect(status.hasPaymentsInTable, isFalse);
       expect(status.paymentRecordsCount, equals(0));
-      expect(status.overdueUnits, equals(10)); // 10 days overdue
+      // 10 calendar days with 2 Sundays (Aug 9, Aug 16) excluded = 8 overdue days
+      expect(status.overdueUnits, equals(8));
       expect(status.lateFineRate, equals(3.0)); // Default ₹3/day
-      expect(status.calculatedLateFine, equals(30.0)); // 10 * 3 = ₹30
-      expect(status.totalOverdueAmount, equals(30.0));
+      expect(status.calculatedLateFine, equals(24.0)); // 8 * 3 = ₹24
+      expect(status.totalOverdueAmount, equals(24.0));
       expect(status.calculationExplanation, contains('No payment record found in ro_collection_payments'));
     });
 
-    test('Case 2: Daily loan WITH payments existing in ro_collection_payments table', () {
-      final now = DateTime(2026, 8, 17);
+    test('Case 2: Daily loan WITH payments existing in ro_collection_payments table (Sunday excluded)', () {
+      final now = DateTime(2026, 8, 17); // Monday
       final startDate = now.subtract(const Duration(days: 20));
-      final lastPaymentDate = now.subtract(const Duration(days: 4)); // 4 days ago
+      final lastPaymentDate = now.subtract(const Duration(days: 4)); // Thursday Aug 13
 
       final entry = RoCollectionEntry(
         id: 'COL-1002',
@@ -86,8 +234,9 @@ void main() {
       expect(status.isDaily, isTrue);
       expect(status.hasPaymentsInTable, isTrue);
       expect(status.paymentRecordsCount, equals(1));
-      expect(status.overdueUnits, equals(3)); // (4 - 1) = 3 overdue days
-      expect(status.calculatedLateFine, equals(9.0)); // 3 * 3 = ₹9
+      // Between Thu Aug 13 and Mon Aug 17: Fri Aug 14 (1), Sat Aug 15 (1), Sun Aug 16 (skipped) = 2 overdue days
+      expect(status.overdueUnits, equals(2));
+      expect(status.calculatedLateFine, equals(6.0)); // 2 * 3 = ₹6
       expect(status.calculationExplanation, contains('Payment data found in ro_collection_payments'));
     });
 
@@ -164,7 +313,7 @@ void main() {
       expect(status.totalOverdueAmount, equals(1350.0)); // 1300 + 50 = ₹1350
     });
 
-    test('Case 5: Dynamic Admin Settings Rate changes apply to calculations', () async {
+    test('Case 5: Dynamic Admin Settings Rate changes apply to calculations with Sunday exclusion', () async {
       await settingsProvider.saveLatePaymentSettings(
         dailyFine: 5.0, // ₹5/day
         weeklyFine: 40.0, // ₹40/week
@@ -172,8 +321,8 @@ void main() {
         weeklyTenure: 15.0,
       );
 
-      final now = DateTime(2026, 8, 17);
-      final startDate = now.subtract(const Duration(days: 5));
+      final now = DateTime(2026, 8, 17); // Monday
+      final startDate = now.subtract(const Duration(days: 5)); // Wednesday Aug 12
 
       final dailyEntry = RoCollectionEntry(
         id: 'COL-1005',
@@ -194,7 +343,9 @@ void main() {
       );
 
       expect(dailyStatus.lateFineRate, equals(5.0));
-      expect(dailyStatus.calculatedLateFine, equals(25.0)); // 5 days * ₹5 = ₹25
+      // Wed 12, Thu 13, Fri 14, Sat 15, Sun 16 (skipped) = 4 days * ₹5 = ₹20
+      expect(dailyStatus.overdueUnits, equals(4));
+      expect(dailyStatus.calculatedLateFine, equals(20.0));
 
       final weeklyStartDate = now.subtract(const Duration(days: 14)); // 2 weeks
       final weeklyEntry = RoCollectionEntry(
@@ -232,3 +383,4 @@ void main() {
     });
   });
 }
+

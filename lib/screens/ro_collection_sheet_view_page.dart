@@ -3968,22 +3968,8 @@ class __AddPaymentEntryModalContentState
                                 ],
                               ),
                             ],
-                            if (breakdown.lateUnits > 0) ...[
-                              const SizedBox(height: 6),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    'Missed Overdue (${breakdown.lateUnits} ${breakdown.isDaily ? "days" : "weeks"} late):',
-                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.red.shade800),
-                                  ),
-                                  Text(
-                                    '+ ₹ ${breakdown.overdueMissedAmount.toStringAsFixed(2)}',
-                                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.red.shade800),
-                                  ),
-                                ],
-                              ),
-                            ],
+                           
+                           
                             const SizedBox(height: 6),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,

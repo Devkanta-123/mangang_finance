@@ -10,6 +10,7 @@ import 'package:mangang_finance/models/user_model.dart';
 import 'package:mangang_finance/providers/ro_provider.dart';
 import 'package:mangang_finance/providers/collection_sheet_provider.dart';
 import 'package:mangang_finance/providers/settings_provider.dart';
+import 'package:mangang_finance/providers/notification_provider.dart';
 
 void main() {
   testWidgets('MainPage renders correctly with drawer and role title',
@@ -22,6 +23,7 @@ void main() {
           ChangeNotifierProvider(create: (_) => RoProvider()),
           ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
           ChangeNotifierProvider(create: (_) => SettingsProvider()),
+          ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ],
         child: const MaterialApp(
           home: MainPage(),
@@ -51,6 +53,7 @@ void main() {
           ChangeNotifierProvider(create: (_) => RoProvider()),
           ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
           ChangeNotifierProvider(create: (_) => SettingsProvider()),
+          ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ],
         child: const MaterialApp(
           home: MainPage(),
@@ -91,6 +94,7 @@ void main() {
           ChangeNotifierProvider(create: (_) => RoProvider()),
           ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
           ChangeNotifierProvider(create: (_) => SettingsProvider()),
+          ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ],
         child: const MaterialApp(
           home: MainPage(),
@@ -135,6 +139,7 @@ void main() {
           ChangeNotifierProvider(create: (_) => RoProvider()),
           ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
           ChangeNotifierProvider(create: (_) => SettingsProvider()),
+          ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ],
         child: const MaterialApp(
           home: MainPage(),

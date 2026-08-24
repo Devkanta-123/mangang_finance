@@ -143,10 +143,16 @@ class UserAuthRecord {
   }
 
   factory UserAuthRecord.fromJson(Map<String, dynamic> json) {
+    final custId = json['customer_id']?.toString() ?? json['customerId']?.toString();
+    final rawId = json['id']?.toString();
+    final effectiveId = (rawId != null && rawId.isNotEmpty)
+        ? rawId
+        : (custId != null && custId.isNotEmpty ? custId : (json['mobile_no']?.toString() ?? json['mobileNo']?.toString() ?? ''));
+
     return UserAuthRecord(
-      id: json['id']?.toString() ?? json['mobile_no']?.toString() ?? '',
+      id: effectiveId,
       mobileNo: json['mobile_no']?.toString() ?? json['mobileNo']?.toString() ?? '',
-      customerId: json['customer_id']?.toString() ?? json['customerId']?.toString(),
+      customerId: custId,
       userType: parseUserType(json['user_type']?.toString() ?? json['userType']?.toString()),
       pin: json['pin']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
@@ -158,19 +164,30 @@ class UserAuthRecord {
     );
   }
 
-  Map<String, dynamic> toSupabaseJson() {
-    return {
-      'id': id,
-      'mobile_no': mobileNo,
-      'customer_id': customerId,
+  Map<String, dynamic> toSupabaseJson({bool includeId = false}) {
+    final map = <String, dynamic>{
+      'mobile_no': mobileNo.trim(),
       'user_type': userType.name,
-      'pin': pin,
-      'name': name,
+      'pin': pin.trim(),
+      'name': name.trim(),
       'ro_name': roName,
       'account_name': accountName,
       'status': status,
       'updated_at': DateTime.now().toIso8601String(),
     };
+
+    if (customerId != null && customerId!.trim().isNotEmpty) {
+      map['customer_id'] = customerId!.trim();
+    }
+
+    final numericId = int.tryParse(id.trim());
+    if (numericId != null) {
+      map['id'] = numericId;
+    } else if (includeId && id.trim().isNotEmpty) {
+      map['id'] = id.trim();
+    }
+
+    return map;
   }
 
   User toUser() {

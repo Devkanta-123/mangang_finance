@@ -160,7 +160,7 @@ void main() {
       expect(find.text('Enter 10-digit mobile number'), findsOneWidget);
       expect(find.text('+91 '), findsOneWidget);
       expect(find.text('Enter 6-Digit Security PIN'), findsOneWidget);
-      expect(find.widgetWithText(ElevatedButton, 'SIGN IN TO '), findsOneWidget);
+      expect(find.widgetWithText(ElevatedButton, 'SIGN IN'), findsOneWidget);
     });
 
     testWidgets('LoginPage validates 10-digit mobile number requirement', (tester) async {
@@ -180,7 +180,8 @@ void main() {
       final textFields = find.byType(TextField);
       await tester.enterText(textFields.at(0), '98765');
       await tester.enterText(textFields.at(1), '123456');
-      await tester.tap(find.widgetWithText(ElevatedButton, 'SIGN'));
+      await tester.ensureVisible(find.widgetWithText(ElevatedButton, 'SIGN IN'));
+      await tester.tap(find.widgetWithText(ElevatedButton, 'SIGN IN'));
       await tester.pumpAndSettle();
       expect(find.text('Mobile number must be exactly 10 digits'), findsOneWidget);
     });
@@ -199,6 +200,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Tap Sign In with empty fields -> SnackBar for mobile number
+      await tester.ensureVisible(find.widgetWithText(ElevatedButton, 'SIGN IN'));
       await tester.tap(find.widgetWithText(ElevatedButton, 'SIGN IN'));
       await tester.pumpAndSettle();
       expect(find.text('Please enter your 10-digit Mobile Number'), findsOneWidget);
@@ -235,6 +237,7 @@ void main() {
       await tester.enterText(textFields.at(0), '9876543210');
       await tester.enterText(textFields.at(1), '123456');
 
+      await tester.ensureVisible(find.widgetWithText(ElevatedButton, 'SIGN IN'));
       await tester.tap(find.widgetWithText(ElevatedButton, 'SIGN IN'));
       await tester.pumpAndSettle();
 

@@ -140,9 +140,12 @@ class RoProvider extends ChangeNotifier {
     );
   }
 
-  String generateNextAccountNumber() {
-    int nextAcc = 991001 + _roAccounts.length;
-    return 'RO-ACC-$nextAcc';
+  String generateNextAccountNumber({DateTime? now, Set<String>? reservedAccNos}) {
+    return CustomerIdService.generateRoAccountNumber(
+      existingRos: _roAccounts,
+      now: now,
+      reservedAccNos: reservedAccNos,
+    );
   }
 
   RoAccount? getRoForUser({String? customerId, String? mobileNo, String? name}) {

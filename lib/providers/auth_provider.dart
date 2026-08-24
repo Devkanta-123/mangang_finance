@@ -82,55 +82,110 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> registerUser(User user) async {
+  /// Check if an account already exists for (mobile_no, user_type) and/or customerId
+  Future<bool> checkDuplicateUser({
+    required String mobileNo,
+    required UserType userType,
+    String? customerId,
+  }) async {
+    return await SupabaseService.instance.checkUserAuthExists(
+      mobileNo: mobileNo,
+      userType: userType,
+      customerId: customerId,
+    );
+  }
+
+  /// Detailed duplicate user verification
+  Future<Map<String, dynamic>> checkDuplicateUserDetailed({
+    required String mobileNo,
+    required UserType userType,
+    String? customerId,
+  }) async {
+    return await SupabaseService.instance.checkUserAuthDuplicate(
+      mobileNo: mobileNo,
+      userType: userType,
+      customerId: customerId,
+    );
+  }
+
+  /// Register a user in the application with duplicate prevention for (mobile_no, user_type) & customerId
+  Future<Map<String, dynamic>> registerUser(User user) async {
+    final cleanMobile = user.mobileNo.trim();
+    final dupResult = await SupabaseService.instance.checkUserAuthDuplicate(
+      mobileNo: cleanMobile,
+      userType: user.userType,
+      customerId: user.customerId,
+    );
+
+    if (dupResult['isDuplicate'] == true) {
+      return {
+        'success': false,
+        'isDuplicate': true,
+        'message': dupResult['message'] ?? 'An account matching these details is already registered.',
+      };
+    }
+
     _currentUser = user;
     _activeRole = user.userType;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('user_data', jsonEncode(user.toJson()));
     notifyListeners();
+    return {
+      'success': true,
+      'isDuplicate': false,
+      'message': 'Account registered successfully',
+    };
   }
 
-  Future<void> setPin(String pin) async {
-    _userPin = pin;
+  /// Create and persist 6-Digit PIN in Supabase user_auth table
+  Future<bool> setPin(String pin, {UserType? userType, String? mobileNo}) async {
+    final cleanPin = pin.trim();
+    _userPin = cleanPin;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_pin', pin);
+    await prefs.setString('user_pin', cleanPin);
     _isLoggedIn = true;
 
+    final effectiveUserType = userType ?? _currentUser?.userType ?? _activeRole;
+    final effectiveMobile = mobileNo?.trim() ?? _currentUser?.mobileNo.trim() ?? '';
+
     // Save & sync User Auth Record directly to Supabase table
-    if (_currentUser != null) {
-      final authRecord = UserAuthRecord(
-        id: (_currentUser!.customerId != null && _currentUser!.customerId!.isNotEmpty)
-            ? _currentUser!.customerId!
-            : _currentUser!.mobileNo,
-        mobileNo: _currentUser!.mobileNo,
-        customerId: _currentUser!.customerId,
-        userType: _currentUser!.userType,
-        pin: pin,
-        name: _currentUser!.name,
-        roName: _currentUser!.roName,
-        accountName: _currentUser!.accountName,
-        status: _currentUser!.status,
-      );
+    final authRecord = UserAuthRecord(
+      id: '', // Leave empty so PostgreSQL auto-generates integer id (1, 2, 3...)
+      mobileNo: effectiveMobile,
+      customerId: _currentUser?.customerId,
+      userType: effectiveUserType,
+      pin: cleanPin,
+      name: _currentUser?.name ??
+          (effectiveUserType == UserType.admin
+              ? 'Administrator'
+              : (effectiveUserType == UserType.manager
+                  ? 'Branch Manager'
+                  : (effectiveUserType == UserType.ro ? 'RO Officer' : 'Loanee Account'))),
+      roName: _currentUser?.roName,
+      accountName: _currentUser?.accountName,
+      status: _currentUser?.status ?? 'Active',
+    );
 
-      await SupabaseService.instance.saveUserAuthRecord(authRecord);
-    }
-
+    final success = await SupabaseService.instance.saveUserAuthRecord(authRecord);
     notifyListeners();
+    return success;
   }
 
-  /// Login using Mobile Number (10 digits) and 6-Digit Security PIN
+  /// Login using Mobile Number (10 digits), 6-Digit Security PIN, and optional UserType
   Future<LoginResult> loginWithMobileAndPin({
     required String mobileNo,
     required String pin,
+    UserType? userType,
   }) async {
     final cleanMobile = mobileNo.trim();
     final cleanPin = pin.trim();
 
-    // 1. Query live Supabase database tables (user_auth, ro_accounts, loanee_accounts) by Mobile and PIN
+    // 1. Query live Supabase database tables (user_auth, ro_accounts, loanee_accounts) by Mobile, PIN, and UserType
     try {
       final supaUser = await SupabaseService.instance.fetchUserAuthByMobileAndPin(
         mobileNo: cleanMobile,
         pin: cleanPin,
+        userType: userType,
       );
       if (supaUser != null) {
         // Check if account status is inactive - block login
@@ -173,7 +228,8 @@ class AuthProvider extends ChangeNotifier {
     if (savedPin == cleanPin && savedPin != null && savedData != null) {
       try {
         final cachedUser = User.fromJson(jsonDecode(savedData));
-        if (cachedUser.mobileNo.trim() == cleanMobile || cleanMobile.isEmpty) {
+        if ((cachedUser.mobileNo.trim() == cleanMobile || cleanMobile.isEmpty) &&
+            (userType == null || cachedUser.userType == userType)) {
           if (!cachedUser.isActive) {
             return const LoginResult(
               success: false,
@@ -191,10 +247,11 @@ class AuthProvider extends ChangeNotifier {
       } catch (_) {}
     }
 
-    return const LoginResult(
+    final roleMsg = userType != null ? ' for ${userType.name.toUpperCase()} role' : '';
+    return LoginResult(
       success: false,
       isInactive: false,
-      message: 'Invalid Mobile Number or Security PIN. Please check your credentials.',
+      message: 'Invalid Mobile Number or Security PIN$roleMsg. Please check your credentials.',
     );
   }
 
@@ -268,6 +325,35 @@ class AuthProvider extends ChangeNotifier {
       isInactive: false,
       message: 'Invalid Security PIN. No matching user account found in database.',
     );
+  }
+
+  /// Reset Security PIN using Customer ID + Mobile Number (and optional User Type)
+  Future<Map<String, dynamic>> resetPinWithCustomerIdAndMobile({
+    required String customerId,
+    required String mobileNo,
+    required String newPin,
+    UserType? userType,
+  }) async {
+    final result = await SupabaseService.instance.resetUserPinByCustomerIdAndMobile(
+      customerId: customerId,
+      mobileNo: mobileNo,
+      newPin: newPin,
+      userType: userType,
+    );
+
+    if (result['success'] == true) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_pin', newPin);
+      _userPin = newPin;
+
+      if (_currentUser != null &&
+          (_currentUser!.customerId == customerId || _currentUser!.mobileNo == mobileNo)) {
+        _currentUser = _currentUser!.copyWith(mobileNo: mobileNo);
+      }
+      notifyListeners();
+    }
+
+    return result;
   }
 
   /// Reset Security PIN for any Role (Admin, RO, Loanee) with live Supabase update

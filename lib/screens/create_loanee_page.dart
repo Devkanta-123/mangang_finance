@@ -6,7 +6,9 @@ import '../models/loanee_model.dart';
 import '../providers/loanee_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/loanee_excel_import_service.dart';
+import '../services/witness_excel_import_service.dart';
 import '../widgets/loanee_excel_upload_dialog.dart';
+import '../widgets/witness_excel_upload_dialog.dart';
 
 class CreateLoaneePage extends StatefulWidget {
   final VoidCallback? onAccountCreated;
@@ -66,6 +68,8 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
   bool _isSubmitting = false;
   bool _isDownloadingTemplate = false;
   bool _isUploadingExcel = false;
+  bool _isDownloadingWitnessTemplate = false;
+  bool _isUploadingWitnessExcel = false;
 
   final List<String> _businessCategories = [
     'Retail Grocery',
@@ -249,6 +253,39 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
 
     if (parsedResult != null && mounted) {
       await LoaneeExcelUploadDialog.show(
+        context,
+        previewResult: parsedResult,
+        onImportSuccess: () {
+          if (widget.onAccountCreated != null) {
+            widget.onAccountCreated!();
+          }
+        },
+      );
+    }
+  }
+
+  Future<void> _handleDownloadWitnessTemplate() async {
+    setState(() => _isDownloadingWitnessTemplate = true);
+    await WitnessExcelImportService.downloadTemplate(context);
+    if (mounted) {
+      setState(() => _isDownloadingWitnessTemplate = false);
+    }
+  }
+
+  Future<void> _handleUploadWitnessExcel() async {
+    setState(() => _isUploadingWitnessExcel = true);
+    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    final parsedResult =
+        await WitnessExcelImportService.pickAndParseWitnessExcel(
+      context: context,
+      existingLoanees: loaneeProvider.loanees,
+    );
+    if (mounted) {
+      setState(() => _isUploadingWitnessExcel = false);
+    }
+
+    if (parsedResult != null && mounted) {
+      await WitnessExcelUploadDialog.show(
         context,
         previewResult: parsedResult,
         onImportSuccess: () {
@@ -709,48 +746,56 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                           ),
                         ],
                       ),
-                      child: isWide
-                          ? Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.05),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(
-                                    Icons.table_view_rounded,
-                                    color: Colors.black87,
-                                    size: 22,
-                                  ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.05),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Bulk Loanee Excel Import / Export',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.black87,
-                                        ),
-                                      ),
-                                      SizedBox(height: 2),
-                                      Text(
-                                        'Download the standard loanee Excel template or upload filled data in bulk',
-                                        style: TextStyle(
-                                          fontSize: 11.5,
-                                          color: Colors.grey,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                child: const Icon(
+                                  Icons.table_view_rounded,
+                                  color: Colors.black87,
+                                  size: 22,
                                 ),
-                                OutlinedButton.icon(
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Bulk Loanee Excel Import / Export',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      'Download standard loanee Excel template or upload basic loanee records in bulk',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
                                   style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
                                     side: BorderSide(color: Colors.grey.shade400),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(10),
@@ -763,22 +808,24 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                           height: 14,
                                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black87),
                                         )
-                                      : const Icon(Icons.download_rounded, size: 18, color: Colors.black87),
+                                      : const Icon(Icons.download_rounded, size: 16, color: Colors.black87),
                                   label: const Text(
                                     'Download Template',
                                     style: TextStyle(
-                                      fontSize: 12.5,
+                                      fontSize: 11.5,
                                       fontWeight: FontWeight.bold,
                                       color: Colors.black87,
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 10),
-                                ElevatedButton.icon(
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: ElevatedButton.icon(
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.black,
                                     foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(10),
                                     ),
@@ -790,121 +837,146 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                           height: 14,
                                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                         )
-                                      : const Icon(Icons.upload_file_rounded, size: 18),
+                                      : const Icon(Icons.upload_file_rounded, size: 16),
                                   label: const Text(
                                     'Upload Excel',
                                     style: TextStyle(
-                                      fontSize: 12.5,
+                                      fontSize: 11.5,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),
-                              ],
-                            )
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Witness Excel Bulk Import & Template Section
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey.shade200),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.grey.withOpacity(0.06),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.indigo.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(
+                                  Icons.handshake_outlined,
+                                  color: Colors.indigo,
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.05),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: const Icon(
-                                        Icons.table_view_rounded,
+                                    Text(
+                                      'Bulk Loanee Witness Excel Import / Export',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
                                         color: Colors.black87,
-                                        size: 20,
                                       ),
                                     ),
-                                    const SizedBox(width: 10),
-                                    const Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            'Bulk Loanee Excel Import',
-                                            style: TextStyle(
-                                              fontSize: 13.5,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.black87,
-                                            ),
-                                          ),
-                                          Text(
-                                            'Use template to import loanee records',
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.grey,
-                                            ),
-                                          ),
-                                        ],
+                                    SizedBox(height: 2),
+                                    Text(
+                                      'Download witness Excel template or upload witness details mapped to Customer ID + Account No',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: Colors.grey,
                                       ),
                                     ),
                                   ],
                                 ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton.icon(
-                                        style: OutlinedButton.styleFrom(
-                                          padding: const EdgeInsets.symmetric(vertical: 10),
-                                          side: BorderSide(color: Colors.grey.shade400),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                          ),
-                                        ),
-                                        onPressed: _isDownloadingTemplate ? null : _handleDownloadTemplate,
-                                        icon: _isDownloadingTemplate
-                                            ? const SizedBox(
-                                                width: 14,
-                                                height: 14,
-                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black87),
-                                              )
-                                            : const Icon(Icons.download_rounded, size: 16, color: Colors.black87),
-                                        label: const Text(
-                                          'Download Template',
-                                          style: TextStyle(
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.black87,
-                                          ),
-                                        ),
-                                      ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                    side: BorderSide(color: Colors.indigo.shade300),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: ElevatedButton.icon(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.black,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(vertical: 10),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                          ),
-                                        ),
-                                        onPressed: _isUploadingExcel ? null : _handleUploadExcel,
-                                        icon: _isUploadingExcel
-                                            ? const SizedBox(
-                                                width: 14,
-                                                height: 14,
-                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                              )
-                                            : const Icon(Icons.upload_file_rounded, size: 16),
-                                        label: const Text(
-                                          'Upload Excel',
-                                          style: TextStyle(
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
+                                  ),
+                                  onPressed: _isDownloadingWitnessTemplate ? null : _handleDownloadWitnessTemplate,
+                                  icon: _isDownloadingWitnessTemplate
+                                      ? const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.indigo),
+                                        )
+                                      : const Icon(Icons.download_rounded, size: 16, color: Colors.indigo),
+                                  label: const Text(
+                                    'Download Witness Template',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.indigo,
                                     ),
-                                  ],
+                                  ),
                                 ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.indigo.shade700,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  onPressed: _isUploadingWitnessExcel ? null : _handleUploadWitnessExcel,
+                                  icon: _isUploadingWitnessExcel
+                                      ? const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                        )
+                                      : const Icon(Icons.upload_file_rounded, size: 16),
+                                  label: const Text(
+                                    'Upload Witness Excel',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
 
@@ -925,7 +997,7 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                 first: _buildFormField(
                                   controller: _customerIdController,
                                   label: 'CUSTOMER ID *',
-                                  hint: 'e.g. CUST2026L000001',
+                                  hint: 'e.g. 2026LA000001',
                                   icon: Icons.badge_outlined,
                                   validator: (val) {
                                     if (val == null || val.trim().isEmpty) {
@@ -937,18 +1009,14 @@ class _CreateLoaneePageState extends State<CreateLoaneePage> {
                                 second: _buildFormField(
                                   controller: _accountNumberController,
                                   label: 'ACCOUNT NUMBER *',
-                                  hint: 'e.g. ACC-88239104',
+                                  hint: 'e.g. MF2026A000001',
                                   icon: Icons.account_balance_wallet_outlined,
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly
-                                  ],
                                   validator: (val) {
                                     if (val == null || val.trim().isEmpty) {
                                       return 'Account Number required';
                                     }
-                                    if (val.trim().length < 6) {
-                                      return 'Min 6 digits';
+                                    if (val.trim().length < 5) {
+                                      return 'Min 5 characters';
                                     }
                                     return null;
                                   },

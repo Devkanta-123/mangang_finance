@@ -900,8 +900,12 @@ class LoaneeExcelImportService {
                 existingLoanees: existingLoanees,
                 reservedIds: fileCustIds.keys.toSet(),
               );
-        final resolvedAccNo =
-            rawAcc.isNotEmpty ? rawAcc : 'LN${88239000 + r}';
+        final resolvedAccNo = rawAcc.isNotEmpty
+            ? rawAcc
+            : CustomerIdService.generateLoaneeAccountNumber(
+                existingLoanees: existingLoanees,
+                reservedAccNos: fileAccNos.keys.toSet(),
+              );
 
         model = LoaneeAccount(
           customerid: resolvedCustId,

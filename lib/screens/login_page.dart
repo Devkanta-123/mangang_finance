@@ -6,7 +6,18 @@ import '../providers/auth_provider.dart';
 import '../widgets/app_logo.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  final bool initialSetPinMode;
+  final String? registeredMobile;
+  final UserType? registeredRole;
+  final User? registeredUser;
+
+  const LoginPage({
+    super.key,
+    this.initialSetPinMode = false,
+    this.registeredMobile,
+    this.registeredRole,
+    this.registeredUser,
+  });
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -19,9 +30,49 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _confirmPinController = TextEditingController();
   final TextEditingController _setMobileController = TextEditingController();
 
-  bool _isSetPinMode = false; // Default to Sign In mode on start and after logout
+  bool _isSetPinMode = false;
   bool _isLoading = false;
   bool _obscurePin = true;
+  bool _obscureSetPin = true;
+  bool _obscureConfirmPin = true;
+
+  UserType _selectedSetPinRole = UserType.admin;
+  bool _initializedFromRoute = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _isSetPinMode = widget.initialSetPinMode;
+    if (widget.registeredMobile != null && widget.registeredMobile!.isNotEmpty) {
+      _setMobileController.text = widget.registeredMobile!;
+      _loginMobileController.text = widget.registeredMobile!;
+    }
+    if (widget.registeredRole != null) {
+      _selectedSetPinRole = widget.registeredRole!;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initializedFromRoute) {
+      _initializedFromRoute = true;
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map<String, dynamic>) {
+        if (args['initialSetPinMode'] == true) {
+          _isSetPinMode = true;
+        }
+        if (args['registeredMobile'] != null) {
+          final mob = args['registeredMobile'].toString();
+          _setMobileController.text = mob;
+          _loginMobileController.text = mob;
+        }
+        if (args['registeredRole'] is UserType) {
+          _selectedSetPinRole = args['registeredRole'] as UserType;
+        }
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -38,7 +89,17 @@ class _LoginPageState extends State<LoginPage> {
     final pin = _pinController.text.trim();
     final confirmPin = _confirmPinController.text.trim();
 
-    if (mobile.isNotEmpty && mobile.length != 10) {
+    if (mobile.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Registered mobile number is required'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (mobile.length != 10) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Mobile number must be exactly 10 digits'),
@@ -48,10 +109,10 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    if (pin.isEmpty || confirmPin.isEmpty) {
+    if (pin.length != 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please enter both PIN fields'),
+          content: Text('PIN must be exactly 6 digits'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -68,31 +129,25 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    if (pin.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('PIN must be exactly 6 digits'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
     setState(() {
       _isLoading = true;
     });
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    if (mobile.isNotEmpty && authProvider.currentUser != null) {
-      authProvider.setCurrentUserForTesting(
-        authProvider.currentUser!.copyWith(mobileNo: mobile),
-      );
-    }
 
-    await authProvider.setPin(pin);
+    await authProvider.setPin(
+      pin,
+      userType: _selectedSetPinRole,
+      mobileNo: mobile,
+    );
 
     setState(() {
       _isLoading = false;
+      _isSetPinMode = false;
+      _loginMobileController.text = mobile;
+      _loginPinController.clear();
+      _pinController.clear();
+      _confirmPinController.clear();
     });
 
     if (mounted) {
@@ -102,13 +157,15 @@ class _LoginPageState extends State<LoginPage> {
             children: [
               Icon(Icons.check_circle, color: Colors.white),
               SizedBox(width: 8),
-              Expanded(child: Text('PIN created & synced with Supabase table!')),
+              Expanded(
+                child: Text('PIN created & saved successfully! Please sign in with your 6-digit PIN.'),
+              ),
             ],
           ),
           backgroundColor: Colors.green,
+          duration: Duration(seconds: 4),
         ),
       );
-      Navigator.pushReplacementNamed(context, '/home');
     }
   }
 
@@ -179,7 +236,7 @@ class _LoginPageState extends State<LoginPage> {
           SnackBar(
             content: Text(result.message.isNotEmpty
                 ? result.message
-                : 'Invalid Mobile Number or Security PIN. No matching user account found.'),
+                : 'Invalid Mobile Number or Security PIN.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -197,74 +254,19 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.red.shade100,
-                shape: BoxShape.circle,
-              ),
+              decoration: BoxDecoration(color: Colors.red.shade100, shape: BoxShape.circle),
               child: Icon(Icons.person_off_rounded, color: Colors.red.shade900, size: 24),
             ),
             const SizedBox(width: 12),
             const Expanded(
-              child: Text(
-                'Account Inactive',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                  color: Colors.red,
-                ),
-              ),
+              child: Text('Account Inactive', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.red)),
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.red.shade200),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.lock_person_rounded, color: Colors.red.shade800, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Login Access Disabled',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Colors.red.shade900,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              message.isNotEmpty
-                  ? message
-                  : 'This account has been deactivated by the Administrator. Access to Mangang Finance portal is restricted while the account is Inactive.',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade800, height: 1.4),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Please contact the Admin or office desk to reactivate your account status.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
-            ),
-          ],
-        ),
+        content: Text(message),
         actions: [
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF8B1A1A),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B1A1A), foregroundColor: Colors.white),
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Understood'),
           ),
@@ -278,39 +280,41 @@ class _LoginPageState extends State<LoginPage> {
       _isSetPinMode = !_isSetPinMode;
       _loginMobileController.clear();
       _loginPinController.clear();
-      _setMobileController.clear();
       _pinController.clear();
       _confirmPinController.clear();
       _isLoading = false;
     });
   }
 
+  static const Map<UserType, String> _roleLabels = {
+    UserType.admin: 'Admin',
+    UserType.manager: ' Manager',
+    UserType.ro: 'RO',
+    UserType.loanee: 'Loanee',
+  };
+
   void _showResetPinDialog() {
-    UserType selectedRole = UserType.loanee;
     final mobileController = TextEditingController();
     final customerIdController = TextEditingController();
     final newPinController = TextEditingController();
     final confirmNewPinController = TextEditingController();
-
+    UserType resetRole = _selectedSetPinRole;
     bool isSubmitting = false;
+
+    if (_loginMobileController.text.trim().isNotEmpty) {
+      mobileController.text = _loginMobileController.text.trim();
+    }
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Padding(
-              padding: EdgeInsets.only(
-                left: 24,
-                right: 24,
-                top: 20,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-              ),
+              padding: EdgeInsets.only(left: 24, right: 24, top: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -323,102 +327,72 @@ class _LoginPageState extends State<LoginPage> {
                           children: [
                             Icon(Icons.lock_reset_rounded, color: Color(0xFF8B1A1A), size: 24),
                             SizedBox(width: 8),
-                            Text(
-                              'Reset Security PIN',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF8B1A1A),
-                              ),
-                            ),
+                            Text('Reset Security PIN', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
                           ],
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded),
-                          onPressed: () => Navigator.pop(context),
-                        ),
+                        IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.pop(context)),
                       ],
                     ),
                     const Text(
-                      'Select your Role and reset your Security PIN in Supabase table',
+                      'Select your Role, enter your Customer ID and Registered Mobile Number to verify your account and reset your 6-digit PIN.',
                       style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
-                    const SizedBox(height: 16),
-
-                    // Role Selector
-                    Text(
-                      'Select Account Role',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade800),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: UserType.values.map((role) {
-                        final isSelected = selectedRole == role;
-                        final label = role == UserType.admin
-                            ? 'Admin'
-                            : (role == UserType.manager
-                                ? 'Manager'
-                                : (role == UserType.ro ? 'RO' : 'Loanee'));
-                        return Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              setModalState(() {
-                                selectedRole = role;
-                              });
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(horizontal: 2),
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              decoration: BoxDecoration(
-                                color: isSelected ? const Color(0xFF8B1A1A) : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: isSelected ? const Color(0xFF8B1A1A) : Colors.grey.shade300,
+                    const SizedBox(height: 12),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          UserType.admin,
+                          UserType.manager,
+                          UserType.ro,
+                          UserType.loanee,
+                        ].map((role) {
+                          final isSelected = resetRole == role;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ChoiceChip(
+                              label: Text(
+                                _roleLabels[role] ?? role.name.toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  color: isSelected ? Colors.white : Colors.black87,
                                 ),
                               ),
-                              child: Center(
-                                child: Text(
-                                  label,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: isSelected ? Colors.white : Colors.grey.shade700,
-                                  ),
-                                ),
-                              ),
+                              selected: isSelected,
+                              selectedColor: const Color(0xFF8B1A1A),
+                              backgroundColor: Colors.grey.shade100,
+                              onSelected: (selected) {
+                                if (selected) {
+                                  setModalState(() {
+                                    resetRole = role;
+                                  });
+                                }
+                              },
                             ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Customer ID (for RO & Loanee)
-                    if (selectedRole != UserType.admin) ...[
-                      TextField(
-                        controller: customerIdController,
-                        decoration: InputDecoration(
-                          labelText: 'Customer ID',
-                          hintText: 'Enter Customer ID',
-                          prefixIcon: const Icon(Icons.badge_outlined, color: Color(0xFF8B1A1A)),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                        ),
+                          );
+                        }).toList(),
                       ),
-                      const SizedBox(height: 12),
-                    ],
-
-                    // Mobile Number (10 digits only)
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: customerIdController,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: InputDecoration(
+                        labelText: 'Customer ID',
+                        hintText: resetRole == UserType.admin ? 'e.g. ADM-01' : (resetRole == UserType.manager ? 'e.g. MGR-01' : (resetRole == UserType.ro ? 'e.g. 26R001' : 'e.g. 26LA000001')),
+                        prefixIcon: const Icon(Icons.badge_outlined, color: Color(0xFF8B1A1A)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: mobileController,
                       keyboardType: TextInputType.phone,
                       maxLength: 10,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(10),
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)],
                       decoration: InputDecoration(
-                        labelText: 'Mobile Number',
+                        labelText: 'Registered Mobile Number',
                         hintText: 'Enter 10-digit registered mobile',
                         counterText: '',
                         prefixIcon: const Icon(Icons.phone_android_rounded, color: Color(0xFF8B1A1A)),
@@ -426,22 +400,16 @@ class _LoginPageState extends State<LoginPage> {
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                     ),
-
                     const SizedBox(height: 12),
-
                     TextField(
                       controller: newPinController,
                       obscureText: true,
                       maxLength: 6,
                       keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(6),
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
                       decoration: InputDecoration(
                         labelText: 'New 6-Digit PIN',
                         hintText: '••••••',
-                        counterText: '',
                         prefixIcon: const Icon(Icons.lock_rounded, color: Color(0xFF8B1A1A)),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                       ),
@@ -452,10 +420,7 @@ class _LoginPageState extends State<LoginPage> {
                       obscureText: true,
                       maxLength: 6,
                       keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(6),
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
                       decoration: InputDecoration(
                         labelText: 'Confirm New PIN',
                         hintText: '••••••',
@@ -464,8 +429,7 @@ class _LoginPageState extends State<LoginPage> {
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                     ),
-                    const SizedBox(height: 16),
-
+                    const SizedBox(height: 18),
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -473,81 +437,109 @@ class _LoginPageState extends State<LoginPage> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF8B1A1A),
                           foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         ),
                         onPressed: isSubmitting
                             ? null
                             : () async {
+                                final custId = customerIdController.text.trim();
                                 final mobile = mobileController.text.trim();
-                                final customerId = customerIdController.text.trim();
                                 final newPin = newPinController.text.trim();
                                 final confirmPin = confirmNewPinController.text.trim();
 
+                                if (custId.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Customer ID is required'), backgroundColor: Colors.orange),
+                                  );
+                                  return;
+                                }
+
                                 if (mobile.length != 10) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Please enter valid 10-digit mobile number')),
+                                    const SnackBar(content: Text('Registered Mobile number must be 10 digits'), backgroundColor: Colors.orange),
                                   );
                                   return;
                                 }
 
                                 if (newPin.length != 6) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('PIN must be 6 digits')),
+                                    const SnackBar(content: Text('New PIN must be exactly 6 digits'), backgroundColor: Colors.orange),
                                   );
                                   return;
                                 }
+
                                 if (newPin != confirmPin) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('PINs do not match')),
+                                    const SnackBar(content: Text('PINs do not match'), backgroundColor: Colors.red),
                                   );
                                   return;
                                 }
 
-                                setModalState(() {
-                                  isSubmitting = true;
-                                });
+                                setModalState(() { isSubmitting = true; });
 
-                                bool success = await Provider.of<AuthProvider>(context, listen: false).resetPinForRole(
-                                  role: selectedRole,
-                                  mobileNo: mobile,
-                                  customerId: customerId,
-                                  newPin: newPin,
-                                );
+                                final resetResult = await Provider.of<AuthProvider>(context, listen: false)
+                                    .resetPinWithCustomerIdAndMobile(
+                                      customerId: custId,
+                                      mobileNo: mobile,
+                                      newPin: newPin,
+                                      userType: resetRole,
+                                    );
 
-                                setModalState(() {
-                                  isSubmitting = false;
-                                });
+                                setModalState(() { isSubmitting = false; });
+                                if (!context.mounted) return;
 
-                                if (success && context.mounted) {
+                                if (resetResult['success'] == true) {
                                   Navigator.pop(context);
+                                  setState(() {
+                                    _selectedSetPinRole = resetRole;
+                                    _loginMobileController.text = mobile;
+                                    _loginPinController.text = newPin;
+                                  });
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       content: Row(
                                         children: [
                                           const Icon(Icons.check_circle, color: Colors.white),
                                           const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              'PIN updated in Supabase table for ${selectedRole.name.toUpperCase()}!',
-                                            ),
-                                          ),
+                                          Expanded(child: Text(resetResult['message'] ?? 'PIN Reset Successful!')),
                                         ],
                                       ),
                                       backgroundColor: Colors.green,
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                } else {
+                                  showDialog(
+                                    context: context,
+                                    builder: (errCtx) => AlertDialog(
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                                      title: Row(
+                                        children: [
+                                          Icon(Icons.error_outline_rounded, color: Colors.red.shade700, size: 24),
+                                          const SizedBox(width: 8),
+                                          const Text(
+                                            'Verification Mismatch',
+                                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.red),
+                                          ),
+                                        ],
+                                      ),
+                                      content: Text(
+                                        resetResult['message'] ?? 'Customer ID and Mobile Number do not match.',
+                                        style: const TextStyle(fontSize: 13.5, height: 1.4),
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(errCtx),
+                                          child: const Text('Try Again'),
+                                        ),
+                                      ],
                                     ),
                                   );
                                 }
                               },
                         child: isSubmitting
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                              )
-                            : const Text('RESET PIN'),
+                            ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                            : const Text('RESET PIN', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                       ),
                     ),
                   ],
@@ -567,203 +559,101 @@ class _LoginPageState extends State<LoginPage> {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            // Rich Brand Red Organic Header (Matching Register Page)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(24, 44, 24, 28),
               decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF8B1A1A), Color(0xFF5E0F0F)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(36),
-                  bottomRight: Radius.circular(36),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black12,
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
+                gradient: LinearGradient(colors: [Color(0xFF8B1A1A), Color(0xFF5E0F0F)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                borderRadius: BorderRadius.only(bottomLeft: Radius.circular(36), bottomRight: Radius.circular(36)),
               ),
               child: Column(
                 children: [
-                  const SizedBox(height: 8),
-                  // Logo container with crisp white circular ring and soft shadow
+                  const SizedBox(height: 12),
+                  const AppLogo(width: 80, height: 80, backgroundColor: Colors.white),
+                  const SizedBox(height: 12),
+                  const Text('MANGANG FINANCE', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: 2.0, color: Colors.white)),
+                  const SizedBox(height: 4),
+                  Text('MICROFINANCE ENTERPRISE PORTAL', style: TextStyle(fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600, color: Colors.white.withOpacity(0.9))),
+                  const SizedBox(height: 12),
                   Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.22),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const AppLogo(
-                      width: 95,
-                      height: 95,
-                      fallbackIcon: Icons.security_rounded,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Mangang Finance',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      letterSpacing: 1.0,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  // Dynamic Mode Badge
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.18),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(20)),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          _isSetPinMode ? Icons.key_rounded : Icons.lock_person_rounded,
-                          color: Colors.amber.shade300,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _isSetPinMode ? 'CREATE SECURITY PIN' : 'SIGN IN',
-                          style: TextStyle(
-                            color: Colors.amber.shade300,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            letterSpacing: 0.8,
-                          ),
-                        ),
+                        Icon(_isSetPinMode ? Icons.lock_open_rounded : Icons.login_rounded, size: 14, color: Colors.amber.shade300),
+                        const SizedBox(width: 6),
+                        Text(_isSetPinMode ? 'CREATE SECURITY PIN' : 'SIGN IN', style: TextStyle(color: Colors.amber.shade300, fontWeight: FontWeight.bold, fontSize: 12)),
                       ],
                     ),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    _isSetPinMode
-                        ? 'Set a custom 6-digit PIN for your account'
-                        : 'Enter your 10-digit mobile number & 6-digit PIN to sign in',
+                    _isSetPinMode ? 'Set your confidential 6-digit PIN for your account' : 'Enter your registered 10-digit mobile number & 6-digit PIN to sign in',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.white.withOpacity(0.85),
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.85)),
                   ),
                 ],
               ),
             ),
-
-            // Form Section with Soft Organic Rounded Shapes
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               child: Column(
                 children: [
                   if (_isSetPinMode) ...[
-                    // Mobile Number (Optional or for mapping)
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(color: const Color(0xFF8B1A1A).withOpacity(0.06), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFF8B1A1A).withOpacity(0.15))),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Color(0xFF8B1A1A), shape: BoxShape.circle), child: const Icon(Icons.lock_rounded, color: Colors.white, size: 16)),
+                              const SizedBox(width: 8),
+                              const Text('Set Security PIN', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
+                              const Spacer(),
+                              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: const Color(0xFF8B1A1A), borderRadius: BorderRadius.circular(10)), child: Text(_selectedSetPinRole.name.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5))),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     TextField(
                       controller: _setMobileController,
+                      readOnly: _setMobileController.text.trim().isNotEmpty,
                       maxLength: 10,
-                      keyboardType: TextInputType.phone,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(10),
-                      ],
                       decoration: InputDecoration(
-                        labelText: 'Mobile Number',
-                        hintText: 'Enter 10-digit mobile number',
-                        counterText: '',
+                        labelText: 'Registered Mobile Number',
                         prefixIcon: const Icon(Icons.phone_android_rounded, color: Color(0xFF8B1A1A)),
-                        prefixText: '+91 ',
-                        prefixStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87),
                         filled: true,
-                        fillColor: Colors.grey.shade50,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: const BorderSide(color: Color(0xFF8B1A1A), width: 2),
-                        ),
+                        fillColor: _setMobileController.text.trim().isNotEmpty ? Colors.grey.shade100 : Colors.grey.shade50,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _pinController,
-                      obscureText: true,
+                      obscureText: _obscureSetPin,
                       maxLength: 6,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(6),
-                      ],
                       decoration: InputDecoration(
                         labelText: 'Enter 6-Digit PIN',
-                        hintText: '••••••',
-                        counterText: '',
                         prefixIcon: const Icon(Icons.lock_rounded, color: Color(0xFF8B1A1A)),
-                        filled: true,
-                        fillColor: Colors.grey.shade50,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: const BorderSide(color: Color(0xFF8B1A1A), width: 2),
-                        ),
+                        suffixIcon: IconButton(icon: Icon(_obscureSetPin ? Icons.visibility_off_rounded : Icons.visibility_rounded), onPressed: () => setState(() => _obscureSetPin = !_obscureSetPin)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _confirmPinController,
-                      obscureText: true,
+                      obscureText: _obscureConfirmPin,
                       maxLength: 6,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(6),
-                      ],
                       decoration: InputDecoration(
-                        labelText: 'Confirm PIN',
-                        hintText: 'Re-enter 6-digit PIN',
-                        counterText: '',
+                        labelText: 'Confirm 6-Digit PIN',
                         prefixIcon: const Icon(Icons.lock_outline_rounded, color: Color(0xFF8B1A1A)),
-                        filled: true,
-                        fillColor: Colors.grey.shade50,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: const BorderSide(color: Color(0xFF8B1A1A), width: 2),
-                        ),
+                        suffixIcon: IconButton(icon: Icon(_obscureConfirmPin ? Icons.visibility_off_rounded : Icons.visibility_rounded), onPressed: () => setState(() => _obscureConfirmPin = !_obscureConfirmPin)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -771,36 +661,13 @@ class _LoginPageState extends State<LoginPage> {
                       width: double.infinity,
                       height: 52,
                       child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF8B1A1A),
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF8B1A1A), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
                         onPressed: _isLoading ? null : _handleSetPin,
-                        child: _isLoading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text(
-                                'SET PIN',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
+                        child: _isLoading ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2) : const Text('CREATE & SAVE PIN', style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ),
                   ] else ...[
-                    // 1. Mobile Number Input Field (10 Digits Only)
+                    // SIGN IN FORM: Mobile Number + 6-Digit PIN (No User Type selection)
                     TextField(
                       controller: _loginMobileController,
                       maxLength: 10,
@@ -834,8 +701,6 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 14),
-
-                    // 2. 6-Digit Security PIN Input Field
                     TextField(
                       controller: _loginPinController,
                       obscureText: _obscurePin,
@@ -856,11 +721,7 @@ class _LoginPageState extends State<LoginPage> {
                             _obscurePin ? Icons.visibility_off_rounded : Icons.visibility_rounded,
                             color: Colors.grey.shade600,
                           ),
-                          onPressed: () {
-                            setState(() {
-                              _obscurePin = !_obscurePin;
-                            });
-                          },
+                          onPressed: () => setState(() => _obscurePin = !_obscurePin),
                         ),
                         filled: true,
                         fillColor: Colors.grey.shade50,
@@ -879,8 +740,6 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 8),
-
-                    // Reset PIN Button
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton.icon(
@@ -896,7 +755,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
@@ -905,28 +763,18 @@ class _LoginPageState extends State<LoginPage> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF8B1A1A),
                           foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         ),
                         onPressed: _isLoading ? null : _handleLogin,
                         child: _isLoading
                             ? const SizedBox(
                                 height: 20,
                                 width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                               )
                             : const Text(
                                 'SIGN IN',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                ),
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.5),
                               ),
                       ),
                     ),
@@ -934,7 +782,7 @@ class _LoginPageState extends State<LoginPage> {
 
                   const SizedBox(height: 20),
 
-                  // 1. Toggle between Create PIN and Sign In
+                  // Toggle between Create PIN and Sign In
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -956,7 +804,7 @@ class _LoginPageState extends State<LoginPage> {
                     ],
                   ),
 
-                  // 2. Link to Register Page
+                  // Link to Register Page
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -985,8 +833,7 @@ class _LoginPageState extends State<LoginPage> {
                     Center(
                       child: TextButton.icon(
                         onPressed: _showResetPinDialog,
-                        icon: const Icon(Icons.lock_reset_rounded,
-                            size: 16, color: Color(0xFF8B1A1A)),
+                        icon: const Icon(Icons.lock_reset_rounded, size: 16, color: Color(0xFF8B1A1A)),
                         label: const Text(
                           'Forgot / Reset Existing PIN?',
                           style: TextStyle(

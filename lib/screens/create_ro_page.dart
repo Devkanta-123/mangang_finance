@@ -452,7 +452,7 @@ class _CreateRoPageState extends State<CreateRoPage> {
                                 first: _buildFormField(
                                   controller: _customerIdController,
                                   label: 'CUSTOMER ID *',
-                                  hint: 'e.g. CUST2026RO001',
+                                  hint: 'e.g. 2026R001',
                                   icon: Icons.badge_outlined,
                                   validator: (val) {
                                     if (val == null || val.trim().isEmpty) {
@@ -464,18 +464,14 @@ class _CreateRoPageState extends State<CreateRoPage> {
                                 second: _buildFormField(
                                   controller: _accountNumberController,
                                   label: 'ACCOUNT NUMBER *',
-                                  hint: 'e.g. RO-ACC-991001',
+                                  hint: 'e.g. AC2026RS0001',
                                   icon: Icons.account_balance_wallet_outlined,
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly
-                                  ],
                                   validator: (val) {
                                     if (val == null || val.trim().isEmpty) {
                                       return 'Account Number required';
                                     }
                                     if (val.trim().length < 5) {
-                                      return 'Min 5 digits';
+                                      return 'Min 5 characters';
                                     }
                                     return null;
                                   },

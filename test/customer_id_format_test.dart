@@ -1,5 +1,6 @@
 // test/customer_id_format_test.dart
 
+import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -12,144 +13,178 @@ import 'package:mangang_finance/providers/settings_provider.dart';
 import 'package:mangang_finance/screens/create_loanee_page.dart';
 import 'package:mangang_finance/screens/create_ro_page.dart';
 import 'package:mangang_finance/services/customer_id_service.dart';
+import 'package:mangang_finance/services/loanee_excel_import_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('CustomerIdService Format & Sequence Tests', () {
-    test('1. First, Second, and Third Loanee Customer IDs follow CUST + YEAR + L + 6-digit sequence', () {
+  group('CustomerIdService Auto-Generated ID Formats & Sequences', () {
+    // -------------------------------------------------------------
+    // 1. LOANEE CUSTOMER ID: YYLA + 6 digits (e.g. 26LA000001)
+    // -------------------------------------------------------------
+    test('1. Loanee Customer ID generation follows YYLA + 6-digit sequence', () {
       final now2026 = DateTime(2026, 8, 24);
 
-      // First Loanee -> CUST2026L000001
+      // First Loanee -> 26LA000001
       final id1 = CustomerIdService.generateLoaneeCustomerId(
         existingLoanees: [],
         now: now2026,
       );
-      expect(id1, equals('CUST2026L000001'));
+      expect(id1, equals('26LA000001'));
 
-      // Second Loanee -> CUST2026L000002
+      // Second Loanee -> 26LA000002
       final id2 = CustomerIdService.generateLoaneeCustomerId(
         existingIds: [id1],
         now: now2026,
       );
-      expect(id2, equals('CUST2026L000002'));
+      expect(id2, equals('26LA000002'));
 
-      // Third Loanee -> CUST2026L000003
+      // Third Loanee -> 26LA000003
       final id3 = CustomerIdService.generateLoaneeCustomerId(
         existingIds: [id1, id2],
         now: now2026,
       );
-      expect(id3, equals('CUST2026L000003'));
+      expect(id3, equals('26LA000003'));
     });
 
-    test('2. First, Second, and Third RO Customer IDs follow CUST + YEAR + RO + 3-digit sequence', () {
+    // -------------------------------------------------------------
+    // 2. RO CUSTOMER ID: YYR + 3 digits (e.g. 26R001)
+    // -------------------------------------------------------------
+    test('2. RO Customer ID generation follows YYR + 3-digit sequence', () {
       final now2026 = DateTime(2026, 8, 24);
 
-      // First RO -> CUST2026RO001
+      // First RO -> 26R001
       final id1 = CustomerIdService.generateRoCustomerId(
         existingRos: [],
         now: now2026,
       );
-      expect(id1, equals('CUST2026RO001'));
+      expect(id1, equals('26R001'));
 
-      // Second RO -> CUST2026RO002
+      // Second RO -> 26R002
       final id2 = CustomerIdService.generateRoCustomerId(
         existingIds: [id1],
         now: now2026,
       );
-      expect(id2, equals('CUST2026RO002'));
+      expect(id2, equals('26R002'));
 
-      // Third RO -> CUST2026RO003
+      // Third RO -> 26R003
       final id3 = CustomerIdService.generateRoCustomerId(
         existingIds: [id1, id2],
         now: now2026,
       );
-      expect(id3, equals('CUST2026RO003'));
+      expect(id3, equals('26R003'));
     });
 
-    test('3. Exact zero-padding verification (6 digits for Loanee, 3 digits for RO)', () {
+    // -------------------------------------------------------------
+    // 3. LOANEE ACCOUNT NUMBER: MF + YY + A + 6 digits (e.g. MF26A000001)
+    // -------------------------------------------------------------
+    test('3. Loanee Account Number generation follows MF + YY + A + 6-digit sequence', () {
       final now2026 = DateTime(2026, 8, 24);
 
-      // Loanee padding to 6 digits
-      final loanee10 = CustomerIdService.formatId(
-        isRo: false,
-        sequence: 10,
+      // First Loanee Account -> MF26A000001
+      final acc1 = CustomerIdService.generateLoaneeAccountNumber(
+        existingLoanees: [],
         now: now2026,
       );
-      expect(loanee10, equals('CUST2026L000010'));
+      expect(acc1, equals('MF26A000001'));
 
-      final loanee999 = CustomerIdService.formatId(
-        isRo: false,
-        sequence: 999,
+      // Second Loanee Account -> MF26A000002
+      final acc2 = CustomerIdService.generateLoaneeAccountNumber(
+        existingAccNos: [acc1],
         now: now2026,
       );
-      expect(loanee999, equals('CUST2026L000999'));
+      expect(acc2, equals('MF26A000002'));
 
-      final loanee999999 = CustomerIdService.formatId(
-        isRo: false,
-        sequence: 999999,
+      // Third Loanee Account -> MF26A000003
+      final acc3 = CustomerIdService.generateLoaneeAccountNumber(
+        existingAccNos: [acc1, acc2],
         now: now2026,
       );
-      expect(loanee999999, equals('CUST2026L999999'));
-
-      // RO padding to 3 digits
-      final ro5 = CustomerIdService.formatId(
-        isRo: true,
-        sequence: 5,
-        now: now2026,
-      );
-      expect(ro5, equals('CUST2026RO005'));
-
-      final ro99 = CustomerIdService.formatId(
-        isRo: true,
-        sequence: 99,
-        now: now2026,
-      );
-      expect(ro99, equals('CUST2026RO099'));
-
-      final ro999 = CustomerIdService.formatId(
-        isRo: true,
-        sequence: 999,
-        now: now2026,
-      );
-      expect(ro999, equals('CUST2026RO999'));
+      expect(acc3, equals('MF26A000003'));
     });
 
-    test('4. Dynamic Year handling across year changes (not hardcoded to 2026)', () {
+    // -------------------------------------------------------------
+    // 4. RO ACCOUNT NUMBER: AC + YY + RS + 4 digits (e.g. AC26RS0001)
+    // -------------------------------------------------------------
+    test('4. RO Account Number generation follows AC + YY + RS + 4-digit sequence', () {
+      final now2026 = DateTime(2026, 8, 24);
+
+      // First RO Account -> AC26RS0001
+      final acc1 = CustomerIdService.generateRoAccountNumber(
+        existingRos: [],
+        now: now2026,
+      );
+      expect(acc1, equals('AC26RS0001'));
+
+      // Second RO Account -> AC26RS0002
+      final acc2 = CustomerIdService.generateRoAccountNumber(
+        existingAccNos: [acc1],
+        now: now2026,
+      );
+      expect(acc2, equals('AC26RS0002'));
+
+      // Third RO Account -> AC26RS0003
+      final acc3 = CustomerIdService.generateRoAccountNumber(
+        existingAccNos: [acc1, acc2],
+        now: now2026,
+      );
+      expect(acc3, equals('AC26RS0003'));
+    });
+
+    // -------------------------------------------------------------
+    // 5. ZERO-PADDING VERIFICATION
+    // -------------------------------------------------------------
+    test('5. Exact zero-padding rules for all 4 generators', () {
+      final now2026 = DateTime(2026, 8, 24);
+
+      // Loanee Customer ID: 6 digits
+      expect(CustomerIdService.formatLoaneeCustomerId(1, now: now2026), equals('26LA000001'));
+      expect(CustomerIdService.formatLoaneeCustomerId(999, now: now2026), equals('26LA000999'));
+      expect(CustomerIdService.formatLoaneeCustomerId(999999, now: now2026), equals('26LA999999'));
+
+      // RO Customer ID: 3 digits
+      expect(CustomerIdService.formatRoCustomerId(1, now: now2026), equals('26R001'));
+      expect(CustomerIdService.formatRoCustomerId(99, now: now2026), equals('26R099'));
+      expect(CustomerIdService.formatRoCustomerId(999, now: now2026), equals('26R999'));
+
+      // Loanee Account Number: 6 digits
+      expect(CustomerIdService.formatLoaneeAccountNumber(1, now: now2026), equals('MF26A000001'));
+      expect(CustomerIdService.formatLoaneeAccountNumber(50, now: now2026), equals('MF26A000050'));
+      expect(CustomerIdService.formatLoaneeAccountNumber(999999, now: now2026), equals('MF26A999999'));
+
+      // RO Account Number: 4 digits
+      expect(CustomerIdService.formatRoAccountNumber(1, now: now2026), equals('AC26RS0001'));
+      expect(CustomerIdService.formatRoAccountNumber(100, now: now2026), equals('AC26RS0100'));
+      expect(CustomerIdService.formatRoAccountNumber(9999, now: now2026), equals('AC26RS9999'));
+    });
+
+    // -------------------------------------------------------------
+    // 6. DYNAMIC YEAR HANDLING
+    // -------------------------------------------------------------
+    test('6. Dynamic Year handling across year changes (never hardcoded)', () {
       final now2027 = DateTime(2027, 1, 1);
-      final loanee2027 = CustomerIdService.generateLoaneeCustomerId(
-        existingLoanees: [],
-        now: now2027,
-      );
-      expect(loanee2027, equals('CUST2027L000001'));
+      expect(CustomerIdService.generateLoaneeCustomerId(existingLoanees: [], now: now2027), equals('27LA000001'));
+      expect(CustomerIdService.generateRoCustomerId(existingRos: [], now: now2027), equals('27R001'));
+      expect(CustomerIdService.generateLoaneeAccountNumber(existingLoanees: [], now: now2027), equals('MF27A000001'));
+      expect(CustomerIdService.generateRoAccountNumber(existingRos: [], now: now2027), equals('AC27RS0001'));
 
-      final ro2027 = CustomerIdService.generateRoCustomerId(
-        existingRos: [],
-        now: now2027,
-      );
-      expect(ro2027, equals('CUST2027RO001'));
-
-      final now2030 = DateTime(2030, 6, 15);
-      final loanee2030 = CustomerIdService.generateLoaneeCustomerId(
-        existingLoanees: [],
-        now: now2030,
-      );
-      expect(loanee2030, equals('CUST2030L000001'));
-
-      final ro2030 = CustomerIdService.generateRoCustomerId(
-        existingRos: [],
-        now: now2030,
-      );
-      expect(ro2030, equals('CUST2030RO001'));
+      final now2030 = DateTime(2030, 12, 31);
+      expect(CustomerIdService.generateLoaneeCustomerId(existingLoanees: [], now: now2030), equals('30LA000001'));
+      expect(CustomerIdService.generateRoCustomerId(existingRos: [], now: now2030), equals('30R001'));
+      expect(CustomerIdService.generateLoaneeAccountNumber(existingLoanees: [], now: now2030), equals('MF30A000001'));
+      expect(CustomerIdService.generateRoAccountNumber(existingRos: [], now: now2030), equals('AC30RS0001'));
     });
 
-    test('5. Separate sequences for Loanee and RO accounts', () {
+    // -------------------------------------------------------------
+    // 7. SEPARATE SEQUENCES
+    // -------------------------------------------------------------
+    test('7. Customer IDs and Account Numbers for Loanee and RO have separate sequences', () {
       final now2026 = DateTime(2026, 8, 24);
 
       final existingLoanees = [
         LoaneeAccount(
-          customerid: 'CUST2026L000001',
-          accountnumber: 'ACC-1',
+          customerid: '26LA000001',
+          accountnumber: 'MF26A000001',
           loaneename: 'Loanee 1',
           guardianname: 'N/A',
           address: 'Imphal',
@@ -162,8 +197,8 @@ void main() {
           aadharno: '111122223333',
         ),
         LoaneeAccount(
-          customerid: 'CUST2026L000002',
-          accountnumber: 'ACC-2',
+          customerid: '26LA000002',
+          accountnumber: 'MF26A000002',
           loaneename: 'Loanee 2',
           guardianname: 'N/A',
           address: 'Imphal',
@@ -179,8 +214,8 @@ void main() {
 
       final existingRos = [
         RoAccount(
-          customerid: 'CUST2026RO001',
-          accountnumber: 'RO-ACC-1',
+          customerid: '26R001',
+          accountnumber: 'AC26RS0001',
           roname: 'RO 1',
           guardianname: 'N/A',
           address: 'Imphal',
@@ -194,21 +229,19 @@ void main() {
         ),
       ];
 
-      final nextLoaneeId = CustomerIdService.generateLoaneeCustomerId(
-        existingLoanees: existingLoanees,
-        now: now2026,
-      );
-      final nextRoId = CustomerIdService.generateRoCustomerId(
-        existingRos: existingRos,
-        now: now2026,
-      );
+      // Next Loanee ID & Account
+      expect(CustomerIdService.generateLoaneeCustomerId(existingLoanees: existingLoanees, now: now2026), equals('26LA000003'));
+      expect(CustomerIdService.generateLoaneeAccountNumber(existingLoanees: existingLoanees, now: now2026), equals('MF26A000003'));
 
-      // Loanee sequence advances to 000003, RO sequence advances to 002
-      expect(nextLoaneeId, equals('CUST2026L000003'));
-      expect(nextRoId, equals('CUST2026RO002'));
+      // Next RO ID & Account
+      expect(CustomerIdService.generateRoCustomerId(existingRos: existingRos, now: now2026), equals('26R002'));
+      expect(CustomerIdService.generateRoAccountNumber(existingRos: existingRos, now: now2026), equals('AC26RS0002'));
     });
 
-    test('6. Existing legacy Customer IDs are preserved without affecting new format generation', () {
+    // -------------------------------------------------------------
+    // 8. PRESERVATION OF EXISTING RECORDS
+    // -------------------------------------------------------------
+    test('8. Existing legacy Customer IDs and Account Numbers are preserved unchanged', () {
       final now2026 = DateTime(2026, 8, 24);
 
       final legacyLoanees = [
@@ -226,103 +259,160 @@ void main() {
           mobileno: '9862000001',
           aadharno: '111122223333',
         ),
-        LoaneeAccount(
-          customerid: 'CUST-1002',
-          accountnumber: 'ACC-88239102',
-          loaneename: 'Legacy Loanee 2',
+      ];
+
+      final legacyRos = [
+        RoAccount(
+          customerid: 'RO-CUST-5001',
+          accountnumber: 'RO-ACC-991001',
+          roname: 'Legacy RO',
           guardianname: 'N/A',
           address: 'Imphal',
-          businesstype: 'Retail',
+          designation: 'Recovery Officer',
           postoffice: 'Imphal',
           policestation: 'Imphal',
           district: 'Imphal West',
           pincode: '795001',
-          mobileno: '9862000002',
-          aadharno: '111122223334',
+          mobileno: '9862000010',
+          aadharno: '222233334444',
         ),
       ];
 
-      // Legacy records stay unchanged
+      // Existing records stay intact
       expect(legacyLoanees[0].customerId, equals('CUST-1001'));
-      expect(legacyLoanees[1].customerId, equals('CUST-1002'));
+      expect(legacyLoanees[0].accountNumber, equals('ACC-88239101'));
+      expect(legacyRos[0].customerId, equals('RO-CUST-5001'));
+      expect(legacyRos[0].accountNumber, equals('RO-ACC-991001'));
 
-      // New generated ID adopts the new format CUST2026L000001
-      final newId = CustomerIdService.generateLoaneeCustomerId(
-        existingLoanees: legacyLoanees,
-        now: now2026,
-      );
-      expect(newId, equals('CUST2026L000001'));
+      // New generated records adopt new formats starting at 1
+      expect(CustomerIdService.generateLoaneeCustomerId(existingLoanees: legacyLoanees, now: now2026), equals('26LA000001'));
+      expect(CustomerIdService.generateLoaneeAccountNumber(existingLoanees: legacyLoanees, now: now2026), equals('MF26A000001'));
+      expect(CustomerIdService.generateRoCustomerId(existingRos: legacyRos, now: now2026), equals('26R001'));
+      expect(CustomerIdService.generateRoAccountNumber(existingRos: legacyRos, now: now2026), equals('AC26RS0001'));
     });
 
-    test('7. Sequence progression across gaps and duplicate prevention', () {
-      final now2026 = DateTime(2026, 8, 24);
-      final existingIds = ['CUST2026L000001', 'CUST2026L000005', 'CUST2026L000010'];
-
-      final nextId = CustomerIdService.generateLoaneeCustomerId(
-        existingIds: existingIds,
-        now: now2026,
-      );
-      expect(nextId, equals('CUST2026L000011'));
-    });
-
-    test('8. Batch and concurrent ID generation with reserved IDs guarantees zero collisions', () {
+    // -------------------------------------------------------------
+    // 9. BATCH & CONCURRENT GENERATION WITH ZERO COLLISIONS
+    // -------------------------------------------------------------
+    test('9. Batch and concurrent generation with reserved IDs guarantees zero collisions', () {
       final now2026 = DateTime(2026, 8, 24);
 
-      final batch = CustomerIdService.generateLoaneeCustomerIdsBatch(
-        5,
-        now: now2026,
-      );
+      final custBatch = CustomerIdService.generateLoaneeCustomerIdsBatch(3, now: now2026);
+      expect(custBatch, equals(['26LA000001', '26LA000002', '26LA000003']));
 
-      expect(batch, equals([
-        'CUST2026L000001',
-        'CUST2026L000002',
-        'CUST2026L000003',
-        'CUST2026L000004',
-        'CUST2026L000005',
-      ]));
+      final accBatch = CustomerIdService.generateLoaneeAccountNumbersBatch(3, now: now2026);
+      expect(accBatch, equals(['MF26A000001', 'MF26A000002', 'MF26A000003']));
 
-      // If CUST2026L000006 is reserved in-flight, next generated ID is CUST2026L000007
+      // In-flight reserved ID collision avoidance
       final nextWithReserved = CustomerIdService.generateLoaneeCustomerId(
-        existingIds: batch,
-        reservedIds: {'CUST2026L000006'},
+        existingIds: custBatch,
+        reservedIds: {'26LA000004'},
         now: now2026,
       );
-      expect(nextWithReserved, equals('CUST2026L000007'));
+      expect(nextWithReserved, equals('26LA000005'));
     });
 
-    test('9. Validation functions recognize new, variant, and legacy formats', () {
-      expect(CustomerIdService.isValidLoaneeCustomerId('CUST2026L000001'), isTrue);
-      expect(CustomerIdService.isValidLoaneeCustomerId('CUST2027L000099'), isTrue);
-      expect(CustomerIdService.isValidLoaneeCustomerId('CUSTL202600001'), isTrue);
+    // -------------------------------------------------------------
+    // 10. FORMAT VALIDATIONS
+    // -------------------------------------------------------------
+    test('10. Validation functions recognize new and legacy formats', () {
+      expect(CustomerIdService.isValidLoaneeCustomerId('26LA000001'), isTrue);
+      expect(CustomerIdService.isValidLoaneeCustomerId('2026LA000001'), isTrue);
       expect(CustomerIdService.isValidLoaneeCustomerId('CUST-1001'), isTrue);
-      expect(CustomerIdService.isValidLoaneeCustomerId('INVALID-ID'), isFalse);
 
-      expect(CustomerIdService.isValidRoCustomerId('CUST2026RO001'), isTrue);
-      expect(CustomerIdService.isValidRoCustomerId('CUST2027RO099'), isTrue);
-      expect(CustomerIdService.isValidRoCustomerId('CUSTRO202600001'), isTrue);
+      expect(CustomerIdService.isValidRoCustomerId('26R001'), isTrue);
+      expect(CustomerIdService.isValidRoCustomerId('2026R001'), isTrue);
       expect(CustomerIdService.isValidRoCustomerId('RO-CUST-5001'), isTrue);
-      expect(CustomerIdService.isValidRoCustomerId('INVALID-ID'), isFalse);
+
+      expect(CustomerIdService.isValidLoaneeAccountNumber('MF26A000001'), isTrue);
+      expect(CustomerIdService.isValidLoaneeAccountNumber('MF2026A000001'), isTrue);
+      expect(CustomerIdService.isValidLoaneeAccountNumber('ACC-88239101'), isTrue);
+
+      expect(CustomerIdService.isValidRoAccountNumber('AC26RS0001'), isTrue);
+      expect(CustomerIdService.isValidRoAccountNumber('AC2026RS0001'), isTrue);
+      expect(CustomerIdService.isValidRoAccountNumber('RO-ACC-991001'), isTrue);
+    });
+
+    // -------------------------------------------------------------
+    // 11. BULK EXCEL LOANEE IMPORT INTEGRATION
+    // -------------------------------------------------------------
+    test('11. Bulk Excel Loanee Import assigns new ID formats for rows missing Customer ID/Account No', () {
+      final excel = Excel.createExcel();
+      final sheet = excel['Loanee Basic Details'];
+
+      const headers = LoaneeExcelImportService.headers;
+      for (int c = 0; c < headers.length; c++) {
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 0))
+          .value = TextCellValue(headers[c]);
+      }
+
+      // Row 1: Has Customer ID, missing Account Number
+      final row1 = [
+        '26LA000001', '', 'Robert Sanasam', 'S. Tomba', 'Keishamthong', 'Handicrafts',
+        'Keishamthong PO', 'Imphal PS', 'Imphal West', '795001', '9862990001', '123456789012',
+        '2026-08-24', 'Active', '50000', '0', '50000', '2026-08-24', '2027-01-24'
+      ];
+      for (int c = 0; c < row1.length; c++) {
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 1))
+          .value = TextCellValue(row1[c]);
+      }
+
+      // Row 2: Missing Customer ID, has Account Number
+      final row2 = [
+        '', 'MF26A000002', 'Bembem Devi', 'W/O Sanatomba', 'Singjamei', 'Handloom',
+        'Singjamei PO', 'Singjamei PS', 'Imphal West', '795008', '9862990002', '987654321098',
+        '2026-08-24', 'Active', '30000', '0', '30000', '2026-08-24', '2027-01-24'
+      ];
+      for (int c = 0; c < row2.length; c++) {
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 2))
+          .value = TextCellValue(row2[c]);
+      }
+
+      final bytes = excel.save()!;
+      final preview = LoaneeExcelImportService.parseWorkbookBytes(
+        bytes: bytes,
+        existingLoanees: [],
+      );
+
+      expect(preview.validRowsCount, equals(2));
+
+      final shortYear = CustomerIdService.getShortYear();
+      final imported1 = preview.rowRecords[0].loaneeModel;
+      expect(imported1, isNotNull);
+      expect(imported1!.customerId, equals('26LA000001'));
+      expect(imported1.accountNumber, startsWith('MF${shortYear}A'));
+
+      final imported2 = preview.rowRecords[1].loaneeModel;
+      expect(imported2, isNotNull);
+      expect(imported2!.customerId, startsWith('${shortYear}LA'));
+      expect(imported2.accountNumber, equals('MF26A000002'));
     });
   });
 
-  group('Provider & UI Integration Tests for Customer ID Format', () {
-    test('10. LoaneeProvider and RoProvider generate new Customer ID formats', () {
+  group('Provider & UI Integration Tests for New ID Formats', () {
+    test('12. LoaneeProvider and RoProvider generate new Customer IDs and Account Numbers', () {
       final loaneeProvider = LoaneeProvider();
       final roProvider = RoProvider();
 
-      final currentYear = DateTime.now().year;
+      final shortYear = CustomerIdService.getShortYear();
 
       final loaneeId = loaneeProvider.generateNextCustomerId();
-      expect(loaneeId, startsWith('CUST${currentYear}L'));
-      expect(loaneeId.length, equals(15)); // CUST (4) + 2026 (4) + L (1) + 000001 (6) = 15
+      final loaneeAcc = loaneeProvider.generateNextAccountNumber();
+      expect(loaneeId, startsWith('${shortYear}LA'));
+      expect(loaneeId.length, equals(10)); // 26 (2) + LA (2) + 000001 (6) = 10
+      expect(loaneeAcc, startsWith('MF${shortYear}A'));
+      expect(loaneeAcc.length, equals(11)); // MF (2) + 26 (2) + A (1) + 000001 (6) = 11
 
       final roId = roProvider.generateNextCustomerId();
-      expect(roId, startsWith('CUST${currentYear}RO'));
-      expect(roId.length, equals(13)); // CUST (4) + 2026 (4) + RO (2) + 001 (3) = 13
+      final roAcc = roProvider.generateNextAccountNumber();
+      expect(roId, startsWith('${shortYear}R'));
+      expect(roId.length, equals(6)); // 26 (2) + R (1) + 001 (3) = 6
+      expect(roAcc, startsWith('AC${shortYear}RS'));
+      expect(roAcc.length, equals(10)); // AC (2) + 26 (2) + RS (2) + 0001 (4) = 10
     });
 
-    testWidgets('11. CreateLoaneePage initializes with new format CUST[YEAR]L000001', (tester) async {
-      final currentYear = DateTime.now().year;
+    testWidgets('13. CreateLoaneePage initializes with new format YYLA000001 and MFYYA000001', (tester) async {
+      final shortYear = CustomerIdService.getShortYear();
 
       await tester.pumpWidget(
         MultiProvider(
@@ -338,17 +428,23 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      // Check text field has generated Customer ID matching CUST{currentYear}L000001
+      // Check Customer ID field has generated ID matching {shortYear}LA000001
       final customerIdFinder = find.byWidgetPredicate((widget) {
         return widget is TextFormField &&
-            widget.controller?.text.startsWith('CUST${currentYear}L') == true;
+            widget.controller?.text.startsWith('${shortYear}LA') == true;
       });
-
       expect(customerIdFinder, findsOneWidget);
+
+      // Check Account Number field has generated Account No matching MF{shortYear}A000001
+      final accountNoFinder = find.byWidgetPredicate((widget) {
+        return widget is TextFormField &&
+            widget.controller?.text.startsWith('MF${shortYear}A') == true;
+      });
+      expect(accountNoFinder, findsOneWidget);
     });
 
-    testWidgets('12. CreateRoPage initializes with new format CUST[YEAR]RO001', (tester) async {
-      final currentYear = DateTime.now().year;
+    testWidgets('14. CreateRoPage initializes with new format YYR001 and ACYYRS0001', (tester) async {
+      final shortYear = CustomerIdService.getShortYear();
 
       await tester.pumpWidget(
         MultiProvider(
@@ -364,13 +460,19 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      // Check text field has generated Customer ID matching CUST{currentYear}RO001
+      // Check Customer ID field has generated ID matching {shortYear}R001
       final customerIdFinder = find.byWidgetPredicate((widget) {
         return widget is TextFormField &&
-            widget.controller?.text.startsWith('CUST${currentYear}RO') == true;
+            widget.controller?.text.startsWith('${shortYear}R') == true;
       });
-
       expect(customerIdFinder, findsOneWidget);
+
+      // Check Account Number field has generated Account No matching AC{shortYear}RS0001
+      final accountNoFinder = find.byWidgetPredicate((widget) {
+        return widget is TextFormField &&
+            widget.controller?.text.startsWith('AC${shortYear}RS') == true;
+      });
+      expect(accountNoFinder, findsOneWidget);
     });
   });
 }

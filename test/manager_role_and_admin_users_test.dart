@@ -8,6 +8,7 @@ import 'package:mangang_finance/providers/loanee_provider.dart';
 import 'package:mangang_finance/providers/ro_provider.dart';
 import 'package:mangang_finance/providers/collection_sheet_provider.dart';
 import 'package:mangang_finance/providers/settings_provider.dart';
+import 'package:mangang_finance/providers/notification_provider.dart';
 import 'package:mangang_finance/screens/admin_users_list_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -122,6 +123,7 @@ void main() {
             ChangeNotifierProvider(create: (_) => RoProvider()),
             ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
             ChangeNotifierProvider(create: (_) => SettingsProvider()),
+            ChangeNotifierProvider(create: (_) => NotificationProvider()),
           ],
           child: const MaterialApp(
             home: MainPage(),
@@ -152,6 +154,7 @@ void main() {
             ChangeNotifierProvider(create: (_) => RoProvider()),
             ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
             ChangeNotifierProvider(create: (_) => SettingsProvider()),
+            ChangeNotifierProvider(create: (_) => NotificationProvider()),
           ],
           child: const MaterialApp(
             home: MainPage(),

@@ -472,6 +472,68 @@ class SettingsProvider extends ChangeNotifier {
     );
   }
 
+  /// Calculate late days between a base date (or due date) and the collection/current date,
+  /// skipping every Sunday encountered in the date range.
+  ///
+  /// Business Rules:
+  /// 1. Sunday is NOT a collection / working day.
+  /// 2. If [hasPreviousPayment] is true, [baseDate] is the previous payment date (which was settled),
+  ///    so missed collection days start checking from the day after [baseDate].
+  /// 3. If [hasPreviousPayment] is false, [baseDate] is the loan start / due date.
+  /// 4. Every Sunday encountered between the start checking date and [asOfDate] is excluded.
+  /// 5. If due date was Saturday and collection date is Sunday, 0 late days.
+  /// 6. If due date was Sunday, Sunday itself is not counted as a late day.
+  static int calculateDailyLateDays({
+    required DateTime baseDate,
+    required DateTime asOfDate,
+    bool hasPreviousPayment = false,
+  }) {
+    final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
+    final cleanToday = DateTime(asOfDate.year, asOfDate.month, asOfDate.day);
+
+    if (!cleanToday.isAfter(cleanBaseDate)) {
+      return 0;
+    }
+
+    // Special rule: Due date Saturday, Collection date Sunday -> 0 late days
+    if (cleanToday.weekday == DateTime.sunday &&
+        cleanBaseDate.weekday == DateTime.saturday &&
+        cleanToday.difference(cleanBaseDate).inDays == 1) {
+      return 0;
+    }
+
+    // If there was a previous payment, that payment covered baseDate.
+    // The next installment was due on the next day.
+    // If no previous payment, installment was due on baseDate itself.
+    final firstCheckDate = hasPreviousPayment
+        ? cleanBaseDate.add(const Duration(days: 1))
+        : cleanBaseDate;
+
+    int lateDays = 0;
+    DateTime current = firstCheckDate;
+
+    while (current.isBefore(cleanToday)) {
+      if (current.weekday != DateTime.sunday) {
+        lateDays++;
+      }
+      current = current.add(const Duration(days: 1));
+    }
+
+    return lateDays.clamp(0, 365);
+  }
+
+  /// Calculate late days between a due date and collection date, excluding Sundays.
+  static int calculateLateDaysBetween({
+    required DateTime dueDate,
+    required DateTime collectionDate,
+  }) {
+    return calculateDailyLateDays(
+      baseDate: dueDate,
+      asOfDate: collectionDate,
+      hasPreviousPayment: false,
+    );
+  }
+
   /// Calculate late units (days for daily, weeks for weekly based on ₹650/17.5 wks scheme)
   int calculateLateUnits({
     required RoCollectionEntry entry,
@@ -497,14 +559,11 @@ class SettingsProvider extends ChangeNotifier {
         baseDate = entry.createdAt;
       }
 
-      final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
-      final daysDifference = today.difference(cleanBaseDate).inDays;
-
-      if (hasPreviousPayment) {
-        return (daysDifference - 1).clamp(0, 365);
-      } else {
-        return daysDifference.clamp(0, 365);
-      }
+      return calculateDailyLateDays(
+        baseDate: baseDate,
+        asOfDate: today,
+        hasPreviousPayment: hasPreviousPayment,
+      );
     } else {
       // Weekly Collection based on ₹650/week for 17.5 weeks tenure
       final breakdown = getWeeklyBreakdown(
@@ -790,8 +849,6 @@ class SettingsProvider extends ChangeNotifier {
     DateTime? maturityDate,
     DateTime? asOfDate,
   }) {
-    final now = asOfDate ?? DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
     final type = entry.collectionType.toLowerCase().trim();
     final isDaily = type == 'daily';
     final hasPayments = payments.isNotEmpty;
@@ -812,20 +869,7 @@ class SettingsProvider extends ChangeNotifier {
     final postMaturity = payableBreakdown.postMaturityBreakdown;
 
     if (isDaily) {
-      DateTime baseDate;
-      int overdueDays = payableBreakdown.lateUnits;
-
-      if (hasPayments && lastPaymentDate != null) {
-        baseDate = lastPaymentDate;
-        final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
-        final daysDiff = today.difference(cleanBaseDate).inDays;
-        overdueDays = (daysDiff - 1).clamp(0, 365);
-      } else {
-        baseDate = entry.createdAt;
-        final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
-        final daysDiff = today.difference(cleanBaseDate).inDays;
-        overdueDays = daysDiff.clamp(0, 365);
-      }
+      final int overdueDays = payableBreakdown.lateUnits;
 
       final lateFine = overdueDays * _dailyLateFine;
       final String explanation = hasPayments
@@ -912,8 +956,11 @@ class SettingsProvider extends ChangeNotifier {
       final now = asOfDate ?? DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
       final startDate = fallbackStartDate ?? now;
-      final cleanStart = DateTime(startDate.year, startDate.month, startDate.day);
-      final daysDiff = today.difference(cleanStart).inDays.clamp(0, 365);
+      final daysDiff = calculateDailyLateDays(
+        baseDate: startDate,
+        asOfDate: today,
+        hasPreviousPayment: false,
+      );
       final fine = daysDiff * _dailyLateFine;
       final baseAmt = baseDailyAmount;
       final overdueMissed = daysDiff * baseAmt;

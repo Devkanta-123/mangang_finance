@@ -422,8 +422,13 @@ class CollectionSheetProvider extends ChangeNotifier {
     );
   }
 
-  String generateNextAccountNumber() {
-    return 'ACC-${88239100 + _collectionEntries.length + 1}';
+  String generateNextAccountNumber({DateTime? now, Set<String>? reservedAccNos}) {
+    final existingAccs = _collectionEntries.map((e) => e.accountNumber).toSet();
+    return CustomerIdService.generateLoaneeAccountNumber(
+      existingAccNos: existingAccs,
+      now: now,
+      reservedAccNos: reservedAccNos,
+    );
   }
 
   static bool _matchesWeekday(String colType, int weekday) {

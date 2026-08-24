@@ -104,6 +104,58 @@ class LoaneeProvider extends ChangeNotifier {
     }
   }
 
+  /// Batch update witness details for existing Loanees with connection test
+  Future<Map<String, dynamic>> updateWitnessesBatchWithConnectionCheck(
+      List<LoaneeAccount> updatedLoanees) async {
+    final isConnected = await SupabaseService.instance.checkConnection();
+    if (!isConnected) {
+      return {
+        'success': false,
+        'connectionFailed': true,
+        'count': 0,
+        'message': 'Failed to connect to Supabase database! Table update aborted.',
+      };
+    }
+
+    final batchSaved =
+        await SupabaseService.instance.saveLoaneeAccountsBatch(updatedLoanees);
+    if (batchSaved) {
+      for (final updated in updatedLoanees) {
+        final cleanCust = updated.customerId.trim().toLowerCase();
+        final cleanAcc = updated.accountNumber.trim().toLowerCase();
+        int foundIndex = -1;
+        for (int i = 0; i < _loanees.length; i++) {
+          if (_loanees[i].customerId.trim().toLowerCase() == cleanCust ||
+              _loanees[i].accountNumber.trim().toLowerCase() == cleanAcc) {
+            foundIndex = i;
+            break;
+          }
+        }
+        if (foundIndex != -1) {
+          _loanees[foundIndex] = updated;
+        } else {
+          _loanees.add(updated);
+        }
+      }
+      notifyListeners();
+      return {
+        'success': true,
+        'connectionFailed': false,
+        'count': updatedLoanees.length,
+        'message':
+            'Successfully updated witness details for ${updatedLoanees.length} loanees!',
+      };
+    } else {
+      return {
+        'success': false,
+        'connectionFailed': false,
+        'count': 0,
+        'message':
+            'Connected to Supabase, but failed to batch update witness records.',
+      };
+    }
+  }
+
   /// Sync/Fetch live accounts directly from Supabase 'loanee_accounts' table
   Future<void> fetchFromSupabase() async {
     _isSyncing = true;
@@ -185,9 +237,12 @@ class LoaneeProvider extends ChangeNotifier {
     );
   }
 
-  String generateNextAccountNumber() {
-    int nextAcc = 88239101 + _loanees.length;
-    return 'ACC-$nextAcc';
+  String generateNextAccountNumber({DateTime? now, Set<String>? reservedAccNos}) {
+    return CustomerIdService.generateLoaneeAccountNumber(
+      existingLoanees: _loanees,
+      now: now,
+      reservedAccNos: reservedAccNos,
+    );
   }
 
   LoaneeAccount? getLoaneeForUser({String? customerId, String? mobileNo, String? name}) {

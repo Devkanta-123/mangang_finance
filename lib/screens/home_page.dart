@@ -474,27 +474,7 @@ class HomePage extends StatelessWidget {
                           ],
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: (roAccount != null && roAccount.route.isNotEmpty)
-                              ? Colors.green.shade100
-                              : Colors.amber.shade100,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          (roAccount != null && roAccount.route.isNotEmpty)
-                              ? 'ACTIVE ROUTE'
-                              : 'ALL ROUTES',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.bold,
-                            color: (roAccount != null && roAccount.route.isNotEmpty)
-                                ? Colors.green.shade900
-                                : Colors.amber.shade900,
-                          ),
-                        ),
-                      ),
+                     
                     ],
                   ),
                 ),
@@ -3479,10 +3459,7 @@ class _AdminAllCollectionsLedgerSectionState
                         color: Colors.white,
                       ),
                     ),
-                    Text(
-                      'Verified Supabase Collection Payment',
-                      style: TextStyle(fontSize: 11, color: Colors.white70),
-                    ),
+                  
                   ],
                 ),
               ),
@@ -3722,23 +3699,7 @@ class _AdminAllCollectionsLedgerSectionState
                   ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade200),
-                ),
-                child: Text(
-                  'ALL ROUTES',
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green.shade900,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
+             
             ],
           ),
           const SizedBox(height: 4),

@@ -10,6 +10,7 @@ import 'package:mangang_finance/providers/ro_provider.dart';
 import 'package:mangang_finance/providers/loanee_provider.dart';
 import 'package:mangang_finance/providers/collection_sheet_provider.dart';
 import 'package:mangang_finance/providers/settings_provider.dart';
+import 'package:mangang_finance/providers/notification_provider.dart';
 import 'package:mangang_finance/screens/ro_list_page.dart';
 
 void main() {
@@ -24,6 +25,10 @@ void main() {
       providers: [
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
         ChangeNotifierProvider<RoProvider>.value(value: roProvider),
+        ChangeNotifierProvider(create: (_) => LoaneeProvider()),
+        ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
+        ChangeNotifierProvider(create: (_) => SettingsProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()),
       ],
       child: const MaterialApp(
         home: RoListPage(),
@@ -167,6 +172,7 @@ void main() {
           ChangeNotifierProvider(create: (_) => LoaneeProvider()),
           ChangeNotifierProvider(create: (_) => CollectionSheetProvider()),
           ChangeNotifierProvider(create: (_) => SettingsProvider()),
+          ChangeNotifierProvider(create: (_) => NotificationProvider()),
         ],
         child: const MaterialApp(
           home: MainPage(),

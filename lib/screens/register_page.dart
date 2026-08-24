@@ -4,6 +4,8 @@ import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/custom_text_field.dart';
 import '../widgets/app_logo.dart';
+import '../services/supabase_service.dart';
+import 'login_page.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -60,31 +62,76 @@ class _RegisterPageState extends State<RegisterPage> {
             : 'Loanee Account';
       }
 
+      final cleanMobile = _mobileController.text.trim();
+      final enteredCustId = _customerIdController.text.trim();
+
+      // Check duplicate (mobile_no, user_type) & customerId
+      if (!mounted) return;
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final dupResult = await authProvider.checkDuplicateUserDetailed(
+        mobileNo: cleanMobile,
+        userType: _selectedUserType,
+        customerId: enteredCustId.isNotEmpty ? enteredCustId : null,
+      );
+
+      if (dupResult['isDuplicate'] == true) {
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+        });
+
+        _showDuplicateUserDialog(
+          mobile: cleanMobile,
+          role: _selectedUserType,
+          customMessage: dupResult['message'],
+        );
+        return;
+      }
+
+      String? assignedCustId;
+      if (_selectedUserType == UserType.admin || _selectedUserType == UserType.manager) {
+        assignedCustId = await SupabaseService.instance.fetchNextRoleCustomerId(_selectedUserType);
+      } else {
+        assignedCustId = enteredCustId.isNotEmpty ? enteredCustId : null;
+      }
+
       // Register user in AuthProvider
       User user = User(
         name: userName,
-        mobileNo: _mobileController.text.trim(),
+        mobileNo: cleanMobile,
         userType: _selectedUserType,
-        customerId: (_selectedUserType != UserType.admin && _selectedUserType != UserType.manager)
-            ? _customerIdController.text.trim()
-            : (_selectedUserType == UserType.manager ? 'MGR-01' : 'ADM-01'),
+        customerId: assignedCustId,
         roName: _selectedUserType == UserType.ro ? _roNameController.text.trim() : null,
         accountName: _selectedUserType == UserType.loanee ? _accountNameController.text.trim() : null,
       );
 
+      final regResult = await authProvider.registerUser(user);
       if (!mounted) return;
-      await Provider.of<AuthProvider>(context, listen: false).registerUser(user);
       setState(() {
         _isLoading = false;
       });
 
+      if (regResult['success'] != true) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(regResult['message'] ?? 'Registration failed'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Row(
             children: [
-              Icon(Icons.check_circle, color: Colors.white),
-              SizedBox(width: 10),
-              Expanded(child: Text('Account registered! Set your 6-digit Security PIN.')),
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Account registered as ${_userTypeLabels[_selectedUserType]}! Create your 6-digit Security PIN.'),
+              ),
             ],
           ),
           backgroundColor: Colors.green,
@@ -92,9 +139,90 @@ class _RegisterPageState extends State<RegisterPage> {
         ),
       );
 
-      // Directly navigate to Login page for PIN setup
-      Navigator.pushReplacementNamed(context, '/login');
+      // Navigate to Set PIN page with registered mobile number and user identity
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => LoginPage(
+            initialSetPinMode: true,
+            registeredMobile: cleanMobile,
+            registeredRole: _selectedUserType,
+            registeredUser: user,
+          ),
+        ),
+      );
     }
+  }
+
+  void _showDuplicateUserDialog({
+    required String mobile,
+    required UserType role,
+    String? customMessage,
+  }) {
+    final roleName = _userTypeLabels[role] ?? role.name.toUpperCase();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.person_off_rounded, color: Colors.red.shade900, size: 24),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Duplicate Registration',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 17,
+                  color: Colors.red,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              customMessage ?? 'An account with mobile number +91 $mobile is already registered as $roleName.',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'A single mobile number or Customer ID cannot be duplicated for the same account. You can sign in using your existing PIN or reset your PIN if forgotten.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8B1A1A),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.pushReplacementNamed(context, '/login');
+            },
+            child: const Text('Go to Sign In'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
