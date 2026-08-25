@@ -88,7 +88,7 @@ class SupabaseService {
     return false;
   }
 
-  /// Save loanee account to Supabase 'loanee_accounts' table & sync with 'user_auth'
+  /// Save loanee account strictly to Supabase 'loanee_accounts' table (user_auth is created only upon self-registration)
   Future<bool> saveLoaneeAccount(LoaneeAccount loanee) async {
     try {
       final supaClient = client;
@@ -123,26 +123,6 @@ class SupabaseService {
         }
             
         debugPrint('✅ Successfully saved loanee ${loanee.customerid} to Supabase (loanee_accounts).');
-
-        // Also ensure UserAuthRecord exists in user_auth so Loanee can login with PIN / mobile
-        try {
-          final authRecord = UserAuthRecord(
-            id: loanee.customerId.isNotEmpty
-                ? loanee.customerId
-                : 'loanee_${loanee.mobileNo}_${loanee.accountNumber}',
-            mobileNo: loanee.mobileNo,
-            customerId: loanee.customerId,
-            userType: UserType.loanee,
-            pin: loanee.pinCode.isNotEmpty ? loanee.pinCode : '1234',
-            name: loanee.loaneeName,
-            accountName: loanee.accountNumber,
-            status: loanee.status,
-          );
-          await saveUserAuthRecord(authRecord);
-        } catch (authSaveErr) {
-          debugPrint('⚠️ Note syncing Loanee to user_auth: $authSaveErr');
-        }
-
         return true;
       } else {
         debugPrint('⚠️ Supabase client not initialized');
@@ -154,7 +134,7 @@ class SupabaseService {
     }
   }
 
-  /// Batch save loanee accounts to Supabase 'loanee_accounts' table & sync with 'user_auth'
+  /// Batch save loanee accounts strictly to Supabase 'loanee_accounts' table
   Future<bool> saveLoaneeAccountsBatch(List<LoaneeAccount> loanees) async {
     try {
       final supaClient = client;
@@ -178,33 +158,7 @@ class SupabaseService {
               .select();
         }
 
-        // Sync to user_auth table in batch
-        try {
-          final authPayloads = loanees.map((l) {
-            final authRecord = UserAuthRecord(
-              id: l.customerId.isNotEmpty
-                  ? l.customerId
-                  : 'loanee_${l.mobileNo}_${l.accountNumber}',
-              mobileNo: l.mobileNo,
-              customerId: l.customerId,
-              userType: UserType.loanee,
-              pin: l.pinCode.isNotEmpty ? l.pinCode : '1234',
-              name: l.loaneeName,
-              accountName: l.accountNumber,
-              status: l.status,
-            );
-            return authRecord.toSupabaseJson();
-          }).toList();
-
-          await supaClient
-              .from('user_auth')
-              .upsert(authPayloads, onConflict: 'id')
-              .select();
-        } catch (authErr) {
-          debugPrint('⚠️ Note batch syncing loanees to user_auth: $authErr');
-        }
-
-        debugPrint('✅ Successfully batch saved ${loanees.length} loanees to Supabase.');
+        debugPrint('✅ Successfully batch saved ${loanees.length} loanees to Supabase (loanee_accounts).');
         return true;
       }
       return false;
@@ -371,7 +325,7 @@ class SupabaseService {
   // RO ACCOUNTS METHODS
   // ==========================================
 
-  /// Save RO account to Supabase 'ro_accounts' table & sync with 'user_auth'
+  /// Save RO account strictly to Supabase 'ro_accounts' table (user_auth is created only upon self-registration)
   Future<bool> saveRoAccount(RoAccount ro) async {
     try {
       final supaClient = client;
@@ -397,29 +351,10 @@ class SupabaseService {
                   onConflict: 'customerid',
                 )
                 .select();
-            debugPrint('✅ Saved RO with fallback payload.');
+            debugPrint('✅ Saved RO with fallback payload (ro_accounts).');
           } catch (colErr2) {
             debugPrint('⚠️ Fallback upsert note: $colErr2');
           }
-        }
-
-        // Also ensure UserAuthRecord exists in user_auth so RO can login with PIN / mobile
-        try {
-          final authRecord = UserAuthRecord(
-            id: ro.customerId.isNotEmpty
-                ? ro.customerId
-                : 'ro_${ro.mobileNo}',
-            mobileNo: ro.mobileNo,
-            customerId: ro.customerId,
-            userType: UserType.ro,
-            pin: ro.pinCode.isNotEmpty ? ro.pinCode : '1234',
-            name: ro.roName,
-            roName: ro.roName,
-            status: ro.status,
-          );
-          await saveUserAuthRecord(authRecord);
-        } catch (authSaveErr) {
-          debugPrint('⚠️ Note syncing RO to user_auth: $authSaveErr');
         }
             
         return true;
@@ -723,12 +658,40 @@ class SupabaseService {
     try {
       final supaClient = client;
       if (supaClient != null) {
-        await supaClient
-            .from('ro_collection_entries')
-            .upsert(entry.toJson(), onConflict: 'id')
-            .select();
-        debugPrint('✅ Successfully saved collection entry for ${entry.loaneeName} to Supabase.');
-        return true;
+        try {
+          await supaClient
+              .from('ro_collection_entries')
+              .upsert(entry.toJson(), onConflict: 'id')
+              .select();
+          debugPrint('✅ Successfully saved collection entry for ${entry.loaneeName} to Supabase.');
+          return true;
+        } catch (e) {
+          final errStr = e.toString();
+          // Fallback to base columns if schema doesn't have extended actual_principal/interest columns
+          if (errStr.contains('PGRST204') || errStr.contains('column') || errStr.contains('schema cache')) {
+            debugPrint('ℹ️ Retrying collection entry save with base schema fields: $e');
+            try {
+              await supaClient
+                  .from('ro_collection_entries')
+                  .upsert(entry.toBaseJson(), onConflict: 'id')
+                  .select();
+              debugPrint('✅ Saved collection entry with base fields for ${entry.loaneeName}.');
+              return true;
+            } catch (baseErr) {
+              final baseErrStr = baseErr.toString();
+              if (baseErrStr.contains('PGRST204') || baseErrStr.contains('column') || baseErrStr.contains('schema cache')) {
+                await supaClient
+                    .from('ro_collection_entries')
+                    .upsert(entry.toCoreJson(), onConflict: 'id')
+                    .select();
+                debugPrint('✅ Saved collection entry with core fields for ${entry.loaneeName}.');
+                return true;
+              }
+              rethrow;
+            }
+          }
+          rethrow;
+        }
       }
     } catch (e) {
       debugPrint('❌ Error saving collection entry to Supabase: $e');
@@ -741,13 +704,37 @@ class SupabaseService {
     try {
       final supaClient = client;
       if (supaClient != null && entries.isNotEmpty) {
-        final payloads = entries.map((e) => e.toJson()).toList();
-        await supaClient
-            .from('ro_collection_entries')
-            .upsert(payloads, onConflict: 'id')
-            .select();
-        debugPrint('✅ Successfully batch saved ${entries.length} collection entries to Supabase.');
-        return true;
+        try {
+          final payloads = entries.map((e) => e.toJson()).toList();
+          await supaClient
+              .from('ro_collection_entries')
+              .upsert(payloads, onConflict: 'id')
+              .select();
+          debugPrint('✅ Successfully batch saved ${entries.length} collection entries to Supabase.');
+          return true;
+        } catch (e) {
+          final errStr = e.toString();
+          if (errStr.contains('PGRST204') || errStr.contains('column') || errStr.contains('schema cache')) {
+            debugPrint('ℹ️ Retrying batch collection save with base schema fields: $e');
+            try {
+              final basePayloads = entries.map((e) => e.toBaseJson()).toList();
+              await supaClient
+                  .from('ro_collection_entries')
+                  .upsert(basePayloads, onConflict: 'id')
+                  .select();
+              debugPrint('✅ Successfully batch saved ${entries.length} collection entries with base fields.');
+              return true;
+            } catch (baseErr) {
+              final corePayloads = entries.map((e) => e.toCoreJson()).toList();
+              await supaClient
+                  .from('ro_collection_entries')
+                  .upsert(corePayloads, onConflict: 'id')
+                  .select();
+              return true;
+            }
+          }
+          rethrow;
+        }
       }
     } catch (e) {
       debugPrint('⚠️ Error batch saving collection entries: $e');
@@ -857,6 +844,170 @@ class SupabaseService {
       debugPrint('⚠️ Error checking duplicate user auth: $e');
     }
     return {'isDuplicate': false};
+  }
+
+  /// Verify if an RO exists in 'ro_accounts' matching (Customer ID, Name, Mobile No)
+  Future<Map<String, dynamic>> verifyRoAccountRegistration({
+    required String customerId,
+    required String roName,
+    required String mobileNo,
+  }) async {
+    final cleanCustId = customerId.trim();
+    final cleanName = roName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+    final cleanMobileDigits = mobileNo.replaceAll(RegExp(r'\D'), '');
+    final normMobile = cleanMobileDigits.length >= 10
+        ? cleanMobileDigits.substring(cleanMobileDigits.length - 10)
+        : cleanMobileDigits;
+
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        List<dynamic> rows = [];
+        try {
+          final res = await supaClient
+              .from('ro_accounts')
+              .select('*')
+              .or('customerid.ilike.$cleanCustId,customerid.eq.$cleanCustId');
+          rows = res as List;
+        } catch (e) {
+          debugPrint('⚠️ ro_accounts query by customerid note: $e');
+        }
+
+        if (rows.isEmpty && normMobile.isNotEmpty) {
+          try {
+            final resMob = await supaClient
+                .from('ro_accounts')
+                .select('*')
+                .or('mobileno.ilike.%$normMobile%,mobileno.eq.$normMobile');
+            rows = resMob as List;
+          } catch (e) {
+            debugPrint('⚠️ ro_accounts query by mobileno note: $e');
+          }
+        }
+
+        if (rows.isEmpty) {
+          try {
+            final resAll = await supaClient.from('ro_accounts').select('*');
+            rows = resAll as List;
+          } catch (_) {}
+        }
+
+        for (final row in rows) {
+          final map = Map<String, dynamic>.from(row);
+          final rowCustId = (map['customerid'] ?? map['customer_id'] ?? map['id'] ?? '').toString().trim();
+          final rowName = (map['roname'] ?? map['ro_name'] ?? map['name'] ?? map['officer_name'] ?? '').toString().trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+          final rawRowMobile = (map['mobileno'] ?? map['mobile_no'] ?? map['mobile'] ?? map['phone'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+          final rowMobile = rawRowMobile.length >= 10 ? rawRowMobile.substring(rawRowMobile.length - 10) : rawRowMobile;
+
+          final bool custMatches = rowCustId.toLowerCase() == cleanCustId.toLowerCase();
+          final bool nameMatches = rowName == cleanName;
+          final bool mobileMatches = rowMobile == normMobile;
+
+          if (custMatches && nameMatches && mobileMatches) {
+            final status = (map['status'] ?? map['is_active'] ?? 'Active').toString().trim();
+            final isInactive = status.toLowerCase() == 'inactive' || status.toLowerCase() == 'false';
+            return {
+              'matched': true,
+              'isInactive': isInactive,
+              'account': RoAccount.fromJson(map),
+              'message': isInactive
+                  ? 'Your RO account is currently marked as Inactive. Login access is disabled. Please contact the administrator.'
+                  : 'RO account verified successfully.',
+            };
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error verifying RO account in ro_accounts: $e');
+    }
+
+    return {
+      'matched': false,
+      'isInactive': false,
+      'message': 'No matching Recovery Officer account found in ro_accounts for Customer ID "$cleanCustId", Name "$roName", and Mobile Number "$mobileNo". Registration cannot proceed until your account is registered by Admin.',
+    };
+  }
+
+  /// Verify if a Loanee exists in 'loanee_accounts' matching (Customer ID, Name, Mobile No)
+  Future<Map<String, dynamic>> verifyLoaneeAccountRegistration({
+    required String customerId,
+    required String loaneeName,
+    required String mobileNo,
+  }) async {
+    final cleanCustId = customerId.trim();
+    final cleanName = loaneeName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+    final cleanMobileDigits = mobileNo.replaceAll(RegExp(r'\D'), '');
+    final normMobile = cleanMobileDigits.length >= 10
+        ? cleanMobileDigits.substring(cleanMobileDigits.length - 10)
+        : cleanMobileDigits;
+
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        List<dynamic> rows = [];
+        try {
+          final res = await supaClient
+              .from('loanee_accounts')
+              .select('*')
+              .or('customerid.ilike.$cleanCustId,customerid.eq.$cleanCustId');
+          rows = res as List;
+        } catch (e) {
+          debugPrint('⚠️ loanee_accounts query by customerid note: $e');
+        }
+
+        if (rows.isEmpty && normMobile.isNotEmpty) {
+          try {
+            final resMob = await supaClient
+                .from('loanee_accounts')
+                .select('*')
+                .or('mobileno.ilike.%$normMobile%,mobileno.eq.$normMobile');
+            rows = resMob as List;
+          } catch (e) {
+            debugPrint('⚠️ loanee_accounts query by mobileno note: $e');
+          }
+        }
+
+        if (rows.isEmpty) {
+          try {
+            final resAll = await supaClient.from('loanee_accounts').select('*');
+            rows = resAll as List;
+          } catch (_) {}
+        }
+
+        for (final row in rows) {
+          final map = Map<String, dynamic>.from(row);
+          final rowCustId = (map['customerid'] ?? map['customer_id'] ?? map['id'] ?? '').toString().trim();
+          final rowName = (map['loaneename'] ?? map['loanee_name'] ?? map['name'] ?? '').toString().trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+          final rawRowMobile = (map['mobileno'] ?? map['mobile_no'] ?? map['mobile'] ?? map['phone'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+          final rowMobile = rawRowMobile.length >= 10 ? rawRowMobile.substring(rawRowMobile.length - 10) : rawRowMobile;
+
+          final bool custMatches = rowCustId.toLowerCase() == cleanCustId.toLowerCase();
+          final bool nameMatches = rowName == cleanName;
+          final bool mobileMatches = rowMobile == normMobile;
+
+          if (custMatches && nameMatches && mobileMatches) {
+            final status = (map['status'] ?? map['is_active'] ?? 'Active').toString().trim();
+            final isInactive = status.toLowerCase() == 'inactive' || status.toLowerCase() == 'false';
+            return {
+              'matched': true,
+              'isInactive': isInactive,
+              'account': LoaneeAccount.fromJson(map),
+              'message': isInactive
+                  ? 'Your Loanee account is currently marked as Inactive. Login access is disabled. Please contact the administrator.'
+                  : 'Loanee account verified successfully.',
+            };
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error verifying Loanee account in loanee_accounts: $e');
+    }
+
+    return {
+      'matched': false,
+      'isInactive': false,
+      'message': 'No matching Loanee account found in loanee_accounts for Customer ID "$cleanCustId", Name "$loaneeName", and Mobile Number "$mobileNo". Registration cannot proceed until your loan account is created by Admin.',
+    };
   }
 
   /// Check if a user authentication record already exists for a specific (mobile_no, user_type)
@@ -1633,12 +1784,21 @@ class SupabaseService {
   // COLLECTION PAYMENTS SEPARATE TABLE METHODS
   // ==========================================
 
+  /// Helper to ensure payment payloads strictly conform to ro_collection_payments table schema
+  Map<String, dynamic> _cleanPaymentPayload(Map<String, dynamic> raw) {
+    final cleaned = Map<String, dynamic>.from(raw);
+    cleaned.remove('interest');
+    cleaned.remove('interest_amount');
+    cleaned.remove('interestAmount');
+    return cleaned;
+  }
+
   /// Save individual payment record into Supabase 'ro_collection_payments' table
   Future<bool> saveCollectionPayment(CollectionPaymentModel payment) async {
     try {
       final supaClient = client;
       if (supaClient != null) {
-        final payload = payment.toJson();
+        final payload = _cleanPaymentPayload(payment.toJson());
         try {
           await supaClient
               .from('ro_collection_payments')
@@ -1666,7 +1826,7 @@ class SupabaseService {
     try {
       final supaClient = client;
       if (supaClient != null && payments.isNotEmpty) {
-        final payloads = payments.map((p) => p.toJson()).toList();
+        final payloads = payments.map((p) => _cleanPaymentPayload(p.toJson())).toList();
         await supaClient
             .from('ro_collection_payments')
             .upsert(payloads, onConflict: 'id')
@@ -1736,6 +1896,7 @@ class SupabaseService {
     String? collectionId,
     DateTime? startDate,
     DateTime? endDate,
+    bool ascending = false,
   }) async {
     final supaClient = client;
     final int from = (page - 1) * pageSize;
@@ -1758,7 +1919,7 @@ class SupabaseService {
           query = query.lte('created_at', endOfDay.toIso8601String());
         }
 
-        final response = await query.order('created_at', ascending: false);
+        final response = await query.order('created_at', ascending: ascending);
         final list = (response as List)
             .map((item) => CollectionPaymentModel.fromJson(Map<String, dynamic>.from(item)))
             .toList();

@@ -104,6 +104,17 @@ class _HistoricalPaymentImportDialogState
                   color: Colors.green.shade800,
                 ),
               ),
+              if (result.totalInterestImported > 0) ...[
+                const SizedBox(height: 4),
+                Text(
+                  "Total Interest Added: ₹${result.totalInterestImported.toStringAsFixed(2)}",
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.deepOrange.shade800,
+                  ),
+                ),
+              ],
               if (result.collectionEntriesCreatedCount > 0) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -241,6 +252,15 @@ class _HistoricalPaymentImportDialogState
                     color: Colors.green.shade900,
                     bgColor: Colors.green.shade50,
                   ),
+                  if (preview.totalInterestToImport > 0) ...[
+                    const SizedBox(width: 8),
+                    _buildStatChip(
+                      title: "Interest Added",
+                      value: "₹${preview.totalInterestToImport.toStringAsFixed(2)}",
+                      color: Colors.deepOrange.shade900,
+                      bgColor: Colors.deepOrange.shade50,
+                    ),
+                  ],
                   if (preview.duplicatePaymentsCount > 0) ...[
                     const SizedBox(width: 8),
                     _buildStatChip(
@@ -532,6 +552,7 @@ class _HistoricalPaymentImportDialogState
                   }
 
                   final dupLabel = isDup ? " (Dup)" : "";
+                  final interestLabel = p.interest > 0 ? " (+₹${p.interest.toStringAsFixed(0)} int)" : "";
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
@@ -540,7 +561,7 @@ class _HistoricalPaymentImportDialogState
                       border: Border.all(color: border),
                     ),
                     child: Text(
-                      "${p.formattedDate}: ₹${p.amount.toStringAsFixed(0)}$dupLabel",
+                      "${p.formattedDate}: ₹${p.amount.toStringAsFixed(0)}$interestLabel$dupLabel",
                       style: TextStyle(
                         fontSize: 9.5,
                         fontWeight: FontWeight.bold,

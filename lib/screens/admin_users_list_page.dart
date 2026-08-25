@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/ro_provider.dart';
 import '../providers/loanee_provider.dart';
+import '../services/customer_id_service.dart';
 
 class AdminUsersListPage extends StatefulWidget {
   const AdminUsersListPage({super.key});
@@ -144,30 +146,40 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Top Row: Title + Role Badge + Sync Button
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 22),
-                        SizedBox(width: 8),
-                        Text(
-                          'Admin User',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                    const Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 22),
+                          SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Admin User',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                           icon: authProvider.isLoadingAdminUsers
                               ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
+                                  width: 16,
+                                  height: 16,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
                                     color: Colors.white,
@@ -179,15 +191,16 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                             authProvider.fetchAdminUsers();
                           },
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF8B1A1A),
-                            borderRadius: BorderRadius.circular(12),
+                            color: Colors.white.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.white24),
                           ),
                           child: Text(
-                            isAdmin ? 'ADMIN CONTROL' : 'MANAGER VIEW',
+                            isAdmin ? 'ADMIN CONTROL' : 'MANAGER ACCESS',
                             style: const TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
@@ -202,10 +215,29 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  isAdmin
-                      ? 'Live database accounts from user_auth table (user_type = admin)'
-                      : 'Monitor executive administrators from user_auth (Read-Only)',
+                  'Live administrator accounts in user_auth • Managers & Admins can add and manage executive credentials',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+                ),
+                const SizedBox(height: 12),
+                
+                // Add Admin User Action Button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF8B1A1A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                    onPressed: () => _showAddAdminUserModal(context, authProvider),
+                    icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
+                    label: const Text(
+                      'Add New Admin User',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.3),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 14),
 
@@ -397,16 +429,22 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                                         children: [
                                           Icon(Icons.badge_outlined, size: 12, color: Colors.grey.shade600),
                                           const SizedBox(width: 4),
-                                          Text(
-                                            item.customerId ?? item.id,
-                                            style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.w600),
+                                          Flexible(
+                                            child: Text(
+                                              item.customerId ?? item.id,
+                                              style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.w600),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                           ),
-                                          const SizedBox(width: 10),
+                                          const SizedBox(width: 8),
                                           Icon(Icons.phone_iphone_rounded, size: 12, color: Colors.grey.shade600),
                                           const SizedBox(width: 4),
-                                          Text(
-                                            item.mobileNo.isNotEmpty ? item.mobileNo : 'N/A',
-                                            style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                                          Flexible(
+                                            child: Text(
+                                              item.mobileNo.isNotEmpty ? item.mobileNo : 'N/A',
+                                              style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                           ),
                                         ],
                                       ),
@@ -485,33 +523,46 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showAddAdminUserModal(context, authProvider),
+        backgroundColor: const Color(0xFF8B1A1A),
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.person_add_alt_1_rounded),
+        label: const Text(
+          'Add Admin',
+          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5),
+        ),
+      ),
     );
   }
 
   Widget _buildTopStatCard(String label, String value, IconData icon, Color color) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.08),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: Colors.white12),
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 6),
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 4),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     value,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                    overflow: TextOverflow.ellipsis,
                   ),
                   Text(
                     label,
-                    style: TextStyle(fontSize: 9, color: Colors.grey.shade400),
+                    style: TextStyle(fontSize: 8.5, color: Colors.grey.shade400),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -681,13 +732,37 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                     const SizedBox(height: 16),
                   ],
 
+                  // Add Admin Account Button inside modal
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showAddAdminUserModal(context, authProvider);
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF8B1A1A),
+                        side: const BorderSide(color: Color(0xFF8B1A1A), width: 1.5),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                      label: const Text(
+                        'Add New Admin Account',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
                   // Close Button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () => Navigator.pop(context),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF8B1A1A),
+                        backgroundColor: Colors.grey.shade800,
+                        foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -712,6 +787,390 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
           Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
           Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
         ],
+      ),
+    );
+  }
+
+  void _showAddAdminUserModal(BuildContext context, AuthProvider authProvider) {
+    final formKey = GlobalKey<FormState>();
+    final nameController = TextEditingController();
+    final mobileController = TextEditingController();
+    final pinController = TextEditingController(text: '123456');
+    bool isSaving = false;
+    bool obscurePin = false;
+
+    final existingAdminIds = authProvider.adminUsers
+        .map((u) => u.customerId ?? '')
+        .where((id) => id.isNotEmpty);
+    final nextAdminId = CustomerIdService.generateAdminCustomerId(existingIds: existingAdminIds);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalContext, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(modalContext).viewInsets.bottom,
+              ),
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(modalContext).size.height * 0.85,
+                ),
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(24),
+                    topRight: Radius.circular(24),
+                  ),
+                ),
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Handle
+                        Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Title Row
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF8B1A1A).withOpacity(0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.admin_panel_settings_rounded,
+                                color: Color(0xFF8B1A1A),
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Add Admin Account',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Create administrator in user_auth table',
+                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.amber.shade300),
+                              ),
+                              child: Text(
+                                nextAdminId,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber.shade900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 12),
+
+                        // Full Name
+                        _buildFieldLabel('Full Name'),
+                        TextFormField(
+                          controller: nameController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: _inputDecoration(
+                            hintText: 'Enter administrator full name',
+                            icon: Icons.person_outline,
+                          ),
+                          validator: (val) {
+                            if (val == null || val.trim().isEmpty) {
+                              return 'Please enter administrator full name';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Mobile Number
+                        _buildFieldLabel('Mobile Number'),
+                        TextFormField(
+                          controller: mobileController,
+                          keyboardType: TextInputType.phone,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(10),
+                          ],
+                          decoration: _inputDecoration(
+                            hintText: 'Enter 10-digit mobile number',
+                            icon: Icons.phone_android_outlined,
+                            prefixText: '+91 ',
+                          ),
+                          validator: (val) {
+                            if (val == null || val.trim().isEmpty) {
+                              return 'Please enter mobile number';
+                            }
+                            final digits = val.replaceAll(RegExp(r'\D'), '');
+                            if (digits.length != 10) {
+                              return 'Please enter valid 10-digit number';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Security PIN
+                        _buildFieldLabel('Security PIN (6 Digits)'),
+                        TextFormField(
+                          controller: pinController,
+                          keyboardType: TextInputType.number,
+                          obscureText: obscurePin,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(6),
+                          ],
+                          decoration: _inputDecoration(
+                            hintText: 'Enter 6-digit Security PIN',
+                            icon: Icons.lock_outline_rounded,
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                obscurePin ? Icons.visibility_off : Icons.visibility,
+                                size: 20,
+                                color: Colors.grey.shade600,
+                              ),
+                              onPressed: () {
+                                setModalState(() {
+                                  obscurePin = !obscurePin;
+                                });
+                              },
+                            ),
+                          ),
+                          validator: (val) {
+                            if (val == null || val.trim().isEmpty) {
+                              return 'Please enter 6-digit Security PIN';
+                            }
+                            if (val.trim().length != 6) {
+                              return 'PIN must be exactly 6 digits';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Info note
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.blue.shade200),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.info_outline, size: 16, color: Colors.blue.shade700),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'This Admin account will be assigned ID $nextAdminId with Active status and instant database login privileges.',
+                                  style: TextStyle(fontSize: 11, color: Colors.blue.shade900),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Buttons
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: isSaving ? null : () => Navigator.pop(modalContext),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                child: const Text('Cancel'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 2,
+                              child: ElevatedButton(
+                                onPressed: isSaving
+                                    ? null
+                                    : () async {
+                                        if (formKey.currentState!.validate()) {
+                                          setModalState(() {
+                                            isSaving = true;
+                                          });
+
+                                          final result = await authProvider.addAdminUser(
+                                            name: nameController.text.trim(),
+                                            mobileNo: mobileController.text.trim(),
+                                            pin: pinController.text.trim(),
+                                            customerId: nextAdminId,
+                                          );
+
+                                          setModalState(() {
+                                            isSaving = false;
+                                          });
+
+                                          if (result['success'] == true) {
+                                            if (modalContext.mounted) {
+                                              Navigator.pop(modalContext);
+                                            }
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Row(
+                                                    children: [
+                                                      const Icon(Icons.check_circle_rounded, color: Colors.white),
+                                                      const SizedBox(width: 10),
+                                                      Expanded(
+                                                        child: Text(
+                                                          result['message'] ?? 'Admin user added successfully!',
+                                                          style: const TextStyle(fontWeight: FontWeight.w600),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  backgroundColor: Colors.green.shade800,
+                                                  duration: const Duration(seconds: 3),
+                                                ),
+                                              );
+                                            }
+                                          } else {
+                                            if (modalContext.mounted) {
+                                              ScaffoldMessenger.of(modalContext).showSnackBar(
+                                                SnackBar(
+                                                  content: Text(result['message'] ?? 'Failed to add Admin user'),
+                                                  backgroundColor: Colors.red.shade800,
+                                                ),
+                                              );
+                                            }
+                                          }
+                                        }
+                                      },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF8B1A1A),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                child: isSaving
+                                    ? const SizedBox(
+                                        height: 18,
+                                        width: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                        ),
+                                      )
+                                    : const Text(
+                                        'CREATE ADMIN',
+                                        style: TextStyle(fontWeight: FontWeight.bold),
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildFieldLabel(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Colors.grey.shade700,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration({
+    required String hintText,
+    required IconData icon,
+    String? prefixText,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+      prefixIcon: Icon(icon, color: const Color(0xFF8B1A1A), size: 20),
+      prefixText: prefixText,
+      prefixStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87),
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: Colors.grey.shade50,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF8B1A1A), width: 1.5),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.red.shade300),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.red.shade700, width: 1.5),
       ),
     );
   }

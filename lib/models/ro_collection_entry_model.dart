@@ -304,6 +304,40 @@ class RoCollectionEntry {
     return map;
   }
 
+  /// Base JSON without extended breakdown fields (for databases without actual_principal columns)
+  Map<String, dynamic> toBaseJson() {
+    final map = <String, dynamic>{
+      'id': id,
+      'customer_id': customerId,
+      'account_number': accountNumber,
+      'loanee_name': loaneeName,
+      'loanee_address': loaneeAddress,
+      'collection_type': collectionType,
+      'route': route,
+      'mobile_no': mobileNo,
+      'created_at': createdAt.toIso8601String(),
+      'status': status,
+    };
+    if (payableAmount != null) map['payable_amount'] = payableAmount;
+    return map;
+  }
+
+  /// Core minimal JSON containing only the essential legacy columns
+  Map<String, dynamic> toCoreJson() {
+    return {
+      'id': id,
+      'customer_id': customerId,
+      'account_number': accountNumber,
+      'loanee_name': loaneeName,
+      'loanee_address': loaneeAddress,
+      'collection_type': collectionType,
+      'route': route,
+      'mobile_no': mobileNo,
+      'created_at': createdAt.toIso8601String(),
+      'status': status,
+    };
+  }
+
   factory RoCollectionEntry.fromJson(Map<String, dynamic> json) {
     final double? pAmt = json['payable_amount'] != null
         ? (json['payable_amount'] as num).toDouble()

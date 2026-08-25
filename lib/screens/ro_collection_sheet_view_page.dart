@@ -296,6 +296,8 @@ class _RoCollectionSheetViewPageState
     final authProvider =
         Provider.of<AuthProvider>(context, listen: false);
     final isAdmin = authProvider.activeRole == UserType.admin;
+    final isManager = authProvider.activeRole == UserType.manager ||
+        authProvider.currentUser?.userType == UserType.manager;
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
     final loaneeProvider =
@@ -501,53 +503,55 @@ class _RoCollectionSheetViewPageState
                               isBold: true,
                               valueColor: latePayable.calculatedLateFine > 0 ? Colors.red.shade800 : Colors.grey.shade700,
                             ),
-                            const Divider(height: 16),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(10),
-                              margin: const EdgeInsets.only(bottom: 8),
-                              decoration: BoxDecoration(
-                                color: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.amber.shade50 : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: latePayable.isOverdue ? Colors.amber.shade300 : Colors.grey.shade300,
+                            if (isManager) ...[
+                              const Divider(height: 16),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.amber.shade50 : Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: latePayable.isOverdue ? Colors.amber.shade300 : Colors.grey.shade300,
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      Icons.info_outline_rounded,
+                                      size: 16,
+                                      color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Payable Amount Rationale',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.black87,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            latePayable.explanation,
+                                            style: TextStyle(
+                                              fontSize: 10.5,
+                                              color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Icon(
-                                    Icons.info_outline_rounded,
-                                    size: 16,
-                                    color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Payable Amount Rationale',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                            color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.black87,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          latePayable.explanation,
-                                          style: TextStyle(
-                                            fontSize: 10.5,
-                                            color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                            ],
                             const Divider(height: 16),
                           ],
                         );
@@ -955,31 +959,130 @@ class _RoCollectionSheetViewPageState
                                             color: Colors.blue.shade900),
                                       ),
                                     ),
-                                  ],
-                                ),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      'Bal: ₹${p.remainingBalance.toStringAsFixed(0)}',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.orange.shade900,
-                                      ),
-                                    ),
-                                    if (p.lateFine > 0)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 2),
+                                    if (p.interest > 0) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.deepOrange.shade50,
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: Colors.deepOrange.shade200),
+                                        ),
                                         child: Text(
-                                          'Fine: ₹${p.lateFine.toStringAsFixed(0)}',
+                                          'Int: +₹${p.interest.toStringAsFixed(0)}',
                                           style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.red.shade700,
-                                          ),
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.deepOrange.shade900),
                                         ),
                                       ),
+                                    ],
+                                  ],
+                                ),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          'Bal: ₹${p.remainingBalance.toStringAsFixed(0)}',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.orange.shade900,
+                                          ),
+                                        ),
+                                        if (p.lateFine > 0)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 2),
+                                            child: Text(
+                                              'Fine: ₹${p.lateFine.toStringAsFixed(0)}',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.red.shade700,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete_outline_rounded,
+                                          size: 18, color: Colors.red),
+                                      tooltip: 'Delete Payment',
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      onPressed: () async {
+                                        final confirmed = await showDialog<bool>(
+                                          context: context,
+                                          builder: (dlgCtx) => AlertDialog(
+                                            shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(16)),
+                                            title: const Row(
+                                              children: [
+                                                Icon(Icons.warning_amber_rounded,
+                                                    color: Colors.red, size: 24),
+                                                SizedBox(width: 8),
+                                                Text('Delete Payment Record?'),
+                                              ],
+                                            ),
+                                            content: Text(
+                                              'Are you sure you want to delete this payment of ₹${p.paymentAmount.toStringAsFixed(2)} for ${entry.loaneeName}?',
+                                              style: const TextStyle(fontSize: 13),
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(dlgCtx, false),
+                                                child: const Text('Cancel',
+                                                    style: TextStyle(color: Colors.grey)),
+                                              ),
+                                              ElevatedButton(
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.red.shade700,
+                                                  foregroundColor: Colors.white,
+                                                ),
+                                                onPressed: () => Navigator.pop(dlgCtx, true),
+                                                child: const Text('Delete'),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                        if (confirmed == true) {
+                                          final success = await collectionProvider.deleteCollectionPayment(p.id);
+                                          if (success) {
+                                            LoaneeProvider? loaneeProvider;
+                                            try {
+                                              loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                                            } catch (_) {}
+                                            final initialBal = entry.initialBalance;
+                                            final currentPaid = collectionProvider.getTotalPaidForCollection(entry.id);
+                                            final currentInterest = collectionProvider.getTotalInterestForCollection(entry.id);
+                                            final newBal = (initialBal + currentInterest - currentPaid).clamp(0.0, double.infinity);
+
+                                            loaneeProvider?.handlePaymentDeleted(
+                                              customerId: entry.customerId,
+                                              accountNumber: entry.accountNumber,
+                                              deletedPaymentAmount: p.paymentAmount,
+                                              newRemainingBalance: newBal,
+                                            );
+
+                                            if (ctx.mounted) {
+                                              Navigator.pop(ctx);
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Text('Payment of ₹${p.paymentAmount.toStringAsFixed(2)} deleted.'),
+                                                  backgroundColor: Colors.green.shade700,
+                                                  behavior: SnackBarBehavior.floating,
+                                                ),
+                                              );
+                                            }
+                                          }
+                                        }
+                                      },
+                                    ),
                                   ],
                                 ),
                               ],
@@ -1296,101 +1399,148 @@ class _RoCollectionSheetViewPageState
           bottomRight: Radius.circular(20),
         ),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade700,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.table_chart_rounded,
-                      color: Colors.white, size: 18),
+      child: LayoutBuilder(
+        builder: (context, headerConstraints) {
+          final isNarrow = headerConstraints.maxWidth < 560;
+          final titleWidget = Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade700,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Collection Sheet",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                child: const Icon(Icons.table_chart_rounded,
+                    color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Collection Sheet",
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
                       ),
-                      Text(
-                        "Route-mapped collection ledger",
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: Colors.white70,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      "Route-mapped collection ledger",
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: Colors.white70,
                       ),
-                    ],
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+
+          final actionsWidget = SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton.icon(
+                  onPressed: () => HistoricalPaymentImportService.downloadTemplate(context),
+                  icon: const Icon(Icons.download_rounded,
+                      size: 13, color: Colors.white),
+                  label: const Text(
+                    "Download Template",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.white.withOpacity(0.15),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: const BorderSide(color: Colors.white24, width: 1),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                TextButton.icon(
+                  onPressed: () => _handleImportHistoricalPayments(context),
+                  icon: const Icon(Icons.upload_file_rounded,
+                      size: 13, color: Colors.white),
+                  label: const Text(
+                    "Upload Excel",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    backgroundColor: const Color(0xFF8B1A1A),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: const BorderSide(color: Colors.white24, width: 1),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                if (_selectedRoute != null || _searchQuery.isNotEmpty) ...[
+                  IconButton(
+                    icon: const Icon(Icons.refresh_rounded,
+                        size: 16, color: Colors.amber),
+                    tooltip: "Reset Filters",
+                    onPressed: _resetFilters,
+                  ),
+                ],
+                IconButton(
+                  icon: provider.isSyncing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.sync_rounded, size: 18, color: Colors.white),
+                  tooltip: "Sync Supabase",
+                  onPressed: () async {
+                    await provider.fetchFromSupabase();
+                  },
                 ),
               ],
             ),
-          ),
-          const SizedBox(width: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextButton.icon(
-                onPressed: () => _handleImportHistoricalPayments(context),
-                icon: const Icon(Icons.upload_file_rounded,
-                    size: 13, color: Colors.white),
-                label: const Text(
-                  "Import Excel",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                style: TextButton.styleFrom(
-                  backgroundColor: const Color(0xFF8B1A1A),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    side: const BorderSide(color: Colors.white24, width: 1),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              if (_selectedRoute != null || _searchQuery.isNotEmpty) ...[
-                IconButton(
-                  icon: const Icon(Icons.refresh_rounded,
-                      size: 16, color: Colors.amber),
-                  tooltip: "Reset Filters",
-                  onPressed: _resetFilters,
-                ),
+          );
+
+          if (isNarrow) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                titleWidget,
+                const SizedBox(height: 10),
+                actionsWidget,
               ],
-              IconButton(
-                icon: provider.isSyncing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.sync_rounded, size: 18, color: Colors.white),
-                tooltip: "Sync Live Supabase Data",
-                onPressed: () => provider.fetchFromSupabase(),
-              ),
+            );
+          }
+
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(child: titleWidget),
+              const SizedBox(width: 8),
+              actionsWidget,
             ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -2850,11 +3000,25 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
   int _totalPages = 1;
   List<CollectionPaymentModel> _payments = [];
   bool _isLoading = true;
+  bool _ascending = true; // Default ascending date sort as requested
 
   @override
   void initState() {
     super.initState();
+    widget.collectionProvider.addListener(_onProviderChange);
     _loadHistory(page: 1);
+  }
+
+  @override
+  void dispose() {
+    widget.collectionProvider.removeListener(_onProviderChange);
+    super.dispose();
+  }
+
+  void _onProviderChange() {
+    if (mounted) {
+      _loadHistory();
+    }
   }
 
   Future<void> _loadHistory({int? page}) async {
@@ -2864,11 +3028,12 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       if (page != null) _page = page;
     });
 
-    // Strictly query only this specific loan collection entry ID
+    // Strictly query only this specific loan collection entry ID in ascending date sort by default
     final result = await widget.collectionProvider.getPaginatedPaymentHistory(
       collectionId: widget.entry.id,
       page: _page,
       pageSize: _pageSize,
+      ascending: _ascending,
     );
 
     if (!mounted) return;
@@ -2879,6 +3044,80 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       _page = result.page;
       _isLoading = false;
     });
+  }
+
+  Future<void> _confirmDeletePayment(CollectionPaymentModel payment) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
+            SizedBox(width: 8),
+            Text("Delete Payment Record?"),
+          ],
+        ),
+        content: Text(
+          "Are you sure you want to delete this payment of ₹${payment.paymentAmount.toStringAsFixed(2)} recorded on ${payment.createdAt.day.toString().padLeft(2, '0')}/${payment.createdAt.month.toString().padLeft(2, '0')}/${payment.createdAt.year}?",
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final success = await widget.collectionProvider.deleteCollectionPayment(payment.id);
+      if (success) {
+        // Also update Loanee record in memory & provider
+        final card = widget.entry;
+        final initialBal = card.initialBalance;
+        final currentPaid = widget.collectionProvider.getTotalPaidForCollection(card.id);
+        final currentInterest = widget.collectionProvider.getTotalInterestForCollection(card.id);
+        final newBal = (initialBal + currentInterest - currentPaid).clamp(0.0, double.infinity);
+
+        widget.loaneeProvider?.handlePaymentDeleted(
+          customerId: card.customerId,
+          accountNumber: card.accountNumber,
+          deletedPaymentAmount: payment.paymentAmount,
+          newRemainingBalance: newBal,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Payment of ₹${payment.paymentAmount.toStringAsFixed(2)} deleted successfully."),
+              backgroundColor: Colors.green.shade700,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          _loadHistory();
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text("Failed to delete payment from database."),
+              backgroundColor: Colors.red.shade700,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    }
   }
 
   @override
@@ -3023,6 +3262,8 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(minWidth: 640),
                     child: DataTable(
+                      sortColumnIndex: 0,
+                      sortAscending: _ascending,
                       headingRowColor: WidgetStateProperty.all(const Color(0xFF8B1A1A)),
                       headingTextStyle: const TextStyle(
                         fontWeight: FontWeight.bold,
@@ -3033,14 +3274,37 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                       dataRowMinHeight: 40,
                       columnSpacing: 16,
                       horizontalMargin: 12,
-                      columns: const [
-                        DataColumn(label: Text("Payment Date")),
-                        DataColumn(label: Text("Amount")),
-                        DataColumn(label: Text("Remaining Outstanding")),
-                        DataColumn(label: Text("Late Fine")),
-                        DataColumn(label: Text("Mode")),
-                        DataColumn(label: Text("Collected By")),
-                        DataColumn(label: Text("Status")),
+                      columns: [
+                        DataColumn(
+                          label: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text("Payment Date"),
+                              const SizedBox(width: 4),
+                              Icon(
+                                _ascending ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                                size: 13,
+                                color: Colors.white,
+                              ),
+                            ],
+                          ),
+                          tooltip: "Sort by Date (Currently: ${_ascending ? 'Oldest first' : 'Newest first'})",
+                          onSort: (columnIndex, ascending) {
+                            setState(() {
+                              _ascending = ascending;
+                              _page = 1;
+                            });
+                            _loadHistory();
+                          },
+                        ),
+                        const DataColumn(label: Text("Amount")),
+                        const DataColumn(label: Text("Interest")),
+                        const DataColumn(label: Text("Remaining Outstanding")),
+                        const DataColumn(label: Text("Late Fine")),
+                        const DataColumn(label: Text("Mode")),
+                        const DataColumn(label: Text("Collected By")),
+                        const DataColumn(label: Text("Status")),
+                        const DataColumn(label: Text("Action")),
                       ],
                       rows: _payments.map((p) {
                         final d = p.createdAt;
@@ -3075,8 +3339,22 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                             ),
                             DataCell(
                               Text(
+                                "₹ ${p.interest.toStringAsFixed(2)}",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: p.interest > 0 ? FontWeight.bold : FontWeight.normal,
+                                  color: p.interest > 0 ? Colors.deepOrange.shade800 : Colors.grey.shade700,
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
                                 "₹ ${p.remainingBalance.toStringAsFixed(2)}",
-                                style: const TextStyle(fontSize: 11),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1E1E1E),
+                                ),
                               ),
                             ),
                             DataCell(
@@ -3128,6 +3406,15 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                     ),
                                   ),
                                 ],
+                              ),
+                            ),
+                            DataCell(
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
+                                tooltip: "Delete Payment Record",
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: () => _confirmDeletePayment(p),
                               ),
                             ),
                           ],

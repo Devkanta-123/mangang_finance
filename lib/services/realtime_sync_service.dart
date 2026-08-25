@@ -137,9 +137,33 @@ class RealtimeSyncService {
           _collectionProvider?.handleRealtimePaymentUpdate(payment);
         }
       } else if (payload.eventType == PostgresChangeEvent.delete) {
-        final id = payload.oldRecord['id']?.toString();
+        final id = payload.oldRecord['id']?.toString() ?? payload.oldRecord['ID']?.toString();
         if (id != null && id.isNotEmpty) {
+          final deletedPayment = _collectionProvider?.payments.firstWhere(
+            (p) => p.id == id,
+            orElse: () => CollectionPaymentModel(id: '', collectionId: '', paymentAmount: 0.0),
+          );
           _collectionProvider?.handleRealtimePaymentDelete(id);
+
+          if (deletedPayment != null && deletedPayment.collectionId.isNotEmpty) {
+            final card = _collectionProvider?.getCollectionEntryById(deletedPayment.collectionId);
+            if (card != null) {
+              final initialBal = card.initialBalance;
+              final currentPaid = _collectionProvider?.getTotalPaidForCollection(card.id) ?? 0.0;
+              final currentInterest = _collectionProvider?.getTotalInterestForCollection(card.id) ?? 0.0;
+              final newBal = (initialBal + currentInterest - currentPaid).clamp(0.0, double.infinity);
+
+              _loaneeProvider?.handlePaymentDeleted(
+                customerId: card.customerId,
+                accountNumber: card.accountNumber,
+                deletedPaymentAmount: deletedPayment.paymentAmount,
+                newRemainingBalance: newBal,
+              );
+            }
+          }
+        } else {
+          _collectionProvider?.fetchFromSupabase();
+          _loaneeProvider?.fetchFromSupabase();
         }
       }
     } catch (e) {
@@ -161,9 +185,11 @@ class RealtimeSyncService {
           _collectionProvider?.handleRealtimeEntryUpdate(entry);
         }
       } else if (payload.eventType == PostgresChangeEvent.delete) {
-        final id = payload.oldRecord['id']?.toString();
+        final id = payload.oldRecord['id']?.toString() ?? payload.oldRecord['ID']?.toString();
         if (id != null && id.isNotEmpty) {
           _collectionProvider?.handleRealtimeEntryDelete(id);
+        } else {
+          _collectionProvider?.fetchFromSupabase();
         }
       }
     } catch (e) {
@@ -185,9 +211,14 @@ class RealtimeSyncService {
           _loaneeProvider?.handleRealtimeLoaneeUpdate(loanee);
         }
       } else if (payload.eventType == PostgresChangeEvent.delete) {
-        final custId = payload.oldRecord['customerid']?.toString();
+        final custId = payload.oldRecord['customerid']?.toString() ??
+            payload.oldRecord['customerId']?.toString() ??
+            payload.oldRecord['CUSTOMERID']?.toString() ??
+            payload.oldRecord['id']?.toString();
         if (custId != null && custId.isNotEmpty) {
           _loaneeProvider?.handleRealtimeLoaneeDelete(custId);
+        } else {
+          _loaneeProvider?.fetchFromSupabase();
         }
       }
     } catch (e) {

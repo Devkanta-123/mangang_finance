@@ -66,6 +66,12 @@ class CollectionSheetProvider extends ChangeNotifier {
     return cardPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
   }
 
+  /// Calculate total interest for a collection card ID from payment table
+  double getTotalInterestForCollection(String collectionId) {
+    final cardPayments = getPaymentsForCollection(collectionId);
+    return cardPayments.fold(0.0, (sum, p) => sum + p.interest);
+  }
+
   /// Calculate today's amount paid for a collection card ID strictly from payment table
   double getTodayPaidForCollection(String collectionId, [DateTime? targetDate]) {
     final date = targetDate ?? DateTime.now();
@@ -254,7 +260,6 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
 
-  /// Query paginated payment history across ALL dates with query-level pagination (default 5 per page)
   Future<PaginatedPaymentsResult> getPaginatedPaymentHistory({
     int page = 1,
     int pageSize = 5,
@@ -263,20 +268,24 @@ class CollectionSheetProvider extends ChangeNotifier {
     String? collectionId,
     DateTime? startDate,
     DateTime? endDate,
+    bool ascending = false,
   }) async {
     // 1. Try fetching via database-level query from Supabase
     if (SupabaseService.instance.isInitialized) {
-      final remoteResult = await SupabaseService.instance.fetchPaginatedPaymentHistory(
-        page: page,
-        pageSize: pageSize,
-        route: route,
-        searchQuery: searchQuery,
-        collectionId: collectionId,
-        startDate: startDate,
-        endDate: endDate,
-      );
-      if (remoteResult.totalCount > 0 || remoteResult.payments.isNotEmpty) {
+      try {
+        final remoteResult = await SupabaseService.instance.fetchPaginatedPaymentHistory(
+          page: page,
+          pageSize: pageSize,
+          route: route,
+          searchQuery: searchQuery,
+          collectionId: collectionId,
+          startDate: startDate,
+          endDate: endDate,
+          ascending: ascending,
+        );
         return remoteResult;
+      } catch (e) {
+        debugPrint('⚠️ Remote paginated history query failed, falling back to local: $e');
       }
     }
 
@@ -318,11 +327,13 @@ class CollectionSheetProvider extends ChangeNotifier {
       filtered = filtered.where((p) => !p.createdAt.isAfter(endOfDay)).toList();
     }
 
-    // Stable Sort: Payment date descending, then ID descending
+    // Stable Sort: Payment date ascending or descending, then ID
     filtered.sort((a, b) {
-      final dateCmp = b.createdAt.compareTo(a.createdAt);
+      final dateCmp = ascending
+          ? a.createdAt.compareTo(b.createdAt)
+          : b.createdAt.compareTo(a.createdAt);
       if (dateCmp != 0) return dateCmp;
-      return b.id.compareTo(a.id);
+      return ascending ? a.id.compareTo(b.id) : b.id.compareTo(a.id);
     });
 
     final totalCount = filtered.length;

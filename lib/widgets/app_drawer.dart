@@ -224,7 +224,7 @@ class AppDrawer extends StatelessWidget {
         ),
       ];
     } else if (role == UserType.manager) {
-      // MANAGER ROLE (Strictly Monitoring - No Entry Menus)
+      // MANAGER ROLE
       return [
         DrawerMenuItemData(
           index: 0,
@@ -238,7 +238,7 @@ class AppDrawer extends StatelessWidget {
           index: 12,
           icon: Icons.admin_panel_settings_rounded,
           title: 'Admin User',
-          subtitle: 'Monitor administrator accounts',
+          subtitle: 'Add & manage admin accounts',
           badge: 'ADMIN',
           badgeColor: const Color(0xFF8B1A1A),
         ),

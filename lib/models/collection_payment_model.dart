@@ -8,6 +8,7 @@ class CollectionPaymentModel {
   final double paymentAmount;
   final double remainingBalance;
   final double lateFine;
+  final double interest; // Interest amount added in this transaction / historical import
   final String paymentType; // Cash, Paytm, Gpay, Phonepay, Other
   final String roPasscode; // 6 digits RO passcode
   final String? roName; // Name of RO who recorded the payment entry
@@ -23,6 +24,7 @@ class CollectionPaymentModel {
     required this.paymentAmount,
     this.remainingBalance = 0.0,
     this.lateFine = 0.0,
+    this.interest = 0.0,
     this.paymentType = 'Cash',
     this.roPasscode = '',
     this.roName,
@@ -85,12 +87,22 @@ class CollectionPaymentModel {
   }
 
   factory CollectionPaymentModel.fromJson(Map<String, dynamic> json) {
+    double parsedInterest = (json['interest'] ?? json['interest_amount'] ?? json['interestAmount'] ?? 0.0).toDouble();
+    if (parsedInterest == 0.0 && json['remarks'] != null) {
+      final rem = json['remarks'].toString();
+      final match = RegExp(r'Interest:\s*₹?\s*([0-9.]+)').firstMatch(rem);
+      if (match != null) {
+        parsedInterest = double.tryParse(match.group(1) ?? '') ?? 0.0;
+      }
+    }
+
     return CollectionPaymentModel(
       id: json['id']?.toString() ?? '',
       collectionId: json['collection_id']?.toString() ?? json['collectionId']?.toString() ?? '',
       paymentAmount: (json['payment_amount'] ?? json['amount'] ?? json['collected_amount'] ?? json['collectedAmount'] ?? 0.0).toDouble(),
       remainingBalance: (json['remaining_balance'] ?? json['remainingBalance'] ?? 0.0).toDouble(),
       lateFine: (json['late_fine'] ?? json['lateFine'] ?? 0.0).toDouble(),
+      interest: parsedInterest,
       paymentType: json['payment_type']?.toString() ?? json['paymentType']?.toString() ?? 'Cash',
       roPasscode: json['ro_passcode']?.toString() ?? json['roPasscode']?.toString() ?? '',
       roName: json['ro_name']?.toString() ?? json['roName']?.toString() ?? json['recorded_by']?.toString() ?? json['recordedBy']?.toString(),

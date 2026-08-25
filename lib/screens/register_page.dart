@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/user_model.dart';
+import '../models/ro_model.dart';
+import '../models/loanee_model.dart';
 import '../providers/auth_provider.dart';
+import '../providers/ro_provider.dart';
+import '../providers/loanee_provider.dart';
 import '../widgets/custom_text_field.dart';
 import '../widgets/app_logo.dart';
-import '../services/supabase_service.dart';
 import 'login_page.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -26,17 +29,13 @@ class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _accountNameController = TextEditingController();
 
   final Map<UserType, String> _userTypeLabels = {
-    UserType.admin: 'Admin',
-    UserType.manager: 'Manager',
-    UserType.ro: 'RO',
-    UserType.loanee: 'Loanee',
+    UserType.ro: 'Recovery Officer (RO)',
+    UserType.loanee: 'Loanee Account',
   };
 
   final Map<UserType, IconData> _userTypeIcons = {
-    UserType.admin: Icons.admin_panel_settings,
-    UserType.manager: Icons.supervisor_account_rounded,
-    UserType.ro: Icons.person_outline,
-    UserType.loanee: Icons.person,
+    UserType.ro: Icons.badge_outlined,
+    UserType.loanee: Icons.person_outline_rounded,
   };
 
   Future<void> _handleRegisterAndCreatePin() async {
@@ -45,29 +44,87 @@ class _RegisterPageState extends State<RegisterPage> {
         _isLoading = true;
       });
 
-      await Future.delayed(const Duration(milliseconds: 300));
-
-      String userName;
-      if (_selectedUserType == UserType.admin || _selectedUserType == UserType.manager) {
-        userName = _nameController.text.trim().isNotEmpty
-            ? _nameController.text.trim()
-            : (_selectedUserType == UserType.manager ? 'Branch Manager' : 'Administrator');
-      } else if (_selectedUserType == UserType.ro) {
-        userName = _roNameController.text.trim().isNotEmpty
-            ? _roNameController.text.trim()
-            : 'RO Officer';
-      } else {
-        userName = _accountNameController.text.trim().isNotEmpty
-            ? _accountNameController.text.trim()
-            : 'Loanee Account';
-      }
-
       final cleanMobile = _mobileController.text.trim();
       final enteredCustId = _customerIdController.text.trim();
+      final enteredName = _selectedUserType == UserType.ro
+          ? _roNameController.text.trim()
+          : _accountNameController.text.trim();
 
-      // Check duplicate (mobile_no, user_type) & customerId
-      if (!mounted) return;
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+      // 1. Mandatory Table Match Check: Check CustomerID, Name, and Mobile No against corresponding table
+      if (_selectedUserType == UserType.ro) {
+        final roProvider = Provider.of<RoProvider>(context, listen: false);
+        final verifResult = await authProvider.verifyRoAccountForRegistration(
+          customerId: enteredCustId,
+          roName: enteredName,
+          mobileNo: cleanMobile,
+          localRos: roProvider.roAccounts,
+        );
+
+        if (verifResult['matched'] != true) {
+          if (!mounted) return;
+          setState(() {
+            _isLoading = false;
+          });
+          _showVerificationFailedDialog(
+            enteredId: enteredCustId,
+            enteredName: enteredName,
+            enteredMobile: cleanMobile,
+            role: UserType.ro,
+            customMessage: verifResult['message'],
+          );
+          return;
+        }
+
+        if (verifResult['isInactive'] == true) {
+          if (!mounted) return;
+          setState(() {
+            _isLoading = false;
+          });
+          _showAccountInactiveDialog(
+            verifResult['message'] ?? 'Your RO account is currently marked as Inactive. Login access is disabled. Please contact the administrator.',
+          );
+          return;
+        }
+      } else if (_selectedUserType == UserType.loanee) {
+        final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+        final verifResult = await authProvider.verifyLoaneeAccountForRegistration(
+          customerId: enteredCustId,
+          loaneeName: enteredName,
+          mobileNo: cleanMobile,
+          localLoanees: loaneeProvider.loanees,
+        );
+
+        if (verifResult['matched'] != true) {
+          if (!mounted) return;
+          setState(() {
+            _isLoading = false;
+          });
+          _showVerificationFailedDialog(
+            enteredId: enteredCustId,
+            enteredName: enteredName,
+            enteredMobile: cleanMobile,
+            role: UserType.loanee,
+            customMessage: verifResult['message'],
+          );
+          return;
+        }
+
+        if (verifResult['isInactive'] == true) {
+          if (!mounted) return;
+          setState(() {
+            _isLoading = false;
+          });
+          _showAccountInactiveDialog(
+            verifResult['message'] ?? 'Your Loanee account is currently marked as Inactive. Login access is disabled. Please contact the administrator.',
+          );
+          return;
+        }
+      }
+
+      // 2. Check duplicate (mobile_no, user_type) & customerId in user_auth table
+      if (!mounted) return;
       final dupResult = await authProvider.checkDuplicateUserDetailed(
         mobileNo: cleanMobile,
         userType: _selectedUserType,
@@ -88,14 +145,10 @@ class _RegisterPageState extends State<RegisterPage> {
         return;
       }
 
-      String? assignedCustId;
-      if (_selectedUserType == UserType.admin || _selectedUserType == UserType.manager) {
-        assignedCustId = await SupabaseService.instance.fetchNextRoleCustomerId(_selectedUserType);
-      } else {
-        assignedCustId = enteredCustId.isNotEmpty ? enteredCustId : null;
-      }
+      String userName = enteredName;
+      String? assignedCustId = enteredCustId;
 
-      // Register user in AuthProvider
+      // 3. Register user in AuthProvider
       User user = User(
         name: userName,
         mobileNo: cleanMobile,
@@ -130,7 +183,7 @@ class _RegisterPageState extends State<RegisterPage> {
               const Icon(Icons.check_circle, color: Colors.white),
               const SizedBox(width: 10),
               Expanded(
-                child: Text('Account registered as ${_userTypeLabels[_selectedUserType]}! Create your 6-digit Security PIN.'),
+                child: Text('Account verified & registered as ${_userTypeLabels[_selectedUserType]}! Create your 6-digit Security PIN.'),
               ),
             ],
           ),
@@ -219,6 +272,113 @@ class _RegisterPageState extends State<RegisterPage> {
               Navigator.pushReplacementNamed(context, '/login');
             },
             child: const Text('Go to Sign In'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showVerificationFailedDialog({
+    required String enteredId,
+    required String enteredName,
+    required String enteredMobile,
+    required UserType role,
+    String? customMessage,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.error_outline_rounded, color: Colors.red.shade900, size: 24),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Records Not Match',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 17,
+                  color: Color(0xFF8B1A1A),
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'records not match',
+          style: TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.w500),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Try Again'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8B1A1A),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.pushReplacementNamed(context, '/login');
+            },
+            child: const Text('Go to Sign In'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAccountInactiveDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.block_rounded, color: Colors.red.shade900, size: 24),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Account Inactive',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 17,
+                  color: Colors.red,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(fontSize: 13.5, height: 1.4, color: Colors.black87),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8B1A1A),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
           ),
         ],
       ),
@@ -432,7 +592,10 @@ class _RegisterPageState extends State<RegisterPage> {
                 fontWeight: FontWeight.w500,
                 color: Colors.grey.shade800,
               ),
-              items: UserType.values.map((UserType type) {
+              items: [
+                UserType.loanee,
+                UserType.ro,
+              ].map((UserType type) {
                 return DropdownMenuItem<UserType>(
                   value: type,
                   child: Row(
@@ -466,50 +629,31 @@ class _RegisterPageState extends State<RegisterPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Full Name Field (for Admin and Manager)
-        if (_selectedUserType == UserType.admin || _selectedUserType == UserType.manager) ...[
-          _buildFieldLabel('Full Name'),
-          CustomTextField(
-            controller: _nameController,
-            hintText: 'Enter your full name',
-            icon: Icons.person_outline,
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'Please enter full name';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 18),
-        ],
-        
         // Customer ID (for RO and Loanee)
-        if (_selectedUserType != UserType.admin && _selectedUserType != UserType.manager) ...[
-          _buildFieldLabel('Customer ID'),
-          CustomTextField(
-            controller: _customerIdController,
-            hintText: 'Enter customer ID',
-            icon: Icons.badge_outlined,
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return 'Please enter Customer ID';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 18),
-        ],
+        _buildFieldLabel('Customer ID'),
+        CustomTextField(
+          controller: _customerIdController,
+          hintText: _selectedUserType == UserType.ro ? 'Enter RO Customer ID (e.g. 26R001)' : 'Enter Loanee Customer ID (e.g. 26LA000001)',
+          icon: Icons.badge_outlined,
+          validator: (value) {
+            if (value == null || value.trim().isEmpty) {
+              return 'Please enter Customer ID';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 18),
         
-        // RO Name (only for RO)
+        // Full Name (RO Name if RO)
         if (_selectedUserType == UserType.ro) ...[
-          _buildFieldLabel('RO Name'),
+          _buildFieldLabel('Full Name (as registered in RO Account)'),
           CustomTextField(
             controller: _roNameController,
-            hintText: 'Enter RO name',
+            hintText: 'Enter official RO officer name',
             icon: Icons.person_outline,
             validator: (value) {
               if (value == null || value.trim().isEmpty) {
-                return 'Please enter RO Name';
+                return 'Please enter official RO Name';
               }
               return null;
             },
@@ -517,16 +661,16 @@ class _RegisterPageState extends State<RegisterPage> {
           const SizedBox(height: 18),
         ],
         
-        // Loanee Name (only for Loanee)
+        // Full Name (Loanee Name if Loanee)
         if (_selectedUserType == UserType.loanee) ...[
-          _buildFieldLabel('Loanee Name'),
+          _buildFieldLabel('Full Name (as registered in Loan Account)'),
           CustomTextField(
             controller: _accountNameController,
-            hintText: 'Enter loanee name',
+            hintText: 'Enter official loanee name',
             icon: Icons.person_outline,
             validator: (value) {
-              if (_selectedUserType == UserType.loanee && (value == null || value.trim().isEmpty)) {
-                return 'Please enter Loanee Name';
+              if (value == null || value.trim().isEmpty) {
+                return 'Please enter official Loanee Name';
               }
               return null;
             },
@@ -535,7 +679,7 @@ class _RegisterPageState extends State<RegisterPage> {
         ],
         
         // Mobile Number
-        _buildFieldLabel('Mobile Number'),
+        _buildFieldLabel('Mobile Number (as registered in record)'),
         CustomTextField(
           controller: _mobileController,
           hintText: 'Enter 10-digit mobile number',
@@ -545,8 +689,9 @@ class _RegisterPageState extends State<RegisterPage> {
             if (value == null || value.trim().isEmpty) {
               return 'Please enter mobile number';
             }
-            if (value.trim().length != 10) {
-              return 'Please enter valid 10-digit number';
+            final digits = value.replaceAll(RegExp(r'\D'), '');
+            if (digits.length != 10) {
+              return 'Please enter valid 10-digit mobile number';
             }
             return null;
           },

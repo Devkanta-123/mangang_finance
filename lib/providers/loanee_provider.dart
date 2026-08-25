@@ -326,6 +326,58 @@ class LoaneeProvider extends ChangeNotifier {
     }
   }
 
+  void handlePaymentDeleted({
+    required String customerId,
+    required String accountNumber,
+    required double deletedPaymentAmount,
+    required double newRemainingBalance,
+  }) {
+    final cleanCust = customerId.trim().toLowerCase();
+    final cleanAcc = accountNumber.trim().toLowerCase();
+
+    for (int i = 0; i < _loanees.length; i++) {
+      final l = _loanees[i];
+      final matchCust = cleanCust.isNotEmpty && l.customerId.trim().toLowerCase() == cleanCust;
+      final matchAcc = cleanAcc.isNotEmpty && l.accountNumber.trim().toLowerCase() == cleanAcc;
+
+      if (matchCust || matchAcc) {
+        final double updatedPaid = (l.paidamount - deletedPaymentAmount).clamp(0.0, double.infinity);
+        _loanees[i] = LoaneeAccount(
+          customerid: l.customerid,
+          accountnumber: l.accountnumber,
+          loaneename: l.loaneename,
+          guardianname: l.guardianname,
+          address: l.address,
+          businesstype: l.businesstype,
+          postoffice: l.postoffice,
+          policestation: l.policestation,
+          district: l.district,
+          pincode: l.pincode,
+          mobileno: l.mobileno,
+          aadharno: l.aadharno,
+          createdat: l.createdat,
+          status: newRemainingBalance <= 0 ? 'Closed' : 'Active',
+          loanamount: l.loanamount,
+          paidamount: updatedPaid,
+          dueamount: newRemainingBalance,
+          witnessname: l.witnessname,
+          witnessguardianname: l.witnessguardianname,
+          witnessaddress: l.witnessaddress,
+          witnessbusinesstype: l.witnessbusinesstype,
+          witnesspostoffice: l.witnesspostoffice,
+          witnesspolicestation: l.witnesspolicestation,
+          witnessdistrict: l.witnessdistrict,
+          witnesspincode: l.witnesspincode,
+          witnessmobileno: l.witnessmobileno,
+          witnessaadharno: l.witnessaadharno,
+          witnessrelationship: l.witnessrelationship,
+        );
+        notifyListeners();
+        break;
+      }
+    }
+  }
+
   // ==========================================
   // REALTIME POSTGRES CHANGES HANDLERS
   // ==========================================

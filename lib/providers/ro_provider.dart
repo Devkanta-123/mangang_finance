@@ -22,6 +22,16 @@ class RoProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void handleRealtimeRoInsert(RoAccount ro) {
+    final idx = _roAccounts.indexWhere((r) => r.customerId == ro.customerId);
+    if (idx >= 0) {
+      _roAccounts[idx] = ro;
+    } else {
+      _roAccounts.insert(0, ro);
+    }
+    notifyListeners();
+  }
+
   int get totalRoAccounts => _roAccounts.length;
   int get totalRos => _roAccounts.length;
 

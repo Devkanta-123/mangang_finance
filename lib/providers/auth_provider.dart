@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
+import '../models/ro_model.dart';
+import '../models/loanee_model.dart';
 import '../services/supabase_service.dart';
 
 class LoginResult {
@@ -106,6 +108,156 @@ class AuthProvider extends ChangeNotifier {
       userType: userType,
       customerId: customerId,
     );
+  }
+
+  /// Verify that an RO account exists in ro_accounts before allowing registration
+  Future<Map<String, dynamic>> verifyRoAccountForRegistration({
+    required String customerId,
+    required String roName,
+    required String mobileNo,
+    List<RoAccount>? localRos,
+  }) async {
+    final result = await SupabaseService.instance.verifyRoAccountRegistration(
+      customerId: customerId,
+      roName: roName,
+      mobileNo: mobileNo,
+    );
+
+    if (result['matched'] == true) {
+      return result;
+    }
+
+    // Local fallback check
+    if (localRos != null && localRos.isNotEmpty) {
+      final cleanCustId = customerId.trim().toLowerCase();
+      final cleanName = roName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+      final cleanMobile = mobileNo.replaceAll(RegExp(r'\D'), '');
+      final normMobile = cleanMobile.length >= 10 ? cleanMobile.substring(cleanMobile.length - 10) : cleanMobile;
+
+      for (final r in localRos) {
+        final rCust = r.customerId.trim().toLowerCase();
+        final rName = r.roName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+        final rawRMobile = r.mobileNo.replaceAll(RegExp(r'\D'), '');
+        final rMobile = rawRMobile.length >= 10 ? rawRMobile.substring(rawRMobile.length - 10) : rawRMobile;
+
+        if (rCust == cleanCustId && rName == cleanName && rMobile == normMobile) {
+          final isInactive = !r.isActive;
+          return {
+            'matched': true,
+            'isInactive': isInactive,
+            'account': r,
+            'message': isInactive
+                ? 'Your RO account is currently marked as Inactive. Login access is disabled. Please contact the administrator.'
+                : 'RO account verified successfully.',
+          };
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /// Verify that a Loanee account exists in loanee_accounts before allowing registration
+  Future<Map<String, dynamic>> verifyLoaneeAccountForRegistration({
+    required String customerId,
+    required String loaneeName,
+    required String mobileNo,
+    List<LoaneeAccount>? localLoanees,
+  }) async {
+    final result = await SupabaseService.instance.verifyLoaneeAccountRegistration(
+      customerId: customerId,
+      loaneeName: loaneeName,
+      mobileNo: mobileNo,
+    );
+
+    if (result['matched'] == true) {
+      return result;
+    }
+
+    // Local fallback check
+    if (localLoanees != null && localLoanees.isNotEmpty) {
+      final cleanCustId = customerId.trim().toLowerCase();
+      final cleanName = loaneeName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+      final cleanMobile = mobileNo.replaceAll(RegExp(r'\D'), '');
+      final normMobile = cleanMobile.length >= 10 ? cleanMobile.substring(cleanMobile.length - 10) : cleanMobile;
+
+      for (final l in localLoanees) {
+        final lCust = l.customerId.trim().toLowerCase();
+        final lName = l.loaneeName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+        final rawLMobile = l.mobileNo.replaceAll(RegExp(r'\D'), '');
+        final lMobile = rawLMobile.length >= 10 ? rawLMobile.substring(rawLMobile.length - 10) : rawLMobile;
+
+        if (lCust == cleanCustId && lName == cleanName && lMobile == normMobile) {
+          final isInactive = !l.isActive;
+          return {
+            'matched': true,
+            'isInactive': isInactive,
+            'account': l,
+            'message': isInactive
+                ? 'Your Loanee account is currently marked as Inactive. Login access is disabled. Please contact the administrator.'
+                : 'Loanee account verified successfully.',
+          };
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /// Add a new Admin user directly to Supabase user_auth table (called by Manager or Admin)
+  Future<Map<String, dynamic>> addAdminUser({
+    required String name,
+    required String mobileNo,
+    required String pin,
+    String? customerId,
+  }) async {
+    final cleanMobile = mobileNo.trim();
+    final cleanName = name.trim();
+    final cleanPin = pin.trim();
+
+    // Check duplicate
+    final dupResult = await SupabaseService.instance.checkUserAuthDuplicate(
+      mobileNo: cleanMobile,
+      userType: UserType.admin,
+      customerId: customerId,
+    );
+
+    if (dupResult['isDuplicate'] == true) {
+      return {
+        'success': false,
+        'message': dupResult['message'] ?? 'An account with this Mobile Number or Customer ID already exists.',
+      };
+    }
+
+    String finalCustId = customerId?.trim() ?? '';
+    if (finalCustId.isEmpty) {
+      finalCustId = await SupabaseService.instance.fetchNextRoleCustomerId(UserType.admin);
+    }
+
+    final newAdmin = UserAuthRecord(
+      id: '',
+      mobileNo: cleanMobile,
+      customerId: finalCustId,
+      userType: UserType.admin,
+      pin: cleanPin,
+      name: cleanName,
+      status: 'Active',
+    );
+
+    final saved = await SupabaseService.instance.saveUserAuthRecord(newAdmin);
+    if (saved) {
+      await fetchAdminUsers();
+      return {
+        'success': true,
+        'message': 'Admin account ($finalCustId) for $cleanName added successfully.',
+        'user': newAdmin,
+      };
+    } else {
+      return {
+        'success': false,
+        'message': 'Failed to save admin account to Supabase user_auth table.',
+      };
+    }
   }
 
   /// Register a user in the application with duplicate prevention for (mobile_no, user_type) & customerId

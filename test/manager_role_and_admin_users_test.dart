@@ -137,8 +137,9 @@ void main() {
       await tester.tap(find.byIcon(Icons.menu_rounded));
       await tester.pumpAndSettle();
 
-      // Admin drawer does not have Admin User
+      // Admin drawer does not have Admin User / Admin Users
       expect(find.text('Admin User'), findsNothing);
+      expect(find.text('Admin Users'), findsNothing);
     });
 
     testWidgets('Manager drawer DOES show Admin User directly above Loanee Accounts List',

@@ -78,6 +78,23 @@ void main() {
     setUp(() {
       sampleLoanees = [
         LoaneeAccount(
+          customerid: "26LA000001",
+          accountnumber: "MF2026A000001",
+          loaneename: "Ramesh Kumar",
+          guardianname: "R. Sharma",
+          address: "Angom Leikai",
+          businesstype: "Retail Shop",
+          postoffice: "Imphal",
+          policestation: "Porompat",
+          district: "Imphal East",
+          pincode: "795005",
+          mobileno: "9862112233",
+          aadharno: "123456789012",
+          loanamount: 11500.0,
+          paidamount: 0.0,
+          dueamount: 11500.0,
+        ),
+        LoaneeAccount(
           customerid: "CUST-1031",
           accountnumber: "ACC-88239131",
           loaneename: "Arambam Nikhil",
@@ -114,6 +131,20 @@ void main() {
       ];
 
       sampleEntries = [
+        RoCollectionEntry(
+          id: "COL-26LA000001",
+          customerId: "26LA000001",
+          accountNumber: "MF2026A000001",
+          loaneeName: "Ramesh Kumar",
+          loaneeAddress: "Angom Leikai",
+          collectionType: "Daily",
+          route: "Angom",
+          mobileNo: "9862112233",
+          payableAmount: 100.0,
+          loanAmount: 11500.0,
+          actualPrincipal: 10000.0,
+          interestAmount: 1500.0,
+        ),
         RoCollectionEntry(
           id: "COL-1031",
           customerId: "CUST-1031",
@@ -157,13 +188,14 @@ void main() {
       expect(preview.validRowsCount, greaterThanOrEqualTo(1));
 
       final firstRow = preview.rowRecords.first;
-      expect(firstRow.rawCustomerId, equals("CUST-1031"));
-      expect(firstRow.rawAccountNumber, equals("ACC-88239131"));
-      expect(firstRow.rawLoaneeName, equals("Arambam Nikhil"));
+      expect(firstRow.rawCustomerId, equals("26LA000001"));
+      expect(firstRow.rawAccountNumber, equals("MF2026A000001"));
+      expect(firstRow.rawLoaneeName, equals("Ramesh Kumar"));
       expect(firstRow.rawRoute, equals("Angom"));
       expect(firstRow.rawCollectedBy, equals("Dev"));
-      expect(firstRow.resolvedCollectionEntry?.id, equals("COL-1031"));
-      expect(firstRow.validPaymentsCount, greaterThan(0));
+      expect(firstRow.resolvedCollectionEntry?.id, equals("COL-26LA000001"));
+      expect(firstRow.validPaymentsCount, equals(5));
+      expect(preview.totalAmountToImport, equals(900.0));
     });
 
     // Test 2: Multiple valid rows
@@ -844,9 +876,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Verify Header & Import button
+      // Verify Header & Action buttons (Download Template & Upload Excel)
       expect(find.text("Collection Sheet"), findsOneWidget);
-      expect(find.text("Import Excel"), findsOneWidget);
+      expect(find.text("Download Template"), findsOneWidget);
+      expect(find.text("Upload Excel"), findsOneWidget);
 
       // Verify compact Route chip is present
       expect(find.text("ROUTE ZONES"), findsOneWidget);
@@ -984,15 +1017,15 @@ void main() {
       expect(find.text("Previous"), findsOneWidget);
       expect(find.text("Next"), findsOneWidget);
 
-      // Verify it shows Loan A transactions only (NOT Loan B)
-      expect(find.text("₹ 1200.00"), findsOneWidget); // PAY-A-6 newest
+      // Verify it shows Loan A transactions in ascending date order (earliest first)
+      expect(find.text("₹ 200.00"), findsOneWidget); // PAY-A-1 oldest first
       expect(find.text("₹ 500.00"), findsNothing); // Loan B payment not here
 
       // Navigate to Page 2 of Loan A history
       await tester.tap(find.text("Next"));
       await tester.pumpAndSettle();
       expect(find.text("Page 2 of 2 (6 records)"), findsOneWidget);
-      expect(find.text("₹ 200.00"), findsOneWidget); // PAY-A-1 oldest
+      expect(find.text("₹ 1200.00"), findsOneWidget); // PAY-A-6 latest on last page
 
       // Close dialog
       await tester.tap(find.byIcon(Icons.close_rounded).last);
@@ -1075,6 +1108,296 @@ void main() {
       expect(find.text("Friday"), findsOneWidget);
       expect(find.text("Saturday"), findsOneWidget);
     });
+
+    test("20. generateTemplateExcelBytes generates valid Excel matching new vertical structure", () {
+      final bytes = HistoricalPaymentImportService.generateTemplateExcelBytes();
+      expect(bytes, isNotEmpty);
+
+      final preview = HistoricalPaymentImportService.parseWorkbookBytes(
+        bytes: bytes,
+        existingLoanees: sampleLoanees,
+        existingEntries: sampleEntries,
+        existingPayments: samplePayments,
+        existingRoutes: sampleRoutes,
+      );
+
+      expect(preview.hasFileErrors, isFalse);
+      expect(preview.totalRows, equals(1));
+      expect(preview.validRowsCount, equals(1));
+      expect(preview.validPaymentsCount, equals(5));
+      expect(preview.totalAmountToImport, equals(900.0));
+
+      final record = preview.rowRecords.first;
+      expect(record.rawCustomerId, equals("26LA000001"));
+      expect(record.rawAccountNumber, equals("MF2026A000001"));
+      expect(record.rawLoaneeName, equals("Ramesh Kumar"));
+    });
+
+    test("21. Bulk import transactional execution correctly suppresses individual notifications and preserves exact historical dates", () async {
+      final collectionProvider = CollectionSheetProvider();
+      final loaneeProvider = LoaneeProvider();
+
+      // Create entry for 26LA000001
+      await collectionProvider.addCollectionEntry(sampleEntries.first);
+
+      final bytes = HistoricalPaymentImportService.generateTemplateExcelBytes();
+      final preview = HistoricalPaymentImportService.parseWorkbookBytes(
+        bytes: bytes,
+        existingLoanees: loaneeProvider.loanees,
+        existingEntries: collectionProvider.collectionEntries,
+        existingPayments: collectionProvider.payments,
+      );
+
+      expect(preview.canImport, isTrue);
+
+      final result = await HistoricalPaymentImportService.executeTransactionalImport(
+        previewResult: preview,
+        collectionProvider: collectionProvider,
+        loaneeProvider: loaneeProvider,
+      );
+
+      expect(result.success, isTrue);
+      expect(result.paymentsInsertedCount, equals(5));
+      expect(result.totalAmountImported, equals(900.0));
+
+      // Verify exact dates were preserved (2026-07-01 to 2026-07-05)
+      final importedPayments = collectionProvider.payments;
+      expect(importedPayments.length, equals(5));
+      expect(importedPayments.every((p) => p.createdAt.year == 2026 && p.createdAt.month == 7), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.day == 1), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.day == 2), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.day == 3), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.day == 4), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.day == 5), isTrue);
+    });
+
+    test("22. Old payment history import parses Interest column and calculates remaining balance as Initial + Interest - Paid", () async {
+      final collectionProvider = CollectionSheetProvider();
+      final loaneeProvider = LoaneeProvider();
+
+      // Seed loanee with initial loan amount 11500
+      final loanee = LoaneeAccount(
+        customerid: "26LA000001",
+        accountnumber: "MF2026A000001",
+        loaneename: "Ramesh Kumar",
+        guardianname: "R. Sharma",
+        address: "Angom Leikai",
+        businesstype: "Retail",
+        postoffice: "Imphal",
+        policestation: "Porompat",
+        district: "Imphal East",
+        pincode: "795005",
+        mobileno: "9862112233",
+        aadharno: "123456789012",
+        loanamount: 11500.0,
+        paidamount: 0.0,
+        dueamount: 11500.0,
+      );
+      loaneeProvider.handleRealtimeLoaneeInsert(loanee);
+
+      final entry = RoCollectionEntry(
+        id: "COL-26LA000001",
+        customerId: "26LA000001",
+        accountNumber: "MF2026A000001",
+        loaneeName: "Ramesh Kumar",
+        loaneeAddress: "Angom Leikai",
+        route: "Angom",
+        collectionType: "Daily",
+        mobileNo: "9862112233",
+        loanAmount: 11500.0,
+      );
+      await collectionProvider.addCollectionEntry(entry);
+
+      // Parse template Excel bytes
+      final bytes = HistoricalPaymentImportService.generateTemplateExcelBytes();
+      final preview = HistoricalPaymentImportService.parseWorkbookBytes(
+        bytes: bytes,
+        existingLoanees: loaneeProvider.loanees,
+        existingEntries: collectionProvider.collectionEntries,
+        existingPayments: collectionProvider.payments,
+      );
+
+      expect(preview.canImport, isTrue);
+      expect(preview.totalAmountToImport, equals(900.0));
+      expect(preview.totalInterestToImport, equals(301.0)); // 150 + 20 + 30 + 45 + 56
+
+      final result = await HistoricalPaymentImportService.executeTransactionalImport(
+        previewResult: preview,
+        collectionProvider: collectionProvider,
+        loaneeProvider: loaneeProvider,
+      );
+
+      expect(result.success, isTrue);
+      expect(result.paymentsInsertedCount, equals(5));
+      expect(result.totalAmountImported, equals(900.0));
+      expect(result.totalInterestImported, equals(301.0));
+
+      // Final remaining balance should be: 11500 + 301 - 900 = 10901.0
+      final updatedLoanee = loaneeProvider.loanees.firstWhere((l) => l.customerId == "26LA000001");
+      expect(updatedLoanee.paidamount, equals(900.0));
+      expect(updatedLoanee.dueamount, equals(10901.0));
+
+      final latestBal = collectionProvider.getLatestRemainingBalance("COL-26LA000001");
+      expect(latestBal, equals(10901.0));
+    });
+
+    test("23. Deletion of payment immediately reflects in provider and updates loanee balance without manual refresh", () async {
+      final collectionProvider = CollectionSheetProvider();
+      final loaneeProvider = LoaneeProvider();
+
+      final loanee = LoaneeAccount(
+        customerid: "26LA000001",
+        accountnumber: "MF2026A000001",
+        loaneename: "Ramesh Kumar",
+        guardianname: "R. Sharma",
+        address: "Angom Leikai",
+        businesstype: "Retail",
+        postoffice: "Imphal",
+        policestation: "Porompat",
+        district: "Imphal East",
+        pincode: "795005",
+        mobileno: "9862112233",
+        aadharno: "123456789012",
+        loanamount: 11500.0,
+        paidamount: 200.0,
+        dueamount: 11450.0,
+      );
+      loaneeProvider.handleRealtimeLoaneeInsert(loanee);
+
+      final entry = RoCollectionEntry(
+        id: "COL-26LA000001",
+        customerId: "26LA000001",
+        accountNumber: "MF2026A000001",
+        loaneeName: "Ramesh Kumar",
+        loaneeAddress: "Angom Leikai",
+        route: "Angom",
+        collectionType: "Daily",
+        mobileNo: "9862112233",
+        loanAmount: 11500.0,
+      );
+      await collectionProvider.addCollectionEntry(entry);
+
+      final payment = CollectionPaymentModel(
+        id: "PAY-TEST-DEL",
+        collectionId: "COL-26LA000001",
+        paymentAmount: 200.0,
+        interest: 150.0,
+        remainingBalance: 11450.0, // 11500 + 150 - 200
+        createdAt: DateTime(2026, 7, 1),
+      );
+      await collectionProvider.addCollectionPayment(payment);
+
+      // Verify payment is present
+      var history = await collectionProvider.getPaginatedPaymentHistory(collectionId: "COL-26LA000001");
+      expect(history.totalCount, equals(1));
+      expect(history.payments.first.interest, equals(150.0));
+
+      // Now delete payment
+      final deleted = await collectionProvider.deleteCollectionPayment("PAY-TEST-DEL");
+      expect(deleted, isTrue);
+
+      // Verify paginated payment history returns 0 payments immediately
+      history = await collectionProvider.getPaginatedPaymentHistory(collectionId: "COL-26LA000001");
+      expect(history.totalCount, equals(0));
+      expect(history.payments.isEmpty, isTrue);
+
+      // Balance adjustment
+      final initialBal = entry.initialBalance;
+      final currentPaid = collectionProvider.getTotalPaidForCollection(entry.id);
+      final currentInterest = collectionProvider.getTotalInterestForCollection(entry.id);
+      final newBal = (initialBal + currentInterest - currentPaid).clamp(0.0, double.infinity);
+
+      loaneeProvider.handlePaymentDeleted(
+        customerId: entry.customerId,
+        accountNumber: entry.accountNumber,
+        deletedPaymentAmount: 200.0,
+        newRemainingBalance: newBal,
+      );
+
+      final updatedLoanee = loaneeProvider.loanees.firstWhere((l) => l.customerId == "26LA000001");
+      expect(updatedLoanee.paidamount, equals(0.0));
+      expect(updatedLoanee.dueamount, equals(11500.0));
+    });
+
+    testWidgets("24. RoCollectionSheetViewPage history dialog displays Interest column and allows deleting payment", (tester) async {
+      final collectionProvider = CollectionSheetProvider();
+      final loaneeProvider = LoaneeProvider();
+      final authProvider = AuthProvider();
+      final settingsProvider = SettingsProvider();
+      final roProvider = RoProvider();
+
+      final entry = RoCollectionEntry(
+        id: "COL-TEST-HIST",
+        customerId: "26LA000001",
+        accountNumber: "MF2026A000001",
+        loaneeName: "Ramesh Kumar",
+        loaneeAddress: "Angom Leikai",
+        route: "Angom",
+        collectionType: "Daily",
+        mobileNo: "9862112233",
+        loanAmount: 11500.0,
+      );
+      collectionProvider.handleRealtimeEntryInsert(entry);
+      collectionProvider.addRoute(RouteModel(id: "R1", name: "Angom", code: "ANG"));
+
+      final payment = CollectionPaymentModel(
+        id: "PAY-DLG-1",
+        collectionId: "COL-TEST-HIST",
+        paymentAmount: 200.0,
+        interest: 150.0,
+        remainingBalance: 11450.0,
+        paymentType: "Cash",
+        roName: "Dev",
+        createdAt: DateTime(2026, 7, 1),
+      );
+      collectionProvider.handleRealtimePaymentInsert(payment);
+
+      tester.view.physicalSize = const Size(1280, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<CollectionSheetProvider>.value(value: collectionProvider),
+            ChangeNotifierProvider<LoaneeProvider>.value(value: loaneeProvider),
+            ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+            ChangeNotifierProvider<SettingsProvider>.value(value: settingsProvider),
+            ChangeNotifierProvider<RoProvider>.value(value: roProvider),
+          ],
+          child: const MaterialApp(
+            home: RoCollectionSheetViewPage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Tap Angom route
+      await tester.tap(find.text("Angom"));
+      await tester.pumpAndSettle();
+
+      // Open Actions dropdown on row
+      final actionDropdown = find.byType(PopupMenuButton<String>).first;
+      await tester.tap(actionDropdown);
+      await tester.pumpAndSettle();
+
+      // Tap "View History"
+      await tester.tap(find.text("View History"));
+      await tester.pumpAndSettle();
+
+      // Verify Interest column is present in DataTable
+      expect(find.text("Interest"), findsOneWidget);
+      expect(find.text("₹ 150.00"), findsOneWidget);
+      expect(find.text("₹ 200.00"), findsOneWidget);
+      expect(find.text("₹ 11450.00"), findsOneWidget);
+
+      // Verify Delete action button is rendered
+      expect(find.byIcon(Icons.delete_outline_rounded), findsOneWidget);
+    });
   });
 }
+
 
