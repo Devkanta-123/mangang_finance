@@ -177,10 +177,10 @@ void main() {
 
       expect(breakdown.isPastMaturity, isTrue);
       expect(breakdown.overdueMonths, equals(3));
-      // Month 3 interest = 39,155.58 * 7% = 2,740.8906
-      expect(breakdown.postMaturityInterestAmount, closeTo(2740.8906, 0.0001));
-      // Total Payable = 39,155.58 + 2,740.8906 = 41,896.4706
-      expect(breakdown.postMaturityPayableAmount, closeTo(41896.4706, 0.0001));
+      // Month 3 interest = 39,155.58 * 7% = 2,740.89
+      expect(breakdown.postMaturityInterestAmount, equals(2740.89));
+      // Total Payable = 39,155.58 + 2,740.89 = 41,896.47
+      expect(breakdown.postMaturityPayableAmount, equals(41896.47));
     });
 
     test('Test 8: Collection Late Payable Breakdown Integration for Past-Maturity Loan', () {
@@ -226,6 +226,133 @@ void main() {
       // Overdue interest field is ONLY the latest month's interest: ₹2,561.58
       expect(breakdown.postMaturityBreakdown!.postMaturityInterestAmount, equals(2561.58));
       expect(breakdown.postMaturityBreakdown!.postMaturityPayableAmount, equals(39155.58));
+    });
+
+    test('Test 9: Prompt Specification Case - ₹39,000 loan, ₹2,300 paid -> ₹36,700 outstanding across 1, 2, and 3 overdue months', () {
+      final sanctionDate = DateTime(2026, 3, 1);
+      final maturityDate = DateTime(2026, 8, 1);
+
+      // Month 1: 15-08-2026
+      final m1 = settingsProvider.getPostMaturityBreakdown(
+        sanctionDate: sanctionDate,
+        maturityDate: maturityDate,
+        remainingBalance: 36700.0,
+        standardInstallment: 100.0,
+        asOfDate: DateTime(2026, 8, 15),
+      );
+      expect(m1.isPastMaturity, isTrue);
+      expect(m1.overdueMonths, equals(1));
+      expect(m1.remainingBalance, equals(36700.0));
+      expect(m1.postMaturityInterestAmount, equals(2569.0));
+      expect(m1.postMaturityPayableAmount, equals(39269.0));
+
+      // Month 2 (no payment): 15-09-2026
+      final m2 = settingsProvider.getPostMaturityBreakdown(
+        sanctionDate: sanctionDate,
+        maturityDate: maturityDate,
+        remainingBalance: 36700.0,
+        standardInstallment: 100.0,
+        asOfDate: DateTime(2026, 9, 15),
+      );
+      expect(m2.isPastMaturity, isTrue);
+      expect(m2.overdueMonths, equals(2));
+      expect(m2.remainingBalance, equals(39269.0));
+      expect(m2.postMaturityInterestAmount, equals(2748.83));
+      expect(m2.postMaturityPayableAmount, equals(42017.83));
+
+      // Month 3 (no payment): 15-10-2026
+      final m3 = settingsProvider.getPostMaturityBreakdown(
+        sanctionDate: sanctionDate,
+        maturityDate: maturityDate,
+        remainingBalance: 36700.0,
+        standardInstallment: 100.0,
+        asOfDate: DateTime(2026, 10, 15),
+      );
+      expect(m3.isPastMaturity, isTrue);
+      expect(m3.overdueMonths, equals(3));
+      expect(m3.remainingBalance, equals(42017.83));
+      expect(m3.postMaturityInterestAmount, equals(2941.25));
+      expect(m3.postMaturityPayableAmount, equals(44959.08));
+    });
+
+    test('Test 10: Partial payment handling after overdue interest is added (₹500 payment in month 1)', () {
+      final sanctionDate = DateTime(2026, 3, 1);
+      final maturityDate = DateTime(2026, 8, 1);
+
+      final entry = RoCollectionEntry(
+        id: 'COL-PARTIAL-01',
+        customerId: 'CUST-P01',
+        accountNumber: 'ACC-P01',
+        loaneeName: 'Partial Payment Loanee',
+        loaneeAddress: 'Imphal',
+        collectionType: 'Daily',
+        route: 'Master Route',
+        mobileNo: '9876543210',
+        createdAt: sanctionDate,
+        loanAmount: 39000.0,
+      );
+
+      final payments = [
+        // Pre-maturity payment of ₹2,300
+        CollectionPaymentModel(
+          id: 'PAY-PRE-01',
+          collectionId: entry.id,
+          paymentAmount: 2300.0,
+          remainingBalance: 36700.0,
+          createdAt: DateTime(2026, 5, 15),
+        ),
+        // Post-maturity partial payment of ₹500 during Month 1
+        CollectionPaymentModel(
+          id: 'PAY-POST-01',
+          collectionId: entry.id,
+          paymentAmount: 500.0,
+          remainingBalance: 38769.0, // 39,269 - 500 = 38,769
+          createdAt: DateTime(2026, 8, 20),
+        ),
+      ];
+
+      // Verify Month 2 breakdown on 15-09-2026:
+      // Starting balance = ₹38,769
+      // Interest = 38,769 * 7% = ₹2,713.83
+      // Total Payable = 38,769 + 2,713.83 = ₹41,482.83
+      final breakdownMonth2 = settingsProvider.getLatePayableBreakdownForEntry(
+        entry: entry,
+        payments: payments,
+        loaneeLoanAmount: 39000.0,
+        maturityDate: maturityDate,
+        asOfDate: DateTime(2026, 9, 15),
+      );
+
+      expect(breakdownMonth2.isPastMaturity, isTrue);
+      expect(breakdownMonth2.postMaturityBreakdown!.overdueMonths, equals(2));
+      expect(breakdownMonth2.postMaturityBreakdown!.remainingBalance, equals(38769.0));
+      expect(breakdownMonth2.postMaturityBreakdown!.postMaturityInterestAmount, equals(2713.83));
+      expect(breakdownMonth2.postMaturityBreakdown!.postMaturityPayableAmount, equals(41482.83));
+      expect(breakdownMonth2.totalPayableAmount, equals(41482.83));
+    });
+
+    test('Test 11: Dynamic Overdue Rate from Settings Provider (e.g. 10% instead of 7%)', () async {
+      await settingsProvider.saveInterestPolicySettings(
+        normalRate: 3.0,
+        postMaturityRate: 10.0,
+      );
+
+      final sanctionDate = DateTime(2026, 3, 1);
+      final maturityDate = DateTime(2026, 8, 1);
+
+      final breakdown = settingsProvider.getPostMaturityBreakdown(
+        sanctionDate: sanctionDate,
+        maturityDate: maturityDate,
+        remainingBalance: 36700.0,
+        standardInstallment: 100.0,
+        asOfDate: DateTime(2026, 8, 15),
+      );
+
+      expect(breakdown.isPastMaturity, isTrue);
+      expect(breakdown.postMaturityInterestRate, equals(10.0));
+      // 36,700 * 10% = 3,670
+      expect(breakdown.postMaturityInterestAmount, equals(3670.0));
+      expect(breakdown.postMaturityPayableAmount, equals(40370.0));
     });
   });
 }

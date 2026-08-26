@@ -20,6 +20,7 @@ import 'screens/recent_loanees_page.dart';
 import 'screens/settings_page.dart';
 import 'screens/late_fines_page.dart';
 import 'screens/admin_users_list_page.dart';
+import 'screens/collection_performance_page.dart';
 import 'providers/auth_provider.dart';
 import 'providers/loanee_provider.dart';
 import 'providers/ro_provider.dart';
@@ -306,13 +307,29 @@ class _MainPageState extends State<MainPage> {
       const LateFinesPage(),
       // Index 12: Admin & Staff Accounts List
       const AdminUsersListPage(),
+      // Index 13: Collection Performance (Manager & Admin only)
+      CollectionPerformancePage(
+        onBackToDashboard: () {
+          setState(() {
+            _selectedIndex = 0;
+          });
+        },
+      ),
     ];
+
+    // Access control protection: Only Admin and Manager can access index 13
+    int effectiveIndex = _selectedIndex;
+    if (effectiveIndex == 13 &&
+        authProvider.activeRole != UserType.admin &&
+        authProvider.activeRole != UserType.manager) {
+      effectiveIndex = 0;
+    }
 
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
         title: Text(
-          _getMenuTitle(_selectedIndex, authProvider.activeRole),
+          _getMenuTitle(effectiveIndex, authProvider.activeRole),
           style: const TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 18,
@@ -367,7 +384,7 @@ class _MainPageState extends State<MainPage> {
           const SizedBox(width: 2),
 
           // Active Role Level Badge in AppBar (Hidden for Loanee or when on Profile)
-          if (authProvider.activeRole != UserType.loanee && _selectedIndex != 8)
+          if (authProvider.activeRole != UserType.loanee && effectiveIndex != 8)
             Container(
               margin: const EdgeInsets.only(right: 14),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -403,7 +420,7 @@ class _MainPageState extends State<MainPage> {
       ),
       // Toggle Navigation Drawer
       drawer: AppDrawer(
-        selectedIndex: _selectedIndex,
+        selectedIndex: effectiveIndex,
         onMenuSelected: (index) {
           setState(() {
             _selectedIndex = index;
@@ -411,7 +428,7 @@ class _MainPageState extends State<MainPage> {
           Navigator.pop(context); // Close drawer after selection
         },
       ),
-      body: pages[_selectedIndex < pages.length ? _selectedIndex : 0],
+      body: pages[effectiveIndex < pages.length ? effectiveIndex : 0],
     );
   }
 
@@ -452,6 +469,8 @@ class _MainPageState extends State<MainPage> {
         return 'Late Fines & Overdue Tracking';
       case 12:
         return 'Admin User';
+      case 13:
+        return 'Collection Performance';
       default:
         return 'Mangang Finance';
     }

@@ -69,6 +69,12 @@ List<int> createTestExcel({
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  setUpAll(() {
+    final bytes = HistoricalPaymentImportService.generateTemplateExcelBytes();
+    Directory("assets/template").createSync(recursive: true);
+    File("assets/template/old_payment_history.xlsx").writeAsBytesSync(bytes);
+  });
+
   group("Historical Payment Import - 13 Comprehensive Tests", () {
     late List<LoaneeAccount> sampleLoanees;
     late List<RoCollectionEntry> sampleEntries;
@@ -1396,6 +1402,76 @@ void main() {
 
       // Verify Delete action button is rendered
       expect(find.byIcon(Icons.delete_outline_rounded), findsOneWidget);
+    });
+
+    test("14. Recording payment or importing payment history preserves custom loansanctiondate and loanmaturitydate", () async {
+      final customSanction = DateTime(2026, 2, 10);
+      final customMaturity = DateTime(2026, 7, 10);
+
+      final loanee = LoaneeAccount(
+        customerid: "CUST-DATE-TEST",
+        accountnumber: "ACC-DATE-TEST",
+        loaneename: "Date Test Loanee",
+        guardianname: "N/A",
+        address: "Imphal",
+        businesstype: "Retail",
+        postoffice: "PO",
+        policestation: "PS",
+        district: "Imphal West",
+        pincode: "795001",
+        mobileno: "9862000099",
+        aadharno: "111122223333",
+        createdat: DateTime(2026, 1, 1),
+        status: "Active",
+        loanamount: 50000.0,
+        paidamount: 0.0,
+        dueamount: 50000.0,
+        loansanctiondate: customSanction,
+        loanmaturitydate: customMaturity,
+      );
+
+      final loaneeProvider = LoaneeProvider();
+      await loaneeProvider.updateLoanee(loanee);
+
+      // Verify before payment
+      final before = loaneeProvider.loanees.firstWhere((l) => l.customerId == "CUST-DATE-TEST");
+      expect(before.loansanctiondate, equals(customSanction));
+      expect(before.loanmaturitydate, equals(customMaturity));
+      expect(before.formattedSanctionDate, equals("10/02/2026"));
+      expect(before.formattedMaturityDate, equals("10/07/2026"));
+
+      // Record a payment
+      loaneeProvider.recordPaymentForLoanee(
+        customerId: "CUST-DATE-TEST",
+        accountNumber: "ACC-DATE-TEST",
+        paymentAmount: 5000.0,
+        newRemainingBalance: 45000.0,
+      );
+
+      // Verify after payment: sanction date and maturity date must be UNCHANGED
+      final after = loaneeProvider.loanees.firstWhere((l) => l.customerId == "CUST-DATE-TEST");
+      expect(after.paidamount, equals(5000.0));
+      expect(after.dueamount, equals(45000.0));
+      expect(after.loansanctiondate, equals(customSanction));
+      expect(after.loanmaturitydate, equals(customMaturity));
+      expect(after.formattedSanctionDate, equals("10/02/2026"));
+      expect(after.formattedMaturityDate, equals("10/07/2026"));
+
+      // Handle payment deleted
+      loaneeProvider.handlePaymentDeleted(
+        customerId: "CUST-DATE-TEST",
+        accountNumber: "ACC-DATE-TEST",
+        deletedPaymentAmount: 5000.0,
+        newRemainingBalance: 50000.0,
+      );
+
+      final afterDelete = loaneeProvider.loanees.firstWhere((l) => l.customerId == "CUST-DATE-TEST");
+      expect(afterDelete.paidamount, equals(0.0));
+      expect(afterDelete.dueamount, equals(50000.0));
+      expect(afterDelete.loansanctiondate, equals(customSanction));
+      expect(afterDelete.loanmaturitydate, equals(customMaturity));
+      expect(afterDelete.formattedSanctionDate, equals("10/02/2026"));
+      expect(afterDelete.formattedMaturityDate, equals("10/07/2026"));
     });
   });
 }

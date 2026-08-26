@@ -65,6 +65,19 @@ class _RoCollectionSheetViewPageState
   }
 
   Future<void> _handleImportHistoricalPayments(BuildContext context) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isRo = authProvider.activeRole == UserType.ro ||
+        authProvider.currentUser?.userType == UserType.ro;
+    if (isRo) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Access Denied: RO users cannot upload historical collection records.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
@@ -103,8 +116,15 @@ class _RoCollectionSheetViewPageState
     );
     final totalCollected =
         collectionProvider.getTotalPaidForCollection(entry.id);
+    final totalInterest =
+        collectionProvider.getTotalInterestForCollection(entry.id);
+    final totalLoanAmount = (entry.loanAmount != null && entry.loanAmount! > 0)
+        ? entry.loanAmount!
+        : ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : entry.initialBalance);
     final remainingBal =
-        collectionProvider.getLatestRemainingBalance(entry.id, loanee?.loanAmount ?? 0.0);
+        (totalLoanAmount + totalInterest - totalCollected).clamp(0.0, double.infinity);
 
     final result = await showDialog<bool>(
       context: context,
@@ -309,8 +329,15 @@ class _RoCollectionSheetViewPageState
     );
     final totalCollected =
         collectionProvider.getTotalPaidForCollection(entry.id);
+    final totalInterest =
+        collectionProvider.getTotalInterestForCollection(entry.id);
+    final totalLoanAmount = (entry.loanAmount != null && entry.loanAmount! > 0)
+        ? entry.loanAmount!
+        : ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : entry.initialBalance);
     final remainingBal =
-        collectionProvider.getLatestRemainingBalance(entry.id, loanee?.loanAmount ?? 0.0);
+        (totalLoanAmount + totalInterest - totalCollected).clamp(0.0, double.infinity);
     final hasPaidToday = collectionProvider.hasPaymentForDate(entry.id);
     final payments = collectionProvider.getPaymentsForCollection(entry.id);
     final now = DateTime.now();
@@ -1441,57 +1468,63 @@ class _RoCollectionSheetViewPageState
             ],
           );
 
+          final authProvider = Provider.of<AuthProvider>(context, listen: false);
+          final isRo = authProvider.activeRole == UserType.ro ||
+              authProvider.currentUser?.userType == UserType.ro;
+
           final actionsWidget = SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextButton.icon(
-                  onPressed: () => HistoricalPaymentImportService.downloadTemplate(context),
-                  icon: const Icon(Icons.download_rounded,
-                      size: 13, color: Colors.white),
-                  label: const Text(
-                    "Download Template",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+                if (!isRo) ...[
+                  TextButton.icon(
+                    onPressed: () => HistoricalPaymentImportService.downloadTemplate(context),
+                    icon: const Icon(Icons.download_rounded,
+                        size: 13, color: Colors.white),
+                    label: const Text(
+                      "Download Template",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.white.withOpacity(0.15),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: const BorderSide(color: Colors.white24, width: 1),
+                      ),
                     ),
                   ),
-                  style: TextButton.styleFrom(
-                    backgroundColor: Colors.white.withOpacity(0.15),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      side: const BorderSide(color: Colors.white24, width: 1),
+                  const SizedBox(width: 6),
+                  TextButton.icon(
+                    onPressed: () => _handleImportHistoricalPayments(context),
+                    icon: const Icon(Icons.upload_file_rounded,
+                        size: 13, color: Colors.white),
+                    label: const Text(
+                      "Upload Excel",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      backgroundColor: const Color(0xFF8B1A1A),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: const BorderSide(color: Colors.white24, width: 1),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 6),
-                TextButton.icon(
-                  onPressed: () => _handleImportHistoricalPayments(context),
-                  icon: const Icon(Icons.upload_file_rounded,
-                      size: 13, color: Colors.white),
-                  label: const Text(
-                    "Upload Excel",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  style: TextButton.styleFrom(
-                    backgroundColor: const Color(0xFF8B1A1A),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      side: const BorderSide(color: Colors.white24, width: 1),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
+                  const SizedBox(width: 4),
+                ],
                 if (_selectedRoute != null || _searchQuery.isNotEmpty) ...[
                   IconButton(
                     icon: const Icon(Icons.refresh_rounded,
@@ -3579,28 +3612,11 @@ class __AddPaymentEntryModalContentState
 
       final payments =
           collectionProvider.getPaymentsForCollection(widget.entry.id);
-      if (payments.isNotEmpty) {
-        _currentDueBalance = payments.first.remainingBalance;
-      } else {
-        final loanee = loaneeProvider.getLoaneeForUser(
-          customerId: widget.entry.customerId,
-          mobileNo: widget.entry.mobileNo,
-          name: widget.entry.loaneeName,
-        );
-        _currentDueBalance = (loanee != null && loanee.loanAmount > 0)
-            ? loanee.loanAmount
-            : ((loanee != null && loanee.dueAmount > 0)
-                ? loanee.dueAmount
-                : 0.0);
-      }
-
       final loanee = loaneeProvider.getLoaneeForUser(
         customerId: widget.entry.customerId,
         mobileNo: widget.entry.mobileNo,
         name: widget.entry.loaneeName,
       );
-
-      // Auto-calculate full Late Breakdown: Missed overdue days + today's installment + late penalty fee
       final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
         entry: widget.entry,
         payments: payments,
@@ -3611,6 +3627,25 @@ class __AddPaymentEntryModalContentState
       _payableBreakdown = breakdown;
       _lateUnits = breakdown.lateUnits;
       _calculatedFine = breakdown.calculatedLateFine;
+
+      final initialBal = (widget.entry.loanAmount != null && widget.entry.loanAmount! > 0)
+          ? widget.entry.loanAmount!
+          : ((loanee != null && loanee.loanAmount > 0)
+              ? loanee.loanAmount
+              : ((loanee != null && loanee.dueAmount > 0)
+                  ? loanee.dueAmount
+                  : widget.entry.initialBalance));
+      final totalPaid =
+          collectionProvider.getTotalPaidForCollection(widget.entry.id);
+      final totalInterest =
+          collectionProvider.getTotalInterestForCollection(widget.entry.id);
+
+      if (breakdown.isPastMaturity && breakdown.postMaturityBreakdown != null) {
+        _currentDueBalance = breakdown.postMaturityBreakdown!.remainingBalance;
+      } else {
+        _currentDueBalance =
+            (initialBal + totalInterest - totalPaid).clamp(0.0, double.infinity);
+      }
 
       if (_paymentAmountController.text.trim().isEmpty) {
         _paymentAmountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
@@ -3888,8 +3923,12 @@ class __AddPaymentEntryModalContentState
     final lateFine =
         double.tryParse(_lateFineController.text.trim()) ?? 0.0;
 
-    final newRemainingBalance = (_currentDueBalance >= paymentAmount)
-        ? (_currentDueBalance - paymentAmount)
+    final totalTarget = (_payableBreakdown?.isPastMaturity == true)
+        ? _payableBreakdown!.totalPayableAmount
+        : _currentDueBalance;
+
+    final newRemainingBalance = (totalTarget >= paymentAmount)
+        ? (totalTarget - paymentAmount)
         : 0.0;
 
     final messenger = ScaffoldMessenger.of(context);
@@ -4239,6 +4278,30 @@ class __AddPaymentEntryModalContentState
                                 Text('₹ ${breakdown.baseInstallment.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF1E1E1E))),
                               ],
                             ),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Current Due Balance:',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey.shade700,
+                                  ),
+                                ),
+                                Text(
+                                  '₹ ${((postMaturity != null && postMaturity.isPastMaturity) ? postMaturity.remainingBalance : _currentDueBalance).toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: ((postMaturity != null && postMaturity.isPastMaturity) ? postMaturity.remainingBalance : _currentDueBalance) > 0
+                                        ? Colors.red.shade800
+                                        : Colors.green.shade800,
+                                  ),
+                                ),
+                              ],
+                            ),
                             if (postMaturity != null && postMaturity.isPastMaturity) ...[
                               const SizedBox(height: 6),
                               Row(
@@ -4255,8 +4318,6 @@ class __AddPaymentEntryModalContentState
                                 ],
                               ),
                             ],
-                           
-                           
                             const SizedBox(height: 6),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -4317,33 +4378,9 @@ class __AddPaymentEntryModalContentState
                                 ],
                               ),
                             ),
-                            const Divider(height: 12),
                           ],
                         );
                       },
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Current Due Balance:',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey.shade700,
-                          ),
-                        ),
-                        Text(
-                          '₹ ${_currentDueBalance.toStringAsFixed(2)}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: _currentDueBalance > 0
-                                ? Colors.red.shade800
-                                : Colors.green.shade800,
-                          ),
-                        ),
-                      ],
                     ),
                   ],
                 ),

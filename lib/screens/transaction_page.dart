@@ -1,6 +1,7 @@
 // lib/screens/transaction_page.dart
 
 import 'package:flutter/material.dart';
+import 'package:mangang_finance/providers/loanee_provider.dart';
 import 'package:provider/provider.dart';
 import '../models/collection_payment_model.dart';
 import '../models/ro_collection_entry_model.dart';
@@ -437,10 +438,18 @@ class _TransactionPageState extends State<TransactionPage> {
                                   _selectedCard = val;
                                   if (val != null) {
                                     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                                    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                                    final loanee = loaneeProvider.getLoaneeForUser(
+                                      customerId: val.customerId,
+                                      mobileNo: val.mobileNo,
+                                      name: val.loaneeName,
+                                    );
                                     final payments = collectionProvider.getPaymentsForCollection(val.id);
                                     final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                                       entry: val,
                                       payments: payments,
+                                      loaneeLoanAmount: loanee?.loanAmount,
+                                      maturityDate: loanee?.loanMaturityDate,
                                     );
                                     _amountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
                                     _lateFineController.text = breakdown.calculatedLateFine.toStringAsFixed(2);

@@ -258,46 +258,235 @@ class LoaneeAccount {
     return 0.0;
   }
 
+  /// Robust date parser for all Postgres, ISO-8601, text, and serial formats
+  static DateTime? parseDateTimeOrNull(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) {
+      return DateTime(value.year, value.month, value.day);
+    }
+    if (value is num) {
+      if (value > 1000 && value < 100000) {
+        return DateTime(1899, 12, 30).add(Duration(days: value.toInt()));
+      }
+      final dt = DateTime.fromMillisecondsSinceEpoch(value.toInt());
+      return DateTime(dt.year, dt.month, dt.day);
+    }
+
+    final str = value.toString().trim();
+    if (str.isEmpty || str.toLowerCase() == 'null') return null;
+
+    // 1. Numeric Excel serial string (e.g. "46204")
+    final numVal = double.tryParse(str);
+    if (numVal != null &&
+        numVal > 1000 &&
+        numVal < 100000 &&
+        !str.contains('-') &&
+        !str.contains('/') &&
+        !str.contains('.')) {
+      return DateTime(1899, 12, 30).add(Duration(days: numVal.toInt()));
+    }
+
+    // 2. Month names mapping (e.g. "24-Aug-2026", "24 August 2026", "Aug 24, 2026")
+    const monthNames = {
+      'jan': 1, 'january': 1,
+      'feb': 2, 'february': 2,
+      'mar': 3, 'march': 3,
+      'apr': 4, 'april': 4,
+      'may': 5,
+      'jun': 6, 'june': 6,
+      'jul': 7, 'july': 7,
+      'aug': 8, 'august': 8,
+      'sep': 9, 'september': 9, 'sept': 9,
+      'oct': 10, 'october': 10,
+      'nov': 11, 'november': 11,
+      'dec': 12, 'december': 12,
+    };
+
+    final cleanStr =
+        str.replaceAll(',', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    final parts =
+        cleanStr.split(RegExp(r'[-/.\s]')).where((p) => p.isNotEmpty).toList();
+
+    if (parts.length == 3) {
+      int? monthFromText;
+      int? dayFromParts;
+      int? yearFromParts;
+
+      for (int i = 0; i < 3; i++) {
+        final lower = parts[i].toLowerCase();
+        if (monthNames.containsKey(lower)) {
+          monthFromText = monthNames[lower];
+          if (i == 0) {
+            dayFromParts = int.tryParse(parts[1]);
+            yearFromParts = int.tryParse(parts[2]);
+          } else if (i == 1) {
+            dayFromParts = int.tryParse(parts[0]);
+            yearFromParts = int.tryParse(parts[2]);
+          }
+          break;
+        }
+      }
+
+      if (monthFromText != null &&
+          dayFromParts != null &&
+          yearFromParts != null) {
+        if (yearFromParts < 100) yearFromParts += 2000;
+        return DateTime(yearFromParts, monthFromText, dayFromParts);
+      }
+
+      final p1 = int.tryParse(parts[0]);
+      final p2 = int.tryParse(parts[1]);
+      int? p3 = int.tryParse(parts[2]);
+
+      if (p1 != null && p2 != null && p3 != null) {
+        if (p3 < 100) p3 += 2000;
+
+        if (p3 > 1900) {
+          if (p2 <= 12 && p1 <= 31) {
+            return DateTime(p3, p2, p1);
+          } else if (p1 <= 12 && p2 <= 31) {
+            return DateTime(p3, p1, p2);
+          }
+        } else if (p1 > 1900) {
+          return DateTime(p1, p2, p3);
+        }
+      }
+    }
+
+    // 3. Standard Postgres / ISO formats (e.g. "2026-08-24", "2026-08-24T00:00:00+00:00")
+    try {
+      final dt = DateTime.parse(str);
+      return DateTime(dt.year, dt.month, dt.day);
+    } catch (_) {}
+
+    return null;
+  }
+
   factory LoaneeAccount.fromJson(Map<String, dynamic> json) {
-    final parsedCreatedAt = AppNotification.parseDateTime(json['createdat'] ?? json['createdAt']);
+    final parsedCreatedAt = parseDateTimeOrNull(
+          json['createdat'] ?? json['created_at'] ?? json['createdAt'],
+        ) ??
+        DateTime.now();
 
-    final rawSanction = json['loansanctiondate'] ?? json['loanSanctionDate'] ?? json['loan_sanction_date'];
-    final parsedSanctionDate = rawSanction != null ? AppNotification.parseDateTime(rawSanction) : null;
+    final rawSanction = json['loansanctiondate'] ??
+        json['loan_sanction_date'] ??
+        json['loansanction_date'] ??
+        json['loanSanctionDate'] ??
+        json['sanction_date'] ??
+        json['sanctiondate'] ??
+        json['sanctionDate'];
+    final parsedSanctionDate = parseDateTimeOrNull(rawSanction);
 
-    final rawMaturity = json['loanmaturitydate'] ?? json['loanMaturityDate'] ?? json['loan_maturity_date'];
-    final parsedMaturityDate = rawMaturity != null ? AppNotification.parseDateTime(rawMaturity) : null;
+    final rawMaturity = json['loanmaturitydate'] ??
+        json['loan_maturity_date'] ??
+        json['loanmaturity_date'] ??
+        json['loanMaturityDate'] ??
+        json['maturity_date'] ??
+        json['maturitydate'] ??
+        json['maturityDate'];
+    final parsedMaturityDate = parseDateTimeOrNull(rawMaturity);
+
+    final finalSanction = parsedSanctionDate ?? parsedCreatedAt;
+    final finalMaturity =
+        parsedMaturityDate ?? calculateMaturityDate(finalSanction);
 
     return LoaneeAccount(
-      customerid: json['customerid']?.toString() ?? json['customerId']?.toString() ?? '',
-      accountnumber: json['accountnumber']?.toString() ?? json['accountNumber']?.toString() ?? '',
-      loaneename: json['loaneename']?.toString() ?? json['loaneeName']?.toString() ?? '',
-      guardianname: json['guardianname']?.toString() ?? json['guardianName']?.toString() ?? '',
+      customerid: json['customerid']?.toString() ??
+          json['customerId']?.toString() ??
+          json['customer_id']?.toString() ??
+          '',
+      accountnumber: json['accountnumber']?.toString() ??
+          json['accountNumber']?.toString() ??
+          json['account_number']?.toString() ??
+          '',
+      loaneename: json['loaneename']?.toString() ??
+          json['loaneeName']?.toString() ??
+          json['loanee_name']?.toString() ??
+          '',
+      guardianname: json['guardianname']?.toString() ??
+          json['guardianName']?.toString() ??
+          json['guardian_name']?.toString() ??
+          '',
       address: json['address']?.toString() ?? '',
-      businesstype: json['businesstype']?.toString() ?? json['businessType']?.toString() ?? '',
-      postoffice: json['postoffice']?.toString() ?? json['postOffice']?.toString() ?? '',
-      policestation: json['policestation']?.toString() ?? json['policeStation']?.toString() ?? '',
+      businesstype: json['businesstype']?.toString() ??
+          json['businessType']?.toString() ??
+          json['business_type']?.toString() ??
+          '',
+      postoffice: json['postoffice']?.toString() ??
+          json['postOffice']?.toString() ??
+          json['post_office']?.toString() ??
+          '',
+      policestation: json['policestation']?.toString() ??
+          json['policeStation']?.toString() ??
+          json['police_station']?.toString() ??
+          '',
       district: json['district']?.toString() ?? '',
-      pincode: json['pincode']?.toString() ?? json['pinCode']?.toString() ?? '',
-      mobileno: json['mobileno']?.toString() ?? json['mobileNo']?.toString() ?? '',
-      aadharno: json['aadharno']?.toString() ?? json['aadharNo']?.toString() ?? '',
+      pincode: json['pincode']?.toString() ??
+          json['pinCode']?.toString() ??
+          json['pin_code']?.toString() ??
+          '',
+      mobileno: json['mobileno']?.toString() ??
+          json['mobileNo']?.toString() ??
+          json['mobile_no']?.toString() ??
+          '',
+      aadharno: json['aadharno']?.toString() ??
+          json['aadharNo']?.toString() ??
+          json['aadhar_no']?.toString() ??
+          '',
       createdat: parsedCreatedAt,
       status: json['status']?.toString() ?? 'Active',
-      loanamount: _parseDouble(json['loanamount'] ?? json['loanAmount'] ?? json['loan_amount']),
-      paidamount: _parseDouble(json['paidamount'] ?? json['paidAmount'] ?? json['paid_amount']),
-      dueamount: _parseDouble(json['dueamount'] ?? json['dueAmount'] ?? json['due_amount']),
-      loansanctiondate: parsedSanctionDate ?? parsedCreatedAt,
-      loanmaturitydate: parsedMaturityDate ?? calculateMaturityDate(parsedSanctionDate ?? parsedCreatedAt),
-      witnessname: json['witnessname']?.toString() ?? json['witnessName']?.toString() ?? '',
-      witnessguardianname: json['witnessguardianname']?.toString() ?? json['witnessGuardianName']?.toString() ?? '',
-      witnessaddress: json['witnessaddress']?.toString() ?? json['witnessAddress']?.toString() ?? '',
-      witnessbusinesstype: json['witnessbusinesstype']?.toString() ?? json['witnessBusinessType']?.toString() ?? '',
-      witnesspostoffice: json['witnesspostoffice']?.toString() ?? json['witnessPostOffice']?.toString() ?? '',
-      witnesspolicestation: json['witnesspolicestation']?.toString() ?? json['witnessPoliceStation']?.toString() ?? '',
-      witnessdistrict: json['witnessdistrict']?.toString() ?? json['witnessDistrict']?.toString() ?? '',
-      witnesspincode: json['witnesspincode']?.toString() ?? json['witnessPinCode']?.toString() ?? '',
-      witnessmobileno: json['witnessmobileno']?.toString() ?? json['witnessMobileNo']?.toString() ?? '',
-      witnessaadharno: json['witnessaadharno']?.toString() ?? json['witnessAadharNo']?.toString() ?? '',
-      witnessrelationship: json['witnessrelationship']?.toString() ?? json['witnessRelationship']?.toString() ?? '',
+      loanamount: _parseDouble(
+          json['loanamount'] ?? json['loanAmount'] ?? json['loan_amount']),
+      paidamount: _parseDouble(
+          json['paidamount'] ?? json['paidAmount'] ?? json['paid_amount']),
+      dueamount: _parseDouble(
+          json['dueamount'] ?? json['dueAmount'] ?? json['due_amount']),
+      loansanctiondate: finalSanction,
+      loanmaturitydate: finalMaturity,
+      witnessname: json['witnessname']?.toString() ??
+          json['witnessName']?.toString() ??
+          json['witness_name']?.toString() ??
+          '',
+      witnessguardianname: json['witnessguardianname']?.toString() ??
+          json['witnessGuardianName']?.toString() ??
+          json['witness_guardian_name']?.toString() ??
+          '',
+      witnessaddress: json['witnessaddress']?.toString() ??
+          json['witnessAddress']?.toString() ??
+          json['witness_address']?.toString() ??
+          '',
+      witnessbusinesstype: json['witnessbusinesstype']?.toString() ??
+          json['witnessBusinessType']?.toString() ??
+          json['witness_business_type']?.toString() ??
+          '',
+      witnesspostoffice: json['witnesspostoffice']?.toString() ??
+          json['witnessPostOffice']?.toString() ??
+          json['witness_post_office']?.toString() ??
+          '',
+      witnesspolicestation: json['witnesspolicestation']?.toString() ??
+          json['witnessPoliceStation']?.toString() ??
+          json['witness_police_station']?.toString() ??
+          '',
+      witnessdistrict: json['witnessdistrict']?.toString() ??
+          json['witnessDistrict']?.toString() ??
+          json['witness_district']?.toString() ??
+          '',
+      witnesspincode: json['witnesspincode']?.toString() ??
+          json['witnessPinCode']?.toString() ??
+          json['witness_pin_code']?.toString() ??
+          '',
+      witnessmobileno: json['witnessmobileno']?.toString() ??
+          json['witnessMobileNo']?.toString() ??
+          json['witness_mobile_no']?.toString() ??
+          '',
+      witnessaadharno: json['witnessaadharno']?.toString() ??
+          json['witnessAadharNo']?.toString() ??
+          json['witness_aadhar_no']?.toString() ??
+          '',
+      witnessrelationship: json['witnessrelationship']?.toString() ??
+          json['witnessRelationship']?.toString() ??
+          json['witness_relationship']?.toString() ??
+          '',
     );
   }
 }

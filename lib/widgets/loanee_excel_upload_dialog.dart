@@ -421,7 +421,7 @@ class _LoaneeExcelUploadDialogState extends State<LoaneeExcelUploadDialog> {
                                   Padding(
                                     padding: const EdgeInsets.only(top: 2),
                                     child: Text(
-                                      'Mobile: ${row.rawMobileNo.isNotEmpty ? row.rawMobileNo : "N/A"} • Business: ${row.rawBusinessType.isNotEmpty ? row.rawBusinessType : "Retail"} • District: ${row.rawDistrict.isNotEmpty ? row.rawDistrict : "Imphal"}',
+                                      'Mobile: ${row.rawMobileNo.isNotEmpty ? row.rawMobileNo : "N/A"} • Sanction: ${row.loaneeModel != null ? row.loaneeModel!.formattedSanctionDate : (row.rawSanctionDate.isNotEmpty ? row.rawSanctionDate : "Today")} • Maturity: ${row.loaneeModel != null ? row.loaneeModel!.formattedMaturityDate : (row.rawMaturityDate.isNotEmpty ? row.rawMaturityDate : "Auto")}',
                                       style: TextStyle(
                                         fontSize: 10.5,
                                         color: Colors.grey.shade600,

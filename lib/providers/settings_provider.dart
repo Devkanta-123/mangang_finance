@@ -627,7 +627,7 @@ class SettingsProvider extends ChangeNotifier {
     return '${date.day.toString().padLeft(2, '0')} ${months[date.month - 1]} ${date.year}';
   }
 
-  /// Evaluates Post-Maturity Overdue Assessment (3% Normal vs 7%/month Compound Overdue Interest on Remaining Balance)
+  /// Evaluates Post-Maturity Overdue Assessment (7%/month Compound Overdue Interest on Remaining Balance)
   PostMaturityInterestBreakdown getPostMaturityBreakdown({
     required DateTime sanctionDate,
     DateTime? maturityDate,
@@ -635,6 +635,8 @@ class SettingsProvider extends ChangeNotifier {
     required double standardInstallment,
     DateTime? asOfDate,
     bool isDaily = true,
+    List<CollectionPaymentModel>? payments,
+    double? initialLoanAmount,
   }) {
     final now = asOfDate ?? DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -683,38 +685,118 @@ class SettingsProvider extends ChangeNotifier {
     }
 
     final double monthlyRateDecimal = postRate / 100.0; // e.g. 0.07 for 7%
-
     final List<PostMaturityMonthlyStep> steps = [];
-    double currentPayable = remainingBalance;
+    double currentPayable;
     double lastPeriodInterest = 0.0;
+    double currentPeriodStartingBalance = 0.0;
 
-    // Compound sequentially through each applicable overdue period:
-    // Period 1: 7% on initial remainingBalance (e.g. ₹34,200 -> ₹2,394 -> ₹36,594)
-    // Period 2: 7% on updated payable (e.g. ₹36,594 -> ₹2,561.58 -> ₹39,155.58)
-    // Period 3: 7% on updated payable (e.g. ₹39,155.58 -> ₹2,740.8906 -> ₹41,896.4706)
-    for (int p = 1; p <= overduePeriods; p++) {
-      final double rawInterest = currentPayable * monthlyRateDecimal;
-      final double currentInterest = double.parse(rawInterest.toStringAsFixed(4));
-      final double newPayable = double.parse((currentPayable + currentInterest).toStringAsFixed(4));
-      steps.add(PostMaturityMonthlyStep(
-        monthNumber: p,
-        startingBalance: currentPayable,
-        interestRate: postRate,
-        interestAmount: currentInterest,
-        endingBalance: newPayable,
-      ));
-      lastPeriodInterest = currentInterest;
-      currentPayable = newPayable;
+    if (payments != null && payments.isNotEmpty && initialLoanAmount != null && initialLoanAmount > 0) {
+      final sortedPayments = List<CollectionPaymentModel>.from(payments)
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+      final preMaturityPaid = sortedPayments.where((p) {
+        final pDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
+        return !pDate.isAfter(cleanMaturity);
+      }).fold(0.0, (sum, p) => sum + p.paymentAmount);
+
+      final balanceAtMaturity = (initialLoanAmount - preMaturityPaid).clamp(0.0, double.infinity);
+
+      if (balanceAtMaturity <= 0) {
+        return PostMaturityInterestBreakdown(
+          isPastMaturity: false,
+          maturityDate: calculatedMaturity,
+          sanctionDate: sanctionDate,
+          remainingBalance: 0.0,
+          normalInterestRate: normalRate,
+          postMaturityInterestRate: postRate,
+          overdueMonths: 0,
+          overdueExtraDays: 0,
+          daysPastMaturity: 0,
+          totalOverdueMonths: 0.0,
+          postMaturityInterestAmount: 0.0,
+          cumulativeInterestAmount: 0.0,
+          normalInterestAmount: 0.0,
+          postMaturityPayableAmount: 0.0,
+          standardInstallment: standardInstallment,
+          monthlySteps: const [],
+          explanation: 'Loan Due Date: ${formatDate(calculatedMaturity)}. Loan is fully settled. Overdue interest: ₹0.00.',
+        );
+      }
+
+      currentPayable = balanceAtMaturity;
+
+      for (int p = 1; p <= overduePeriods; p++) {
+        if (currentPayable <= 0) {
+          lastPeriodInterest = 0.0;
+          break;
+        }
+
+        final periodStart = p == 1 ? cleanMaturity : addMonths(cleanMaturity, p - 1);
+        final periodEnd = addMonths(cleanMaturity, p);
+
+        currentPeriodStartingBalance = currentPayable;
+        final double rawInterest = currentPayable * monthlyRateDecimal;
+        final double currentInterest = double.parse(rawInterest.toStringAsFixed(2));
+        final double payableWithInterest = double.parse((currentPayable + currentInterest).toStringAsFixed(2));
+
+        steps.add(PostMaturityMonthlyStep(
+          monthNumber: p,
+          startingBalance: currentPeriodStartingBalance,
+          interestRate: postRate,
+          interestAmount: currentInterest,
+          endingBalance: payableWithInterest,
+        ));
+
+        lastPeriodInterest = currentInterest;
+        currentPayable = payableWithInterest;
+
+        // Apply payments made during this period p
+        final periodPayments = sortedPayments.where((pm) {
+          final pmDate = DateTime(pm.createdAt.year, pm.createdAt.month, pm.createdAt.day);
+          final inPeriod = pmDate.isAfter(periodStart) &&
+              (p == overduePeriods ? !pmDate.isAfter(today) : !pmDate.isAfter(periodEnd));
+          return inPeriod;
+        });
+
+        for (final pm in periodPayments) {
+          currentPayable = (currentPayable - pm.paymentAmount).clamp(0.0, double.infinity);
+          currentPayable = double.parse(currentPayable.toStringAsFixed(2));
+        }
+      }
+    } else {
+      currentPayable = remainingBalance;
+
+      for (int p = 1; p <= overduePeriods; p++) {
+        if (currentPayable <= 0) {
+          lastPeriodInterest = 0.0;
+          break;
+        }
+        currentPeriodStartingBalance = currentPayable;
+        final double rawInterest = currentPayable * monthlyRateDecimal;
+        final double currentInterest = double.parse(rawInterest.toStringAsFixed(2));
+        final double newPayable = double.parse((currentPayable + currentInterest).toStringAsFixed(2));
+
+        steps.add(PostMaturityMonthlyStep(
+          monthNumber: p,
+          startingBalance: currentPeriodStartingBalance,
+          interestRate: postRate,
+          interestAmount: currentInterest,
+          endingBalance: newPayable,
+        ));
+
+        lastPeriodInterest = currentInterest;
+        currentPayable = newPayable;
+      }
     }
 
-    final double cumulativeInterest = double.parse((currentPayable - remainingBalance).toStringAsFixed(4));
+    final double cumulativeInterest = steps.fold(0.0, (sum, s) => sum + s.interestAmount);
     final double finalPayable = currentPayable;
-    final double normalInterest = (remainingBalance * normalRate / 100.0);
+    final double normalInterest = (currentPeriodStartingBalance * normalRate / 100.0);
 
     // Build plain-English explanation without day references
     final StringBuffer exp = StringBuffer();
     exp.write('Loan Due Date: ${formatDate(calculatedMaturity)} (Period $overduePeriods overdue). ');
-    exp.write('Under Mangang Finance servicing terms, overdue interest compounds at 7% per overdue month. ');
+    exp.write('Under Mangang Finance servicing terms, overdue interest compounds at ${postRate.toStringAsFixed(1)}% per overdue month. ');
     if (steps.isNotEmpty) {
       final stepStrs = steps.map((s) => 'Month ${s.monthNumber}: Overdue interest on ₹${s.startingBalance.toStringAsFixed(2)} = ₹${s.interestAmount.toStringAsFixed(2)} (Payable: ₹${s.endingBalance.toStringAsFixed(2)})').join('; ');
       exp.write('[$stepStrs]. ');
@@ -725,7 +807,7 @@ class SettingsProvider extends ChangeNotifier {
       isPastMaturity: true,
       maturityDate: calculatedMaturity,
       sanctionDate: sanctionDate,
-      remainingBalance: remainingBalance,
+      remainingBalance: currentPeriodStartingBalance,
       normalInterestRate: normalRate,
       postMaturityInterestRate: postRate,
       overdueMonths: overduePeriods,
@@ -778,6 +860,8 @@ class SettingsProvider extends ChangeNotifier {
       standardInstallment: baseInstallment,
       asOfDate: asOfDate,
       isDaily: isDaily,
+      payments: payments,
+      initialLoanAmount: initialLoan,
     );
 
     final int lateUnits = calculateLateUnits(
@@ -789,7 +873,7 @@ class SettingsProvider extends ChangeNotifier {
     final double fineRate = isDaily ? _dailyLateFine : _weeklyLateFine;
     final double calculatedFine = lateUnits * fineRate;
 
-    // For a loan past 5-month maturity date:
+    // For a loan past maturity date:
     // Total Payable Amount = Remaining Due + New Overdue Interest Amount (NOT the daily installment)
     final double overdueMissedAmount;
     final double currentInstallment;

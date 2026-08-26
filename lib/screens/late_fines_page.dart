@@ -30,9 +30,16 @@ class _LateFinesPageState extends State<LateFinesPage> {
 
     for (final entry in entries) {
       final payments = collectionProvider.getPaymentsForCollection(entry.id);
+      final loanee = loaneeProvider.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
       final status = settingsProvider.getLateFineStatusForEntry(
         entry: entry,
         payments: payments,
+        loaneeLoanAmount: loanee?.loanAmount,
+        maturityDate: loanee?.loanMaturityDate,
       );
       allStatuses.add(status);
     }

@@ -162,9 +162,16 @@ void main() {
     authProvider.switchRole(UserType.manager);
     await tester.pumpAndSettle();
 
-    // On Manager Dashboard: Total Sanctioned, Manager Monitoring, and Recovered/Due exist
+    // On Manager Dashboard: Total Sanctioned and Manager Monitoring exist
     expect(find.text('TOTAL SANCTIONED'), findsOneWidget);
     expect(find.text('MANAGER MONITORING'), findsOneWidget);
+    // Hidden by default
+    expect(find.text('Total Recovered'), findsNothing);
+    expect(find.text('Total Due Remaining'), findsNothing);
+
+    // Tap to reveal
+    await tester.tap(find.text('MANAGER MONITORING'));
+    await tester.pumpAndSettle();
     expect(find.text('Total Recovered'), findsOneWidget);
     expect(find.text('Total Due Remaining'), findsOneWidget);
   });

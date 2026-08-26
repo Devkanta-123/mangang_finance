@@ -290,35 +290,10 @@ class LoaneeProvider extends ChangeNotifier {
       final matchAcc = cleanAcc.isNotEmpty && l.accountNumber.trim().toLowerCase() == cleanAcc;
 
       if (matchCust || matchAcc) {
-        _loanees[i] = LoaneeAccount(
-          customerid: l.customerid,
-          accountnumber: l.accountnumber,
-          loaneename: l.loaneename,
-          guardianname: l.guardianname,
-          address: l.address,
-          businesstype: l.businesstype,
-          postoffice: l.postoffice,
-          policestation: l.policestation,
-          district: l.district,
-          pincode: l.pincode,
-          mobileno: l.mobileno,
-          aadharno: l.aadharno,
-          createdat: l.createdat,
-          status: newRemainingBalance <= 0 ? 'Closed' : l.status,
-          loanamount: l.loanamount,
+        _loanees[i] = l.copyWith(
           paidamount: l.paidamount + paymentAmount,
           dueamount: newRemainingBalance,
-          witnessname: l.witnessname,
-          witnessguardianname: l.witnessguardianname,
-          witnessaddress: l.witnessaddress,
-          witnessbusinesstype: l.witnessbusinesstype,
-          witnesspostoffice: l.witnesspostoffice,
-          witnesspolicestation: l.witnesspolicestation,
-          witnessdistrict: l.witnessdistrict,
-          witnesspincode: l.witnesspincode,
-          witnessmobileno: l.witnessmobileno,
-          witnessaadharno: l.witnessaadharno,
-          witnessrelationship: l.witnessrelationship,
+          status: newRemainingBalance <= 0 ? 'Closed' : l.status,
         );
         notifyListeners();
         break;
@@ -342,35 +317,10 @@ class LoaneeProvider extends ChangeNotifier {
 
       if (matchCust || matchAcc) {
         final double updatedPaid = (l.paidamount - deletedPaymentAmount).clamp(0.0, double.infinity);
-        _loanees[i] = LoaneeAccount(
-          customerid: l.customerid,
-          accountnumber: l.accountnumber,
-          loaneename: l.loaneename,
-          guardianname: l.guardianname,
-          address: l.address,
-          businesstype: l.businesstype,
-          postoffice: l.postoffice,
-          policestation: l.policestation,
-          district: l.district,
-          pincode: l.pincode,
-          mobileno: l.mobileno,
-          aadharno: l.aadharno,
-          createdat: l.createdat,
-          status: newRemainingBalance <= 0 ? 'Closed' : 'Active',
-          loanamount: l.loanamount,
+        _loanees[i] = l.copyWith(
           paidamount: updatedPaid,
           dueamount: newRemainingBalance,
-          witnessname: l.witnessname,
-          witnessguardianname: l.witnessguardianname,
-          witnessaddress: l.witnessaddress,
-          witnessbusinesstype: l.witnessbusinesstype,
-          witnesspostoffice: l.witnesspostoffice,
-          witnesspolicestation: l.witnesspolicestation,
-          witnessdistrict: l.witnessdistrict,
-          witnesspincode: l.witnesspincode,
-          witnessmobileno: l.witnessmobileno,
-          witnessaadharno: l.witnessaadharno,
-          witnessrelationship: l.witnessrelationship,
+          status: newRemainingBalance <= 0 ? 'Closed' : 'Active',
         );
         notifyListeners();
         break;

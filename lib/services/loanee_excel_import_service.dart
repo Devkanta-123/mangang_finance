@@ -129,9 +129,10 @@ class LoaneeImportExecutionResult {
 
 class LoaneeExcelImportService {
   static const String templateAssetPath = 'assets/template/loanee_basic.xlsx';
+  static const String templateAssetPathAlt = 'assets/templates/loanee_basic.xlsx';
   static const String templateSheetName = 'Loanee Basic Details';
 
-  /// Standard Headers matching assets/template/loanee_basic.xlsx
+  /// Standard Headers matching assets/template/loanee_basic.xlsx (Created At removed; defaults to system current date)
   static const List<String> headers = [
     'Customer ID',
     'Account Number',
@@ -145,7 +146,6 @@ class LoaneeExcelImportService {
     'PIN Code',
     'Mobile No',
     'Aadhaar No',
-    'Created At',
     'Status',
     'Loan Amount',
     'Paid Amount',
@@ -157,7 +157,7 @@ class LoaneeExcelImportService {
   /// Excel epoch date: December 30, 1899 (for Windows Excel 1900 date system)
   static final DateTime excelEpoch = DateTime(1899, 12, 30);
 
-  /// Parse an Excel serial date number (e.g. 46204.0 -> 2026-07-01) or date string
+  /// Parse an Excel serial date number (e.g. 46204.0 -> 2026-07-01), DateCellValue, or date string
   static DateTime? parseDateValue(dynamic rawValue) {
     if (rawValue == null) return null;
 
@@ -166,7 +166,12 @@ class LoaneeExcelImportService {
       return DateTime(rawValue.year, rawValue.month, rawValue.day);
     }
 
-    // 2. Excel package DateCellValue or DateTimeCellValue
+    // 2. Excel package Data wrapper
+    if (rawValue is Data) {
+      return parseDateValue(rawValue.value);
+    }
+
+    // 3. Excel package DateCellValue or DateTimeCellValue
     if (rawValue is DateCellValue) {
       return DateTime(rawValue.year, rawValue.month, rawValue.day);
     }
@@ -174,7 +179,18 @@ class LoaneeExcelImportService {
       return DateTime(rawValue.year, rawValue.month, rawValue.day);
     }
 
-    // 3. Numeric Excel Serial Date (e.g. 46204 or 46204.0)
+    // 4. Excel package IntCellValue or DoubleCellValue
+    if (rawValue is IntCellValue) {
+      return parseDateValue(rawValue.value);
+    }
+    if (rawValue is DoubleCellValue) {
+      return parseDateValue(rawValue.value);
+    }
+    if (rawValue is TextCellValue) {
+      return parseDateValue(rawValue.value.text ?? rawValue.value.toString());
+    }
+
+    // 5. Numeric Excel Serial Date (e.g. 46204 or 46204.0)
     if (rawValue is num) {
       final double serial = rawValue.toDouble();
       if (serial > 1000 && serial < 100000) {
@@ -186,24 +202,74 @@ class LoaneeExcelImportService {
     final str = rawValue.toString().trim();
     if (str.isEmpty) return null;
 
-    // 4. Numeric string representing Excel serial date (e.g. "46204" or "46204.0")
+    // 6. Numeric string representing Excel serial date (e.g. "46204" or "46204.0")
     final numVal = double.tryParse(str);
     if (numVal != null &&
         numVal > 1000 &&
         numVal < 100000 &&
         !str.contains('-') &&
-        !str.contains('/')) {
+        !str.contains('/') &&
+        !str.contains('.')) {
       final days = numVal.floor();
       return excelEpoch.add(Duration(days: days));
     }
 
-    // 5. Standard formats: DD/MM/YYYY, DD-MM-YYYY, YYYY/MM/DD, MM/DD/YYYY
-    final partsSlash = str.split('/');
-    if (partsSlash.length == 3) {
-      final p1 = int.tryParse(partsSlash[0]);
-      final p2 = int.tryParse(partsSlash[1]);
-      final p3 = int.tryParse(partsSlash[2]);
+    // 7. Text month names mapping (e.g. "24-Aug-2026", "24 August 2026", "Aug 24, 2026")
+    const monthNames = {
+      'jan': 1, 'january': 1,
+      'feb': 2, 'february': 2,
+      'mar': 3, 'march': 3,
+      'apr': 4, 'april': 4,
+      'may': 5,
+      'jun': 6, 'june': 6,
+      'jul': 7, 'july': 7,
+      'aug': 8, 'august': 8,
+      'sep': 9, 'september': 9, 'sept': 9,
+      'oct': 10, 'october': 10,
+      'nov': 11, 'november': 11,
+      'dec': 12, 'december': 12,
+    };
+
+    final cleanStr = str.replaceAll(',', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    final delimiters = RegExp(r'[-/.\s]');
+    final parts = cleanStr.split(delimiters).where((p) => p.isNotEmpty).toList();
+
+    if (parts.length == 3) {
+      int? monthFromText;
+      int? dayFromParts;
+      int? yearFromParts;
+
+      for (int i = 0; i < 3; i++) {
+        final lower = parts[i].toLowerCase();
+        if (monthNames.containsKey(lower)) {
+          monthFromText = monthNames[lower];
+          if (i == 0) {
+            // Aug 24 2026
+            dayFromParts = int.tryParse(parts[1]);
+            yearFromParts = int.tryParse(parts[2]);
+          } else if (i == 1) {
+            // 24 Aug 2026
+            dayFromParts = int.tryParse(parts[0]);
+            yearFromParts = int.tryParse(parts[2]);
+          }
+          break;
+        }
+      }
+
+      if (monthFromText != null && dayFromParts != null && yearFromParts != null) {
+        if (yearFromParts < 100) yearFromParts += 2000;
+        return DateTime(yearFromParts, monthFromText, dayFromParts);
+      }
+
+      final p1 = int.tryParse(parts[0]);
+      final p2 = int.tryParse(parts[1]);
+      int? p3 = int.tryParse(parts[2]);
+
       if (p1 != null && p2 != null && p3 != null) {
+        if (p3 < 100) {
+          p3 += 2000; // Handle 2-digit years like 26 -> 2026
+        }
+
         if (p3 > 1900) {
           // DD/MM/YYYY or MM/DD/YYYY
           if (p2 <= 12 && p1 <= 31) {
@@ -218,25 +284,7 @@ class LoaneeExcelImportService {
       }
     }
 
-    final partsHyphen = str.split('-');
-    if (partsHyphen.length == 3) {
-      final p1 = int.tryParse(partsHyphen[0]);
-      final p2 = int.tryParse(partsHyphen[1]);
-      final p3 = int.tryParse(partsHyphen[2]);
-      if (p1 != null && p2 != null && p3 != null) {
-        if (p3 > 1900) {
-          // DD-MM-YYYY
-          if (p2 <= 12 && p1 <= 31) {
-            return DateTime(p3, p2, p1);
-          }
-        } else if (p1 > 1900) {
-          // YYYY-MM-DD
-          return DateTime(p1, p2, p3);
-        }
-      }
-    }
-
-    // 6. ISO Format (e.g. "2026-08-24", "2026-08-24T00:00:00")
+    // 8. ISO Format (e.g. "2026-08-24", "2026-08-24T00:00:00")
     try {
       final dt = DateTime.parse(str);
       return DateTime(dt.year, dt.month, dt.day);
@@ -300,7 +348,7 @@ class LoaneeExcelImportService {
     return cell.toString().trim();
   }
 
-  /// Generate fallback template Excel bytes matching assets/template/loanee_basic.xlsx
+  /// Generate fallback template Excel bytes matching assets/template/loanee_basic.xlsx (18 columns, no Created At)
   static List<int> generateTemplateExcelBytes() {
     final excelDoc = Excel.createExcel();
     final defaultSheet = excelDoc.getDefaultSheet();
@@ -326,7 +374,7 @@ class LoaneeExcelImportService {
       cell.cellStyle = headerStyle;
     }
 
-    // 2. Add sample record matching template
+    // 2. Add sample record matching template (18 columns)
     final sampleValues = [
       'CUST001',
       'LN000001',
@@ -340,7 +388,6 @@ class LoaneeExcelImportService {
       '781006',
       '9876543210',
       'XXXX XXXX 1234',
-      '24/08/2026',
       'Active',
       '57500',
       '0',
@@ -366,10 +413,15 @@ class LoaneeExcelImportService {
       try {
         final byteData = await rootBundle.load(templateAssetPath);
         bytes = byteData.buffer.asUint8List();
-      } catch (assetErr) {
-        debugPrint(
-            'ℹ️ Asset load note: $assetErr, generating exact template bytes dynamically');
-        bytes = generateTemplateExcelBytes();
+      } catch (_) {
+        try {
+          final byteData = await rootBundle.load(templateAssetPathAlt);
+          bytes = byteData.buffer.asUint8List();
+        } catch (assetErr) {
+          debugPrint(
+              'ℹ️ Asset load note: $assetErr, generating exact template bytes dynamically');
+          bytes = generateTemplateExcelBytes();
+        }
       }
 
       if (bytes.isEmpty) {
@@ -667,16 +719,25 @@ class LoaneeExcelImportService {
           (headerStr.contains('aadhar') || headerStr.contains('aadhaar'))) {
         aadharCol = c;
       } else if (createdCol == -1 &&
-          (headerStr.contains('created') || headerStr == 'reg date')) {
+          (headerStr.contains('created') ||
+              headerStr == 'reg date' ||
+              headerStr == 'created at' ||
+              headerStr == 'created date')) {
         createdCol = c;
       } else if (statusCol == -1 && headerStr.contains('status')) {
         statusCol = c;
-      } else if (loanCol == -1 &&
-          (headerStr.contains('loan amount') ||
-              headerStr == 'loan' ||
-              headerStr == 'principal' ||
-              headerStr == 'sanctioned amount')) {
-        loanCol = c;
+      } else if (sanctionCol == -1 &&
+          (headerStr.contains('sanction') ||
+              headerStr.contains('sanction date') ||
+              headerStr == 'loan sanction date' ||
+              headerStr == 'sanctioned date')) {
+        sanctionCol = c;
+      } else if (maturityCol == -1 &&
+          (headerStr.contains('maturity') ||
+              headerStr.contains('maturity date') ||
+              headerStr == 'loan maturity date' ||
+              headerStr == 'due date')) {
+        maturityCol = c;
       } else if (paidCol == -1 &&
           (headerStr.contains('paid amount') || headerStr == 'paid')) {
         paidCol = c;
@@ -685,16 +746,16 @@ class LoaneeExcelImportService {
               headerStr == 'due' ||
               headerStr == 'balance')) {
         dueCol = c;
-      } else if (sanctionCol == -1 &&
-          (headerStr.contains('sanction') || headerStr.contains('sanction date'))) {
-        sanctionCol = c;
-      } else if (maturityCol == -1 &&
-          (headerStr.contains('maturity') || headerStr.contains('maturity date'))) {
-        maturityCol = c;
+      } else if (loanCol == -1 &&
+          (headerStr.contains('loan amount') ||
+              headerStr == 'loan' ||
+              headerStr == 'principal' ||
+              headerStr == 'sanctioned amount')) {
+        loanCol = c;
       }
     }
 
-    // Default Fallback Indices if position-based
+    // Default Fallback Indices if position-based (18 columns standard: Created At removed)
     if (custCol == -1 && headerRow.isNotEmpty) custCol = 0;
     if (accCol == -1 && headerRow.length > 1) accCol = 1;
     if (nameCol == -1 && headerRow.length > 2) nameCol = 2;
@@ -707,13 +768,12 @@ class LoaneeExcelImportService {
     if (pinCol == -1 && headerRow.length > 9) pinCol = 9;
     if (mobileCol == -1 && headerRow.length > 10) mobileCol = 10;
     if (aadharCol == -1 && headerRow.length > 11) aadharCol = 11;
-    if (createdCol == -1 && headerRow.length > 12) createdCol = 12;
-    if (statusCol == -1 && headerRow.length > 13) statusCol = 13;
-    if (loanCol == -1 && headerRow.length > 14) loanCol = 14;
-    if (paidCol == -1 && headerRow.length > 15) paidCol = 15;
-    if (dueCol == -1 && headerRow.length > 16) dueCol = 16;
-    if (sanctionCol == -1 && headerRow.length > 17) sanctionCol = 17;
-    if (maturityCol == -1 && headerRow.length > 18) maturityCol = 18;
+    if (statusCol == -1 && headerRow.length > 12) statusCol = 12;
+    if (loanCol == -1 && headerRow.length > 13) loanCol = 13;
+    if (paidCol == -1 && headerRow.length > 14) paidCol = 14;
+    if (dueCol == -1 && headerRow.length > 15) dueCol = 15;
+    if (sanctionCol == -1 && headerRow.length > 16) sanctionCol = 16;
+    if (maturityCol == -1 && headerRow.length > 17) maturityCol = 17;
 
     // Database duplicate trackers
     final dbCustIds = <String>{};
@@ -879,11 +939,21 @@ class LoaneeExcelImportService {
         parsedDue = parsedLoan - parsedPaid;
       }
 
-      final parsedCreated =
-          parseDateValue(getRawCol(createdCol)) ?? DateTime.now();
-      final parsedSanction = parseDateValue(getRawCol(sanctionCol)) ??
+      // Requirement: Take Created At from system current date (or Excel if explicitly provided)
+      final parsedCreated = (createdCol != -1
+              ? (parseDateValue(getRawCol(createdCol)) ?? parseDateValue(rawCreated))
+              : null) ??
+          DateTime.now();
+
+      // Requirement: Loan Sanction Date and Loan Maturity Date must be taken directly from the Excel values
+      final parsedSanction = (sanctionCol != -1
+              ? (parseDateValue(getRawCol(sanctionCol)) ?? parseDateValue(rawSanction))
+              : null) ??
           parsedCreated;
-      final parsedMaturity = parseDateValue(getRawCol(maturityCol)) ??
+
+      final parsedMaturity = (maturityCol != -1
+              ? (parseDateValue(getRawCol(maturityCol)) ?? parseDateValue(rawMaturity))
+              : null) ??
           LoaneeAccount.calculateMaturityDate(parsedSanction);
 
       final statusVal = rawStatus.isNotEmpty ? rawStatus : 'Active';

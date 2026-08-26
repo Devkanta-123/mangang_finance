@@ -513,8 +513,8 @@ class _RouteManagementPageState extends State<RouteManagementPage> {
                       final entriesForRoute = collectionEntries
                           .where((e) => e.route.toLowerCase() == route.name.toLowerCase())
                           .toList();
-                      final totalRouteAmount = entriesForRoute.fold(
-                          0.0, (sum, item) => sum + provider.getTotalPaidForCollection(item.id));
+                      final todayRouteAmount = entriesForRoute.fold(
+                          0.0, (sum, item) => sum + provider.getTodayPaidForCollection(item.id));
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
@@ -653,13 +653,26 @@ class _RouteManagementPageState extends State<RouteManagementPage> {
                                       ),
                                     ],
                                   ),
-                                  Text(
-                                    '₹ ${totalRouteAmount.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87,
-                                    ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        '₹ ${todayRouteAmount.toStringAsFixed(2)}',
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF1B5E20),
+                                        ),
+                                      ),
+                                      Text(
+                                        "Today's Collection",
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.grey.shade600,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),

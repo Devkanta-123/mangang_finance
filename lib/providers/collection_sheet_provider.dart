@@ -94,13 +94,24 @@ class CollectionSheetProvider extends ChangeNotifier {
     }).fold(0.0, (sum, p) => sum + p.lateFine);
   }
 
-  /// Get the latest remaining balance for a collection card ID (default fallback if no payments)
+  /// Get the latest remaining balance for a collection card ID.
+  /// Dynamically computes (initialBal + totalInterest - totalPaid) so that
+  /// all past payment records in ro_collection_payments are subtracted from the initial balance.
   double getLatestRemainingBalance(String collectionId, [double fallback = 0.0]) {
+    final entry = getCollectionEntryById(collectionId);
+    final initialBal = fallback > 0
+        ? fallback
+        : (entry != null ? entry.initialBalance : 0.0);
+    if (initialBal > 0) {
+      final totalPaid = getTotalPaidForCollection(collectionId);
+      final totalInterest = getTotalInterestForCollection(collectionId);
+      return (initialBal + totalInterest - totalPaid).clamp(0.0, double.infinity);
+    }
     final cardPayments = getPaymentsForCollection(collectionId);
     if (cardPayments.isNotEmpty) {
       return cardPayments.first.remainingBalance;
     }
-    return fallback > 0 ? fallback : 0.0;
+    return 0.0;
   }
 
   /// Strictly check payment table (ro_collection_payments) for payment on a specific date (default today)

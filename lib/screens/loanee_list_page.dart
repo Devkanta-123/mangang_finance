@@ -699,7 +699,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                       style: TextStyle(fontSize: 10.5, color: Colors.grey.shade800),
                     ),
                     Text(
-                      '⏳ Maturity (5m): ${item.formattedMaturityDate}',
+                      '⏳ Maturity: ${item.formattedMaturityDate}',
                       style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.teal.shade900),
                     ),
                   ],
@@ -896,7 +896,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                           _buildModalRow('12. Business Type', currentLoanee.businesstype),
                           _buildModalRow('13. Sanctioned Amount', '₹ ${currentLoanee.loanamount.toStringAsFixed(0)}'),
                           _buildModalRow('14. Loan Sanction Date', currentLoanee.formattedSanctionDate),
-                          _buildModalRow('15. Loan Maturity Date (5m)', currentLoanee.formattedMaturityDate),
+                          _buildModalRow('15. Loan Maturity Date', currentLoanee.formattedMaturityDate),
                           _buildModalRow('16. Account Status', currentLoanee.status),
                         ],
                       ),

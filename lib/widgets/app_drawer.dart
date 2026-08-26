@@ -195,6 +195,12 @@ class AppDrawer extends StatelessWidget {
           subtitle: 'Create & manage route masters',
         ),
         DrawerMenuItemData(
+          index: 13,
+          icon: Icons.insights_rounded,
+          title: 'Collection Performance',
+          subtitle: 'Live collection analytics & monitoring',
+        ),
+        DrawerMenuItemData(
           index: 9,
           icon: Icons.recent_actors_rounded,
           title: 'Recent Registered Loanees',
@@ -265,6 +271,12 @@ class AppDrawer extends StatelessWidget {
           icon: Icons.alt_route_rounded,
           title: 'Master Routes',
           subtitle: 'View master route definitions',
+        ),
+        DrawerMenuItemData(
+          index: 13,
+          icon: Icons.insights_rounded,
+          title: 'Collection Performance',
+          subtitle: 'Live collection analytics & monitoring',
         ),
         DrawerMenuItemData(
           index: 9,
