@@ -145,7 +145,9 @@ class _AddLoaneeCollectionSheetPageState
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
     final double rawLoan = (_selectedLoaneeAccount != null && _selectedLoaneeAccount!.loanAmount > 0)
         ? _selectedLoaneeAccount!.loanAmount
-        : 11500.0;
+        : ((_selectedLoaneeAccount != null && _selectedLoaneeAccount!.dueAmount > 0)
+            ? _selectedLoaneeAccount!.dueAmount
+            : (settingsProvider.investmentBaseAmount * (1.0 + settingsProvider.investmentInterestRate / 100.0)));
 
     final breakdown = LoanPrincipalBreakdown.calculate(
       loanAmount: rawLoan,
@@ -588,7 +590,9 @@ class _AddLoaneeCollectionSheetPageState
                               final bool isDaily = _selectedCollectionType.toLowerCase().trim() == 'daily';
                               final double rawLoan = _selectedLoaneeAccount!.loanAmount > 0
                                   ? _selectedLoaneeAccount!.loanAmount
-                                  : 11500.0;
+                                  : (_selectedLoaneeAccount!.dueAmount > 0
+                                      ? _selectedLoaneeAccount!.dueAmount
+                                      : (settingsProvider.investmentBaseAmount * (1.0 + settingsProvider.investmentInterestRate / 100.0)));
                               final breakdown = LoanPrincipalBreakdown.calculate(
                                 loanAmount: rawLoan,
                                 interestRate: settingsProvider.investmentInterestRate,

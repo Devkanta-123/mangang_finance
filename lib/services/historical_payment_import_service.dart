@@ -1410,11 +1410,14 @@ class HistoricalPaymentImportService {
           final targetEntryId = row.resolvedCollectionEntry?.id ?? row.newCollectionEntry?.id;
           if (targetEntryId == null) continue;
 
-          // Initial loan balance
-          final initialBal = row.resolvedCollectionEntry?.initialBalance ??
-              row.newCollectionEntry?.initialBalance ??
-              row.resolvedLoanee?.loanAmount ??
-              11500.0;
+          // Initial loan balance directly from DB records
+          final initialBal = (row.resolvedCollectionEntry?.initialBalance != null && row.resolvedCollectionEntry!.initialBalance > 0)
+              ? row.resolvedCollectionEntry!.initialBalance
+              : ((row.newCollectionEntry?.initialBalance != null && row.newCollectionEntry!.initialBalance > 0)
+                  ? row.newCollectionEntry!.initialBalance
+                  : ((row.resolvedLoanee?.loanAmount != null && row.resolvedLoanee!.loanAmount > 0)
+                      ? row.resolvedLoanee!.loanAmount
+                      : (row.resolvedLoanee?.dueAmount ?? 0.0)));
 
           // Prior payments recorded in collectionProvider
           final priorPaid = collectionProvider.getTotalPaidForCollection(targetEntryId);

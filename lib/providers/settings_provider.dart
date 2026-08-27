@@ -646,8 +646,8 @@ class SettingsProvider extends ChangeNotifier {
     final double normalRate = _normalInterestRate;
     final double postRate = _postMaturityInterestRate;
 
-    // Rule 1: If current date <= maturity date or remaining balance is 0, loan is NOT overdue:
-    if (!today.isAfter(cleanMaturity) || remainingBalance <= 0) {
+    // Rule 1: If current date <= maturity date, loan is NOT overdue:
+    if (!today.isAfter(cleanMaturity)) {
       final double normalInterest = (remainingBalance * normalRate / 100.0);
       final String explanation = 'Loan Due Date: ${formatDate(calculatedMaturity)}. Loan is not overdue. Overdue interest: ₹0.00. Total Payable Amount = ₹${remainingBalance.toStringAsFixed(2)}.';
 
@@ -764,6 +764,28 @@ class SettingsProvider extends ChangeNotifier {
         }
       }
     } else {
+      if (remainingBalance <= 0) {
+        return PostMaturityInterestBreakdown(
+          isPastMaturity: false,
+          maturityDate: calculatedMaturity,
+          sanctionDate: sanctionDate,
+          remainingBalance: 0.0,
+          normalInterestRate: normalRate,
+          postMaturityInterestRate: postRate,
+          overdueMonths: 0,
+          overdueExtraDays: 0,
+          daysPastMaturity: 0,
+          totalOverdueMonths: 0.0,
+          postMaturityInterestAmount: 0.0,
+          cumulativeInterestAmount: 0.0,
+          normalInterestAmount: 0.0,
+          postMaturityPayableAmount: 0.0,
+          standardInstallment: standardInstallment,
+          monthlySteps: const [],
+          explanation: 'Loan Due Date: ${formatDate(calculatedMaturity)}. Loan is fully settled. Overdue interest: ₹0.00.',
+        );
+      }
+
       currentPayable = remainingBalance;
 
       for (int p = 1; p <= overduePeriods; p++) {
@@ -831,7 +853,9 @@ class SettingsProvider extends ChangeNotifier {
     required RoCollectionEntry entry,
     required List<CollectionPaymentModel> payments,
     double? loaneeLoanAmount,
+    double? loaneeDueAmount,
     DateTime? maturityDate,
+    DateTime? sanctionDate,
     DateTime? asOfDate,
   }) {
     final type = entry.collectionType.toLowerCase().trim();
@@ -846,22 +870,42 @@ class SettingsProvider extends ChangeNotifier {
       configuredWeeklyInstallment: weeklyInstallmentAmount,
     );
 
-    // Compute remaining balance
-    double totalPaid = payments.fold(0.0, (sum, p) => sum + p.paymentAmount);
-    double initialLoan = entry.loanAmount ?? loaneeLoanAmount ?? 11500.0;
-    double remainingBalance = (payments.isNotEmpty)
-        ? payments.first.remainingBalance
-        : (initialLoan - totalPaid).clamp(0.0, initialLoan);
+    // Compute remaining balance directly from DB records
+    final double totalPaid = payments.fold(0.0, (sum, p) => sum + p.paymentAmount);
+    final double totalInterest = payments.fold(0.0, (sum, p) => sum + p.interest);
+    final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
+        ? entry.loanAmount!
+        : ((loaneeLoanAmount != null && loaneeLoanAmount > 0)
+            ? loaneeLoanAmount
+            : (entry.actualPrincipal ?? 0.0));
+
+    final sortedPayments = List<CollectionPaymentModel>.from(payments)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    final double calculatedBalance = (initialLoan > 0)
+        ? (initialLoan + totalInterest - totalPaid).clamp(0.0, double.infinity)
+        : (sortedPayments.isNotEmpty && sortedPayments.first.remainingBalance > 0
+            ? sortedPayments.first.remainingBalance
+            : (loaneeDueAmount ?? 0.0));
+
+    final double remainingBalance = (calculatedBalance > 0 || (sortedPayments.isEmpty && loaneeDueAmount == null))
+        ? calculatedBalance
+        : (sortedPayments.isNotEmpty && sortedPayments.first.remainingBalance > 0
+            ? sortedPayments.first.remainingBalance
+            : (loaneeDueAmount ?? 0.0));
+
+    final effectiveSanctionDate = sanctionDate ?? entry.createdAt;
+    final effectiveMaturityDate = maturityDate ?? LoaneeAccount.calculateMaturityDate(effectiveSanctionDate);
 
     final postMaturity = getPostMaturityBreakdown(
-      sanctionDate: entry.createdAt,
-      maturityDate: maturityDate,
+      sanctionDate: effectiveSanctionDate,
+      maturityDate: effectiveMaturityDate,
       remainingBalance: remainingBalance,
       standardInstallment: baseInstallment,
       asOfDate: asOfDate,
       isDaily: isDaily,
       payments: payments,
-      initialLoanAmount: initialLoan,
+      initialLoanAmount: initialLoan > 0 ? initialLoan : remainingBalance,
     );
 
     final int lateUnits = calculateLateUnits(
@@ -930,7 +974,9 @@ class SettingsProvider extends ChangeNotifier {
     required RoCollectionEntry entry,
     required List<CollectionPaymentModel> payments,
     double? loaneeLoanAmount,
+    double? loaneeDueAmount,
     DateTime? maturityDate,
+    DateTime? sanctionDate,
     DateTime? asOfDate,
   }) {
     final type = entry.collectionType.toLowerCase().trim();
@@ -946,7 +992,9 @@ class SettingsProvider extends ChangeNotifier {
       entry: entry,
       payments: payments,
       loaneeLoanAmount: loaneeLoanAmount,
+      loaneeDueAmount: loaneeDueAmount,
       maturityDate: maturityDate,
+      sanctionDate: sanctionDate,
       asOfDate: asOfDate,
     );
 
@@ -1105,6 +1153,8 @@ class SettingsProvider extends ChangeNotifier {
         entry: entries.first,
         payments: entryPayments,
         loaneeLoanAmount: fallbackLoanAmount,
+        loaneeDueAmount: fallbackDueAmount,
+        sanctionDate: fallbackStartDate,
         maturityDate: fallbackMaturityDate,
         asOfDate: asOfDate,
       );
@@ -1127,6 +1177,8 @@ class SettingsProvider extends ChangeNotifier {
         entry: entry,
         payments: entryPayments,
         loaneeLoanAmount: fallbackLoanAmount,
+        loaneeDueAmount: fallbackDueAmount,
+        sanctionDate: fallbackStartDate,
         maturityDate: fallbackMaturityDate,
         asOfDate: asOfDate,
       );

@@ -448,8 +448,10 @@ class _TransactionPageState extends State<TransactionPage> {
                                     final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                                       entry: val,
                                       payments: payments,
-                                      loaneeLoanAmount: loanee?.loanAmount,
-                                      maturityDate: loanee?.loanMaturityDate,
+                                      loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : val.loanAmount,
+                                      loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
+                                      maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
+                                      sanctionDate: loanee?.loanSanctionDate ?? val.createdAt,
                                     );
                                     _amountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
                                     _lateFineController.text = breakdown.calculatedLateFine.toStringAsFixed(2);

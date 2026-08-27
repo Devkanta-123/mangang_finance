@@ -458,8 +458,10 @@ class _RoCollectionSheetViewPageState
                         final latePayable = settings.getLatePayableBreakdownForEntry(
                           entry: entry,
                           payments: payments,
-                          loaneeLoanAmount: loanee?.loanAmount,
-                          maturityDate: loanee?.loanMaturityDate,
+                          loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : entry.loanAmount,
+                          loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
+                          maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
+                          sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
                         );
                         final postMaturity = latePayable.postMaturityBreakdown;
 
@@ -591,12 +593,28 @@ class _RoCollectionSheetViewPageState
                       isBold: true,
                     ),
                     const Divider(height: 16),
-                    _buildDetailRow(
-                      'Remaining Balance',
-                      '₹ ${remainingBal.toStringAsFixed(2)}',
-                      Icons.account_balance_wallet_rounded,
-                      isBold: true,
-                      valueColor: Colors.orange.shade800,
+                    Builder(
+                      builder: (context) {
+                        final settings = Provider.of<SettingsProvider>(context, listen: false);
+                        final latePayable = settings.getLatePayableBreakdownForEntry(
+                          entry: entry,
+                          payments: payments,
+                          loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : entry.loanAmount,
+                          loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
+                          maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
+                          sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
+                        );
+                        final displayBal = (latePayable.postMaturityBreakdown?.isPastMaturity == true)
+                            ? latePayable.totalPayableAmount
+                            : remainingBal;
+                        return _buildDetailRow(
+                          'Remaining Balance',
+                          '₹ ${displayBal.toStringAsFixed(2)}',
+                          Icons.account_balance_wallet_rounded,
+                          isBold: true,
+                          valueColor: Colors.orange.shade800,
+                        );
+                      },
                     ),
                     const Divider(height: 16),
                     _buildDetailRow(
@@ -2277,8 +2295,10 @@ class _RoCollectionSheetViewPageState
                           final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                             entry: entry,
                             payments: payments,
-                            loaneeLoanAmount: loanee?.loanAmount,
-                            maturityDate: loanee?.loanMaturityDate,
+                            loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : entry.loanAmount,
+                            loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
+                            maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
+                            sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
                           );
                           final postMaturity = breakdown.postMaturityBreakdown;
 
@@ -2365,8 +2385,10 @@ class _RoCollectionSheetViewPageState
                           final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                             entry: entry,
                             payments: payments,
-                            loaneeLoanAmount: loanee?.loanAmount,
-                            maturityDate: loanee?.loanMaturityDate,
+                            loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : entry.loanAmount,
+                            loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
+                            maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
+                            sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
                           );
                           final postMaturity = breakdown.postMaturityBreakdown;
 
@@ -3240,7 +3262,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                   children: [
                     _buildMetricItem(
                       label: "Loan Amount",
-                      value: "₹ ${(loanee?.loanAmount ?? entry.loanAmount ?? 11500.0).toStringAsFixed(0)}",
+                      value: "₹ ${(loanee?.loanAmount ?? entry.loanAmount ?? 0.0).toStringAsFixed(0)}",
                     ),
                     _buildMetricItem(
                       label: "Sanction Date",
@@ -3620,8 +3642,10 @@ class __AddPaymentEntryModalContentState
       final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
         entry: widget.entry,
         payments: payments,
-        loaneeLoanAmount: loanee?.loanAmount,
-        maturityDate: loanee?.loanMaturityDate,
+        loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : widget.entry.loanAmount,
+        loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
+        maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
+        sanctionDate: loanee?.loanSanctionDate ?? widget.entry.createdAt,
       );
 
       _payableBreakdown = breakdown;
@@ -4249,8 +4273,10 @@ class __AddPaymentEntryModalContentState
                         final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                           entry: widget.entry,
                           payments: payments,
-                          loaneeLoanAmount: loanee?.loanAmount,
-                          maturityDate: loanee?.loanMaturityDate,
+                          loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : widget.entry.loanAmount,
+                          loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
+                          maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
+                          sanctionDate: loanee?.loanSanctionDate ?? widget.entry.createdAt,
                         );
                         final postMaturity = breakdown.postMaturityBreakdown;
                         final loanBreakdown = widget.entry.getLoanBreakdown(
@@ -4283,7 +4309,7 @@ class __AddPaymentEntryModalContentState
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
-                                  'Current Due Balance:',
+                                  'Unpaid Remaining Balance:',
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
@@ -4308,7 +4334,7 @@ class __AddPaymentEntryModalContentState
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
-                                    'Post-Maturity Overdue Interest:',
+                                    'Accrued Overdue Interest:',
                                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red.shade900),
                                   ),
                                   Text(
@@ -4322,7 +4348,7 @@ class __AddPaymentEntryModalContentState
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('Total Payable:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: (breakdown.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade900 : Colors.green.shade900)),
+                                Text('Total Payable Today:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: (breakdown.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade900 : Colors.green.shade900)),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                   decoration: BoxDecoration(

@@ -106,7 +106,9 @@ class RoCollectionEntry {
     this.frequency,
   }) : createdAt = createdAt ?? DateTime.now();
 
-  double get initialBalance => loanAmount ?? actualPrincipal ?? 11500.0;
+  double get initialBalance => (loanAmount != null && loanAmount! > 0)
+      ? loanAmount!
+      : ((actualPrincipal != null && actualPrincipal! > 0) ? actualPrincipal! : 0.0);
 
   bool get isDaily => collectionType.toLowerCase().trim() == 'daily';
 
@@ -172,7 +174,7 @@ class RoCollectionEntry {
         ? loanAmount!
         : ((loaneeLoanAmount != null && loaneeLoanAmount > 0)
             ? loaneeLoanAmount
-            : 11500.0); // Default ₹11,500 (₹10,000 principal + 15% interest)
+            : (actualPrincipal ?? 0.0));
 
     final double rate = configuredInterestRate ?? interestRate ?? 15.0;
     final double basePrinc = configuredBasePrincipal ?? 10000.0;
@@ -256,7 +258,7 @@ class RoCollectionEntry {
     if (loaneeLoanAmount != null && loaneeLoanAmount > 0) {
       return loaneeLoanAmount;
     }
-    return defaultBaseAmount ?? 11500.0;
+    return defaultBaseAmount ?? (actualPrincipal ?? 0.0);
   }
 
   /// Formatted payable amount string e.g. "₹100 / Day", "₹500 / Day", "₹650 / Week"

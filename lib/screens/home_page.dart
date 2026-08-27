@@ -862,6 +862,9 @@ class HomePage extends StatelessWidget {
                       entry: primaryEntry,
                       payments: loaneePayments,
                       loaneeLoanAmount: realLoanAmount,
+                      loaneeDueAmount: (loaneeAccount != null && loaneeAccount.dueAmount > 0) ? loaneeAccount.dueAmount : null,
+                      maturityDate: loaneeAccount?.effectiveMaturityDate ?? loaneeAccount?.loanMaturityDate,
+                      sanctionDate: loaneeAccount?.loanSanctionDate ?? primaryEntry.createdAt,
                     );
 
                     return Container(
