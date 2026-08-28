@@ -11,7 +11,7 @@ workflows:
 
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.mangangfinance.app
+        bundle_identifier: com.mangang.finance 
 
     scripts:
       - name: Get Flutter packages
