@@ -5,15 +5,15 @@ workflows:
     max_build_duration: 60
 
     environment:
+      groups:
+        - IOS_SIGNING
+
       flutter: stable
       xcode: latest
       cocoapods: default
 
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.mangang.finance 
-
     scripts:
+
       - name: Get Flutter packages
         script: |
           flutter pub get
@@ -24,18 +24,40 @@ workflows:
           pod install
           cd ..
 
+      - name: Install iOS signing certificate
+        script: |
+          echo "$CM_CERTIFICATE" | base64 --decode > distribution.p12
+
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+
+          security import distribution.p12 \
+            -k build.keychain \
+            -P "$CM_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "" \
+            build.keychain
+
+      - name: Install provisioning profile
+        script: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+
+          echo "$CM_PROVISIONING_PROFILE" | base64 --decode \
+            > ~/Library/MobileDevice/Provisioning\ Profiles/Mangang_Finance_AppStore.mobileprovision
+
       - name: Build iOS IPA
         script: |
           flutter clean
           flutter pub get
 
-          flutter build ipa --release
-
-          echo "========================================"
-          echo "Checking for generated IPA..."
-          echo "========================================"
-
-          find build/ios -name "*.ipa" -type f -print
+          flutter build ipa --release \
+            --export-options-plist=ios/ExportOptions.plist
 
     artifacts:
       - build/ios/ipa/*.ipa
