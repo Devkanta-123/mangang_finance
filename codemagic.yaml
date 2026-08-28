@@ -13,8 +13,6 @@ workflows:
         - IOS_SIGNING
 
       ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.mangang.finance
         certificates:
           - mangang_distribution
         provisioning_profiles:
@@ -23,7 +21,7 @@ workflows:
     scripts:
 
       # ========================================
-      # Get Flutter dependencies
+      # Flutter dependencies
       # ========================================
 
       - name: Get Flutter packages
@@ -38,7 +36,7 @@ workflows:
 
 
       # ========================================
-      # Install CocoaPods
+      # CocoaPods
       # ========================================
 
       - name: Install CocoaPods
@@ -53,15 +51,13 @@ workflows:
             cd ios
             pod install
             cd ..
-            echo "CocoaPods installation completed."
           else
-            echo "No Podfile found."
-            echo "Skipping CocoaPods."
+            echo "No Podfile found. Skipping CocoaPods."
           fi
 
 
       # ========================================
-      # Verify iOS signing
+      # Verify signing
       # ========================================
 
       - name: Verify iOS signing
@@ -69,24 +65,16 @@ workflows:
           set -e
 
           echo "========================================"
-          echo "Checking signing identities"
+          echo "Signing identities"
           echo "========================================"
 
-          security find-identity \
-            -v \
-            -p codesigning
+          security find-identity -v -p codesigning
 
           echo "========================================"
-          echo "Checking provisioning profiles"
+          echo "Provisioning profiles"
           echo "========================================"
 
-          ls -lah \
-            "$HOME/Library/MobileDevice/Provisioning Profiles" \
-            || true
-
-          echo "========================================"
-          echo "Signing setup check completed"
-          echo "========================================"
+          ls -lah "$HOME/Library/MobileDevice/Provisioning Profiles" || true
 
 
       # ========================================
@@ -97,20 +85,16 @@ workflows:
         script: |
           set -e
 
-          echo "========================================"
-          echo "Checking ExportOptions.plist"
-          echo "========================================"
-
           if [ ! -f "ios/ExportOptions.plist" ]; then
-            echo "ERROR: ios/ExportOptions.plist does not exist."
+            echo "ERROR: ios/ExportOptions.plist not found."
             exit 1
           fi
 
-          cat ios/ExportOptions.plist
+          echo "========================================"
+          echo "ExportOptions.plist"
+          echo "========================================"
 
-          echo "========================================"
-          echo "ExportOptions.plist found"
-          echo "========================================"
+          cat ios/ExportOptions.plist
 
 
       # ========================================
@@ -128,13 +112,13 @@ workflows:
           flutter clean
 
           echo "========================================"
-          echo "Getting Flutter packages"
+          echo "Getting packages"
           echo "========================================"
 
           flutter pub get
 
           echo "========================================"
-          echo "Building signed iOS IPA"
+          echo "Building iOS IPA"
           echo "========================================"
 
           flutter build ipa \
@@ -142,7 +126,7 @@ workflows:
             --export-options-plist=ios/ExportOptions.plist
 
           echo "========================================"
-          echo "Checking generated IPA"
+          echo "IPA files"
           echo "========================================"
 
           find build/ios \
@@ -151,7 +135,7 @@ workflows:
             -print
 
           echo "========================================"
-          echo "IPA BUILD COMPLETED"
+          echo "BUILD COMPLETED"
           echo "========================================"
 
 
