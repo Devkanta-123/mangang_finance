@@ -26,11 +26,43 @@ workflows:
 
       - name: Install iOS signing certificate
         script: |
+          set -e
+
+          echo "========================================"
+          echo "Decoding iOS distribution certificate"
+          echo "========================================"
+
           echo "$CM_CERTIFICATE" | base64 --decode > distribution.p12
+
+          echo "Certificate file:"
+          ls -lh distribution.p12
+
+          echo "========================================"
+          echo "Validating PKCS12 certificate/password"
+          echo "========================================"
+
+          openssl pkcs12 \
+            -in distribution.p12 \
+            -noout \
+            -passin env:CM_CERTIFICATE_PASSWORD
+
+          echo "========================================"
+          echo "PKCS12 PASSWORD TEST PASSED"
+          echo "========================================"
+
+          echo "========================================"
+          echo "Creating temporary keychain"
+          echo "========================================"
 
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
+
+          security set-keychain-settings -lut 21600 build.keychain
+
+          echo "========================================"
+          echo "Importing Apple Distribution certificate"
+          echo "========================================"
 
           security import distribution.p12 \
             -k build.keychain \
@@ -38,26 +70,61 @@ workflows:
             -T /usr/bin/codesign \
             -T /usr/bin/security
 
+          echo "Certificate import successful."
+
+          echo "========================================"
+          echo "Configuring keychain access"
+          echo "========================================"
+
           security set-key-partition-list \
             -S apple-tool:,apple: \
             -s \
             -k "" \
             build.keychain
 
+          echo "========================================"
+          echo "iOS signing certificate setup complete"
+          echo "========================================"
+
       - name: Install provisioning profile
         script: |
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          set -e
+
+          echo "========================================"
+          echo "Installing provisioning profile"
+          echo "========================================"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 
           echo "$CM_PROVISIONING_PROFILE" | base64 --decode \
-            > ~/Library/MobileDevice/Provisioning\ Profiles/Mangang_Finance_AppStore.mobileprovision
+            > "$HOME/Library/MobileDevice/Provisioning Profiles/Mangang_Finance_AppStore.mobileprovision"
+
+          echo "Provisioning profile installed:"
+          ls -lh "$HOME/Library/MobileDevice/Provisioning Profiles/Mangang_Finance_AppStore.mobileprovision"
 
       - name: Build iOS IPA
         script: |
+          set -e
+
+          echo "========================================"
+          echo "Cleaning Flutter project"
+          echo "========================================"
+
           flutter clean
           flutter pub get
 
+          echo "========================================"
+          echo "Building signed iOS IPA"
+          echo "========================================"
+
           flutter build ipa --release \
             --export-options-plist=ios/ExportOptions.plist
+
+          echo "========================================"
+          echo "Checking generated IPA"
+          echo "========================================"
+
+          find build/ios -name "*.ipa" -type f -print
 
     artifacts:
       - build/ios/ipa/*.ipa
