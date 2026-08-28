@@ -3,18 +3,28 @@ workflows:
     name: iOS Release Build
     instance_type: mac_mini_m1
     max_build_duration: 60
+
     environment:
       flutter: stable
       xcode: latest
       cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: YOUR_BUNDLE_ID
+
     scripts:
-      - name: Set up dependencies
+      - name: Get Flutter packages
         script: |
           flutter pub get
-          cd ios && pod install
+
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install
+
       - name: Build iOS IPA
         script: |
-          flutter build ios --release --no-codesign
+          flutter build ipa --release
+
     artifacts:
-      - build/ios/iphoneos/*.app
       - build/ios/ipa/*.ipa
