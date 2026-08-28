@@ -14,7 +14,7 @@ workflows:
     # shown in Codemagic.
     #
     integrations:
-      app_store_connect: YOUR_INTEGRATION_NAME
+      app_store_connect: Codemagic
 
     environment:
       flutter: stable
