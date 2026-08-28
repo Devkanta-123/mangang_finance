@@ -1,6 +1,6 @@
 workflows:
   ios-release:
-    name: iOS Release Build
+    name: Mangang Finance iOS Release
     instance_type: mac_mini_m1
     max_build_duration: 60
 
@@ -13,31 +13,21 @@ workflows:
         - IOS_SIGNING
 
       ios_signing:
-        certificates:
-          - mangang_distribution
-        provisioning_profiles:
-          - mangang_finance_appstore
+        distribution_type: app_store
+        bundle_identifier: com.mangang.finance
 
     scripts:
-
-      # ========================================
-      # Flutter dependencies
-      # ========================================
 
       - name: Get Flutter packages
         script: |
           set -e
 
           echo "========================================"
-          echo "Getting Flutter packages"
+          echo "Flutter dependencies"
           echo "========================================"
 
           flutter pub get
 
-
-      # ========================================
-      # CocoaPods
-      # ========================================
 
       - name: Install CocoaPods
         script: |
@@ -52,15 +42,22 @@ workflows:
             pod install
             cd ..
           else
-            echo "No Podfile found. Skipping CocoaPods."
+            echo "No Podfile found."
           fi
 
 
-      # ========================================
-      # Verify signing
-      # ========================================
+      - name: Set up iOS code signing
+        script: |
+          set -e
 
-      - name: Verify iOS signing
+          echo "========================================"
+          echo "Setting up iOS code signing"
+          echo "========================================"
+
+          xcode-project use-profiles
+
+
+      - name: Verify signing
         script: |
           set -e
 
@@ -76,30 +73,6 @@ workflows:
 
           ls -lah "$HOME/Library/MobileDevice/Provisioning Profiles" || true
 
-
-      # ========================================
-      # Verify ExportOptions.plist
-      # ========================================
-
-      - name: Verify ExportOptions
-        script: |
-          set -e
-
-          if [ ! -f "ios/ExportOptions.plist" ]; then
-            echo "ERROR: ios/ExportOptions.plist not found."
-            exit 1
-          fi
-
-          echo "========================================"
-          echo "ExportOptions.plist"
-          echo "========================================"
-
-          cat ios/ExportOptions.plist
-
-
-      # ========================================
-      # Build IPA
-      # ========================================
 
       - name: Build iOS IPA
         script: |
@@ -121,9 +94,7 @@ workflows:
           echo "Building iOS IPA"
           echo "========================================"
 
-          flutter build ipa \
-            --release \
-            --export-options-plist=ios/ExportOptions.plist
+          flutter build ipa --release
 
           echo "========================================"
           echo "IPA files"
