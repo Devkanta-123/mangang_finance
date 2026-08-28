@@ -18,6 +18,10 @@ workflows:
 
     scripts:
 
+      # ========================================
+      # Flutter dependencies
+      # ========================================
+
       - name: Get Flutter packages
         script: |
           set -e
@@ -28,6 +32,10 @@ workflows:
 
           flutter pub get
 
+
+      # ========================================
+      # CocoaPods
+      # ========================================
 
       - name: Install CocoaPods
         script: |
@@ -46,6 +54,10 @@ workflows:
           fi
 
 
+      # ========================================
+      # Code signing
+      # ========================================
+
       - name: Set up iOS code signing
         script: |
           set -e
@@ -56,6 +68,10 @@ workflows:
 
           xcode-project use-profiles
 
+
+      # ========================================
+      # Verify signing
+      # ========================================
 
       - name: Verify signing
         script: |
@@ -71,8 +87,14 @@ workflows:
           echo "Provisioning profiles"
           echo "========================================"
 
-          ls -lah "$HOME/Library/MobileDevice/Provisioning Profiles" || true
+          ls -lah \
+            "$HOME/Library/MobileDevice/Provisioning Profiles" \
+            || true
 
+
+      # ========================================
+      # Build IPA
+      # ========================================
 
       - name: Build iOS IPA
         script: |
@@ -94,7 +116,9 @@ workflows:
           echo "Building iOS IPA"
           echo "========================================"
 
-          flutter build ipa --release
+          flutter build ipa \
+            --release \
+            --export-options-plist=/Users/builder/export_options.plist
 
           echo "========================================"
           echo "IPA files"
@@ -105,10 +129,160 @@ workflows:
             -name "*.ipa" \
             -print
 
+
+      # ========================================
+      # Locate Xcode archive
+      # ========================================
+
+      - name: Locate Xcode archive
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "Searching for XCARCHIVE"
+          echo "========================================"
+
+          find "$CM_BUILD_DIR" \
+            -type d \
+            -name "*.xcarchive" \
+            -print \
+            2>/dev/null || true
+
+          echo "========================================"
+          echo "Searching DerivedData"
+          echo "========================================"
+
+          find "$HOME/Library/Developer/Xcode/DerivedData" \
+            -maxdepth 8 \
+            -type d \
+            -name "*.xcarchive" \
+            -print \
+            2>/dev/null || true
+
+
+      # ========================================
+      # Search for AppStoreInfo.plist
+      # ========================================
+
+      - name: Locate AppStoreInfo.plist
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "Searching for AppStoreInfo.plist"
+          echo "========================================"
+
+          find "$CM_BUILD_DIR" \
+            -type f \
+            -name "AppStoreInfo.plist" \
+            -print \
+            2>/dev/null || true
+
+          find "$HOME/Library/Developer/Xcode" \
+            -type f \
+            -name "AppStoreInfo.plist" \
+            -print \
+            2>/dev/null || true
+
+          echo "========================================"
+          echo "Searching entire filesystem"
+          echo "========================================"
+
+          find /tmp /Users/builder \
+            -type f \
+            -name "AppStoreInfo.plist" \
+            -print \
+            2>/dev/null || true
+
+
+      # ========================================
+      # Collect AppStoreInfo.plist
+      # ========================================
+
+      - name: Collect AppStoreInfo.plist
+        script: |
+          set -e
+
+          mkdir -p "$CM_BUILD_DIR/appstore_metadata"
+
+          PLIST_PATH=$(find "$CM_BUILD_DIR" "$HOME/Library/Developer/Xcode" /tmp /Users/builder \
+            -type f \
+            -name "AppStoreInfo.plist" \
+            -print \
+            2>/dev/null | head -1 || true)
+
+          if [ -n "$PLIST_PATH" ]; then
+
+            echo "========================================"
+            echo "AppStoreInfo.plist FOUND"
+            echo "========================================"
+
+            echo "Source:"
+            echo "$PLIST_PATH"
+
+            cp "$PLIST_PATH" \
+              "$CM_BUILD_DIR/appstore_metadata/AppStoreInfo.plist"
+
+            echo "Copied to:"
+            echo "$CM_BUILD_DIR/appstore_metadata/AppStoreInfo.plist"
+
+            echo "========================================"
+            echo "Contents"
+            echo "========================================"
+
+            cat "$CM_BUILD_DIR/appstore_metadata/AppStoreInfo.plist"
+
+          else
+
+            echo "========================================"
+            echo "WARNING"
+            echo "========================================"
+
+            echo "AppStoreInfo.plist was not found."
+
+            echo "The IPA itself was still generated."
+
+          fi
+
+
+      # ========================================
+      # Final files
+      # ========================================
+
+      - name: Show final artifacts
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "FINAL IPA"
+          echo "========================================"
+
+          find build/ios \
+            -type f \
+            -name "*.ipa" \
+            -exec ls -lh {} \;
+
+          echo "========================================"
+          echo "FINAL AppStoreInfo.plist"
+          echo "========================================"
+
+          find "$CM_BUILD_DIR/appstore_metadata" \
+            -type f \
+            -name "*.plist" \
+            -exec ls -lh {} \; \
+            2>/dev/null || true
+
           echo "========================================"
           echo "BUILD COMPLETED"
           echo "========================================"
 
 
+    # ========================================
+    # Artifacts
+    # ========================================
+
     artifacts:
       - build/ios/ipa/*.ipa
+      - appstore_metadata/AppStoreInfo.plist
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
