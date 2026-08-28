@@ -1,3 +1,55 @@
+workflows:
+  ios-release:
+    name: iOS Release Build
+    instance_type: mac_mini_m1
+    max_build_duration: 60
+
+    environment:
+      groups:
+        - IOS_SIGNING
+
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+
+    scripts:
+
+      # ========================================
+      # Flutter dependencies
+      # ========================================
+
+      - name: Get Flutter packages
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "Getting Flutter packages"
+          echo "========================================"
+
+          flutter pub get
+
+
+      # ========================================
+      # CocoaPods
+      # ========================================
+
+      - name: Install CocoaPods
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "Installing CocoaPods"
+          echo "========================================"
+
+          cd ios
+          pod install
+          cd ..
+
+
+      # ========================================
+      # iOS signing certificate
+      # ========================================
+
       - name: Install iOS signing certificate
         script: |
           set -e
@@ -8,7 +60,13 @@
 
           echo "$CM_CERTIFICATE" | base64 --decode > distribution.p12
 
-          echo "Validating PKCS12..."
+          echo "Certificate file:"
+          ls -lh distribution.p12
+
+          echo "========================================"
+          echo "Validating PKCS12 certificate/password"
+          echo "========================================"
+
           openssl pkcs12 \
             -in distribution.p12 \
             -noout \
@@ -21,12 +79,17 @@
           echo "========================================"
 
           security create-keychain -p "" build.keychain
+
           security default-keychain -s build.keychain
+
           security unlock-keychain -p "" build.keychain
-          security set-keychain-settings -lut 21600 build.keychain
+
+          security set-keychain-settings \
+            -lut 21600 \
+            build.keychain
 
           echo "========================================"
-          echo "Extracting certificate"
+          echo "Extracting Apple Distribution certificate"
           echo "========================================"
 
           openssl pkcs12 \
@@ -35,6 +98,8 @@
             -nokeys \
             -out distribution_cert.pem \
             -passin env:CM_CERTIFICATE_PASSWORD
+
+          echo "Certificate extracted successfully."
 
           echo "========================================"
           echo "Extracting private key"
@@ -47,8 +112,10 @@
             -out distribution_key.pem \
             -passin env:CM_CERTIFICATE_PASSWORD
 
+          echo "Private key extracted successfully."
+
           echo "========================================"
-          echo "Importing certificate"
+          echo "Importing certificate into keychain"
           echo "========================================"
 
           security import distribution_cert.pem \
@@ -56,10 +123,10 @@
             -T /usr/bin/codesign \
             -T /usr/bin/security
 
-          echo "Certificate imported."
+          echo "Certificate imported successfully."
 
           echo "========================================"
-          echo "Importing private key"
+          echo "Importing private key into keychain"
           echo "========================================"
 
           security import distribution_key.pem \
@@ -67,10 +134,10 @@
             -T /usr/bin/codesign \
             -T /usr/bin/security
 
-          echo "Private key imported."
+          echo "Private key imported successfully."
 
           echo "========================================"
-          echo "Configuring keychain"
+          echo "Configuring keychain access"
           echo "========================================"
 
           security set-key-partition-list \
@@ -80,5 +147,110 @@
             build.keychain
 
           echo "========================================"
-          echo "iOS signing setup complete"
+          echo "Checking available signing identities"
           echo "========================================"
+
+          security find-identity \
+            -v \
+            -p codesigning \
+            build.keychain
+
+          echo "========================================"
+          echo "iOS signing certificate setup complete"
+          echo "========================================"
+
+
+      # ========================================
+      # Provisioning profile
+      # ========================================
+
+      - name: Install provisioning profile
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "Installing provisioning profile"
+          echo "========================================"
+
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          mkdir -p "$PROFILE_DIR"
+
+          echo "$CM_PROVISIONING_PROFILE" | base64 --decode \
+            > "$PROFILE_DIR/Mangang_Finance_AppStore.mobileprovision"
+
+          echo "Provisioning profile installed."
+
+          ls -lh "$PROFILE_DIR/Mangang_Finance_AppStore.mobileprovision"
+
+
+      # ========================================
+      # Verify ExportOptions
+      # ========================================
+
+      - name: Verify iOS export configuration
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "Checking ExportOptions.plist"
+          echo "========================================"
+
+          if [ ! -f ios/ExportOptions.plist ]; then
+            echo "ERROR: ios/ExportOptions.plist not found."
+            exit 1
+          fi
+
+          cat ios/ExportOptions.plist
+
+          echo "ExportOptions.plist found."
+
+
+      # ========================================
+      # Build signed IPA
+      # ========================================
+
+      - name: Build iOS IPA
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "Cleaning Flutter project"
+          echo "========================================"
+
+          flutter clean
+
+          echo "========================================"
+          echo "Getting Flutter packages"
+          echo "========================================"
+
+          flutter pub get
+
+          echo "========================================"
+          echo "Building signed iOS IPA"
+          echo "========================================"
+
+          flutter build ipa \
+            --release \
+            --export-options-plist=ios/ExportOptions.plist
+
+          echo "========================================"
+          echo "Checking generated IPA"
+          echo "========================================"
+
+          find build/ios \
+            -name "*.ipa" \
+            -type f \
+            -print
+
+          echo "========================================"
+          echo "iOS IPA build completed"
+          echo "========================================"
+
+
+    # ========================================
+    # Codemagic artifacts
+    # ========================================
+
+    artifacts:
+      - build/ios/ipa/*.ipa
