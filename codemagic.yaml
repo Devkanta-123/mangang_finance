@@ -10,7 +10,7 @@ workflows:
       cocoapods: default
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: YOUR_BUNDLE_ID
+        bundle_identifier: com.mangangfinance.app
 
     scripts:
       - name: Get Flutter packages
