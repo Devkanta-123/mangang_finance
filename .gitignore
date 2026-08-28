@@ -43,3 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Apple iOS signing credentials
+*.p12
+*.key
+*.csr
+*.cer
+*.pem
+*.mobileprovision
+distribution_p12_base64.txt
+provisioning_base64.txt
