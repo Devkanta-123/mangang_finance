@@ -5,17 +5,25 @@ workflows:
     max_build_duration: 60
 
     environment:
-      groups:
-        - IOS_SIGNING
-
       flutter: stable
       xcode: latest
       cocoapods: default
 
+      groups:
+        - IOS_SIGNING
+
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.mangang.finance
+        certificates:
+          - mangang_distribution
+        provisioning_profiles:
+          - mangang_finance_appstore
+
     scripts:
 
       # ========================================
-      # 1. Flutter dependencies
+      # Get Flutter dependencies
       # ========================================
 
       - name: Get Flutter packages
@@ -30,7 +38,7 @@ workflows:
 
 
       # ========================================
-      # 2. CocoaPods
+      # Install CocoaPods
       # ========================================
 
       - name: Install CocoaPods
@@ -41,128 +49,24 @@ workflows:
           echo "Installing CocoaPods"
           echo "========================================"
 
-          cd ios
-
-          pod install
-
-          cd ..
-
-          echo "CocoaPods installation completed."
+          if [ -f "ios/Podfile" ]; then
+            cd ios
+            pod install
+            cd ..
+            echo "CocoaPods installation completed."
+          else
+            echo "No Podfile found."
+            echo "Skipping CocoaPods."
+          fi
 
 
       # ========================================
-      # 3. Install Apple Distribution certificate
+      # Verify iOS signing
       # ========================================
 
-      - name: Install iOS signing certificate
+      - name: Verify iOS signing
         script: |
           set -e
-
-          echo "========================================"
-          echo "Decoding PKCS12 certificate"
-          echo "========================================"
-
-          echo "$CM_CERTIFICATE" | base64 --decode > distribution.p12
-
-          ls -lh distribution.p12
-
-          echo "========================================"
-          echo "Validating PKCS12 password"
-          echo "========================================"
-
-          openssl pkcs12 \
-            -in distribution.p12 \
-            -noout \
-            -passin env:CM_CERTIFICATE_PASSWORD
-
-          echo "PKCS12 validation successful."
-
-          echo "========================================"
-          echo "Creating temporary keychain"
-          echo "========================================"
-
-          KEYCHAIN_PATH="$HOME/Library/Keychains/build.keychain-db"
-
-          security create-keychain \
-            -p "" \
-            "$KEYCHAIN_PATH"
-
-          security unlock-keychain \
-            -p "" \
-            "$KEYCHAIN_PATH"
-
-          security set-keychain-settings \
-            -lut 21600 \
-            "$KEYCHAIN_PATH"
-
-          echo "========================================"
-          echo "Adding keychain to search list"
-          echo "========================================"
-
-          security list-keychains -d user -s \
-            "$KEYCHAIN_PATH" \
-            "$HOME/Library/Keychains/login.keychain-db" \
-            /Library/Keychains/System.keychain
-
-          security default-keychain -d user -s "$KEYCHAIN_PATH"
-
-          echo "========================================"
-          echo "Extracting Apple Distribution certificate"
-          echo "========================================"
-
-          openssl pkcs12 \
-            -in distribution.p12 \
-            -clcerts \
-            -nokeys \
-            -out distribution_cert.pem \
-            -passin env:CM_CERTIFICATE_PASSWORD
-
-          echo "Certificate extracted."
-
-          echo "========================================"
-          echo "Extracting private key"
-          echo "========================================"
-
-          openssl pkcs12 \
-            -in distribution.p12 \
-            -nocerts \
-            -nodes \
-            -out distribution_key.pem \
-            -passin env:CM_CERTIFICATE_PASSWORD
-
-          echo "Private key extracted."
-
-          echo "========================================"
-          echo "Importing certificate"
-          echo "========================================"
-
-          security import distribution_cert.pem \
-            -k "$KEYCHAIN_PATH" \
-            -T /usr/bin/codesign \
-            -T /usr/bin/security
-
-          echo "Certificate imported successfully."
-
-          echo "========================================"
-          echo "Importing private key"
-          echo "========================================"
-
-          security import distribution_key.pem \
-            -k "$KEYCHAIN_PATH" \
-            -T /usr/bin/codesign \
-            -T /usr/bin/security
-
-          echo "Private key imported successfully."
-
-          echo "========================================"
-          echo "Configuring keychain access"
-          echo "========================================"
-
-          security set-key-partition-list \
-            -S apple-tool:,apple: \
-            -s \
-            -k "" \
-            "$KEYCHAIN_PATH"
 
           echo "========================================"
           echo "Checking signing identities"
@@ -170,86 +74,47 @@ workflows:
 
           security find-identity \
             -v \
-            -p codesigning \
-            "$KEYCHAIN_PATH"
-
-          echo "========================================"
-          echo "Checking all available signing identities"
-          echo "========================================"
-
-          security find-identity \
-            -v \
             -p codesigning
 
           echo "========================================"
-          echo "Signing certificate installation complete"
+          echo "Checking provisioning profiles"
+          echo "========================================"
+
+          ls -lah \
+            "$HOME/Library/MobileDevice/Provisioning Profiles" \
+            || true
+
+          echo "========================================"
+          echo "Signing setup check completed"
           echo "========================================"
 
 
       # ========================================
-      # 4. Install provisioning profile
+      # Verify ExportOptions.plist
       # ========================================
 
-      - name: Install provisioning profile
+      - name: Verify ExportOptions
         script: |
           set -e
-
-          echo "========================================"
-          echo "Installing provisioning profile"
-          echo "========================================"
-
-          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
-
-          mkdir -p "$PROFILE_DIR"
-
-          echo "$CM_PROVISIONING_PROFILE" | base64 --decode \
-            > "$PROFILE_DIR/Mangang_Finance_AppStore.mobileprovision"
-
-          echo "Provisioning profile installed."
-
-          ls -lh \
-            "$PROFILE_DIR/Mangang_Finance_AppStore.mobileprovision"
-
-
-      # ========================================
-      # 5. Verify Bundle ID
-      # ========================================
-
-      - name: Verify iOS project configuration
-        script: |
-          set -e
-
-          echo "========================================"
-          echo "Checking Bundle ID"
-          echo "========================================"
-
-          grep -R "PRODUCT_BUNDLE_IDENTIFIER" \
-            ios/Runner.xcodeproj/project.pbxproj
-
-          echo "========================================"
-          echo "Expected Bundle ID"
-          echo "========================================"
-
-          echo "com.mangang.finance"
 
           echo "========================================"
           echo "Checking ExportOptions.plist"
           echo "========================================"
 
-          if [ ! -f ios/ExportOptions.plist ]; then
-            echo "ERROR: ios/ExportOptions.plist not found."
+          if [ ! -f "ios/ExportOptions.plist" ]; then
+            echo "ERROR: ios/ExportOptions.plist does not exist."
             exit 1
           fi
 
           cat ios/ExportOptions.plist
 
           echo "========================================"
-          echo "iOS configuration verified"
+          echo "ExportOptions.plist found"
           echo "========================================"
 
 
       # ========================================
-      # 6. Build signed IPA
+      # Build IPA
       # ========================================
 
       - name: Build iOS IPA
@@ -263,18 +128,10 @@ workflows:
           flutter clean
 
           echo "========================================"
-          echo "Getting Flutter dependencies"
+          echo "Getting Flutter packages"
           echo "========================================"
 
           flutter pub get
-
-          echo "========================================"
-          echo "Final signing identity check"
-          echo "========================================"
-
-          security find-identity \
-            -v \
-            -p codesigning
 
           echo "========================================"
           echo "Building signed iOS IPA"
@@ -294,13 +151,9 @@ workflows:
             -print
 
           echo "========================================"
-          echo "iOS IPA build completed"
+          echo "IPA BUILD COMPLETED"
           echo "========================================"
 
-
-    # ========================================
-    # Artifacts
-    # ========================================
 
     artifacts:
       - build/ios/ipa/*.ipa
