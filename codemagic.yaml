@@ -7,12 +7,7 @@ workflows:
     # ========================================
     # App Store Connect integration
     # ========================================
-    #
-    # IMPORTANT:
-    # Replace YOUR_INTEGRATION_NAME with the exact
-    # App Store Connect API key/integration name
-    # shown in Codemagic.
-    #
+
     integrations:
       app_store_connect: Codemagic
 
@@ -109,6 +104,313 @@ workflows:
 
 
       # ----------------------------------------
+      # Install screenshot processing tools
+      # ----------------------------------------
+
+      - name: Install screenshot tools
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "Installing Pillow"
+          echo "========================================"
+
+          python3 -m pip install --user Pillow
+
+          echo "Pillow installation completed."
+
+
+      # ----------------------------------------
+      # Prepare App Store screenshots
+      # ----------------------------------------
+
+      - name: Prepare App Store screenshots
+        script: |
+          set -e
+
+          echo "========================================"
+          echo "Preparing App Store screenshots"
+          echo "========================================"
+
+          INPUT_DIR="screenshots"
+          OUTPUT_DIR="build/app_store_screenshots"
+
+          TARGET_WIDTH=1284
+          TARGET_HEIGHT=2778
+
+          mkdir -p "$OUTPUT_DIR"
+
+          # ----------------------------------------
+          # Check screenshot folder
+          # ----------------------------------------
+
+          if [ ! -d "$INPUT_DIR" ]; then
+            echo "ERROR: screenshots/ folder not found."
+            echo ""
+            echo "Please create:"
+            echo "screenshots/"
+            echo ""
+            echo "and put your iPhone screenshots inside it."
+            exit 1
+          fi
+
+          # ----------------------------------------
+          # Process screenshots using Python/Pillow
+          # ----------------------------------------
+
+          python3 <<'PY'
+          from PIL import Image
+          import glob
+          import os
+          import sys
+
+          INPUT_DIR = "screenshots"
+          OUTPUT_DIR = "build/app_store_screenshots"
+
+          TARGET_WIDTH = 1284
+          TARGET_HEIGHT = 2778
+
+          os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+          # Supported image formats
+          patterns = [
+              "*.png",
+              "*.jpg",
+              "*.jpeg",
+              "*.PNG",
+              "*.JPG",
+              "*.JPEG"
+          ]
+
+          files = []
+
+          for pattern in patterns:
+              files.extend(
+                  glob.glob(
+                      os.path.join(INPUT_DIR, pattern)
+                  )
+              )
+
+          files = sorted(set(files))
+
+          if not files:
+              print("")
+              print("ERROR: No screenshots found.")
+              print("")
+              print("Expected screenshots inside:")
+              print("screenshots/")
+              print("")
+              sys.exit(1)
+
+          print("")
+          print("========================================")
+          print("SCREENSHOTS FOUND")
+          print("========================================")
+          print(f"Total: {len(files)}")
+
+          if len(files) > 10:
+              print("")
+              print("WARNING: More than 10 screenshots found.")
+              print("Apple allows up to 10 screenshots.")
+              print("Only the first 10 will be processed.")
+              print("")
+
+              files = files[:10]
+
+          # ----------------------------------------
+          # Process each screenshot
+          # ----------------------------------------
+
+          for index, file in enumerate(files, start=1):
+
+              print("")
+              print("----------------------------------------")
+              print(f"Processing screenshot {index}")
+              print(f"File: {file}")
+              print("----------------------------------------")
+
+              try:
+
+                  image = Image.open(file)
+
+                  original_width, original_height = image.size
+
+                  print(
+                      f"Original size: "
+                      f"{original_width}x{original_height}"
+                  )
+
+                  # --------------------------------
+                  # Convert to RGB
+                  # --------------------------------
+
+                  image = image.convert("RGB")
+
+                  # --------------------------------
+                  # Preserve aspect ratio
+                  # --------------------------------
+
+                  scale = max(
+                      TARGET_WIDTH / original_width,
+                      TARGET_HEIGHT / original_height
+                  )
+
+                  new_width = round(
+                      original_width * scale
+                  )
+
+                  new_height = round(
+                      original_height * scale
+                  )
+
+                  print(
+                      f"Scaled size: "
+                      f"{new_width}x{new_height}"
+                  )
+
+                  image = image.resize(
+                      (new_width, new_height),
+                      Image.Resampling.LANCZOS
+                  )
+
+                  # --------------------------------
+                  # Center crop
+                  # --------------------------------
+
+                  left = (
+                      new_width - TARGET_WIDTH
+                  ) // 2
+
+                  top = (
+                      new_height - TARGET_HEIGHT
+                  ) // 2
+
+                  right = left + TARGET_WIDTH
+                  bottom = top + TARGET_HEIGHT
+
+                  image = image.crop(
+                      (
+                          left,
+                          top,
+                          right,
+                          bottom
+                      )
+                  )
+
+                  # --------------------------------
+                  # Output filename
+                  # --------------------------------
+
+                  output = os.path.join(
+                      OUTPUT_DIR,
+                      f"screenshot_{index}.jpg"
+                  )
+
+                  # --------------------------------
+                  # Save JPEG
+                  # --------------------------------
+
+                  image.save(
+                      output,
+                      "JPEG",
+                      quality=95,
+                      optimize=True
+                  )
+
+                  # --------------------------------
+                  # Verify final image
+                  # --------------------------------
+
+                  final_image = Image.open(output)
+
+                  final_width, final_height = (
+                      final_image.size
+                  )
+
+                  print(
+                      f"Final size: "
+                      f"{final_width}x{final_height}"
+                  )
+
+                  if (
+                      final_width != TARGET_WIDTH
+                      or
+                      final_height != TARGET_HEIGHT
+                  ):
+                      print(
+                          "ERROR: Final dimensions "
+                          "are incorrect."
+                      )
+                      sys.exit(1)
+
+                  print(
+                      f"Created: {output}"
+                  )
+
+              except Exception as error:
+
+                  print("")
+                  print(
+                      f"ERROR processing {file}:"
+                  )
+                  print(error)
+
+                  sys.exit(1)
+
+          # ----------------------------------------
+          # Final summary
+          # ----------------------------------------
+
+          print("")
+          print("========================================")
+          print("SCREENSHOT PREPARATION COMPLETED")
+          print("========================================")
+
+          print("")
+          print("Output directory:")
+          print(OUTPUT_DIR)
+
+          print("")
+          print("Generated screenshots:")
+
+          generated = sorted(
+              glob.glob(
+                  os.path.join(
+                      OUTPUT_DIR,
+                      "*.jpg"
+                  )
+              )
+          )
+
+          for file in generated:
+
+              image = Image.open(file)
+
+              print(
+                  f"  {os.path.basename(file)} "
+                  f"-> {image.size[0]}x{image.size[1]}"
+              )
+
+          print("")
+          print(
+              f"Total generated: {len(generated)}"
+          )
+
+          print("")
+          print("All screenshots are ready for")
+          print("App Store Connect 6.5-inch display.")
+
+          PY
+
+          echo ""
+          echo "========================================"
+          echo "SCREENSHOT ARTIFACTS"
+          echo "========================================"
+
+          ls -lh build/app_store_screenshots/
+
+
+      # ----------------------------------------
       # Build IPA
       # ----------------------------------------
 
@@ -156,6 +458,7 @@ workflows:
 
     artifacts:
       - build/ios/ipa/*.ipa
+      - build/app_store_screenshots/*.jpg
       - /tmp/xcodebuild_logs/*.log
       - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
 
@@ -168,9 +471,8 @@ workflows:
       app_store_connect:
 
         # Use the App Store Connect integration
-        # configured above.
         auth: integration
 
-        # Upload the IPA to App Store Connect
+        # Upload IPA to App Store Connect
         # and submit it to TestFlight.
         submit_to_testflight: true
