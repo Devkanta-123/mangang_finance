@@ -458,7 +458,7 @@ workflows:
 
     artifacts:
       - build/ios/ipa/*.ipa
-      - build/app_store_screenshots/*.jpg
+      - build/app_store_screenshots/**
       - /tmp/xcodebuild_logs/*.log
       - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
 
