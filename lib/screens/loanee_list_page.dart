@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/user_model.dart';
@@ -17,9 +18,12 @@ class LoaneeListPage extends StatefulWidget {
 
 class _LoaneeListPageState extends State<LoaneeListPage> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
   String _selectedDistrictFilter = 'All Districts';
   String _selectedStatusFilter = 'All Status';
+  int _currentPage = 1;
+  int _rowsPerPage = 10; // Default 10 records per page
 
   final List<String> _statusOptions = [
     'All Status',
@@ -50,6 +54,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -134,6 +139,24 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
     final filteredLoanees = _filterLoanees(allLoanees);
     final activeCount = allLoanees.where((l) => l.isActive).length;
     final inactiveCount = allLoanees.where((l) => !l.isActive).length;
+
+    // Pagination calculations (default 10 records per page)
+    final int totalCount = filteredLoanees.length;
+    final int totalPages = totalCount > 0 ? (totalCount / _rowsPerPage).ceil() : 1;
+
+    if (_currentPage > totalPages) {
+      _currentPage = totalPages;
+    }
+    if (_currentPage < 1) {
+      _currentPage = 1;
+    }
+
+    final int startIndex = totalCount == 0 ? 0 : (_currentPage - 1) * _rowsPerPage;
+    final int endIndex = totalCount == 0 ? 0 : math.min(startIndex + _rowsPerPage, totalCount);
+
+    final paginatedLoanees = totalCount == 0
+        ? <LoaneeAccount>[]
+        : filteredLoanees.sublist(startIndex, endIndex);
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
@@ -226,6 +249,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                     onChanged: (val) {
                       setState(() {
                         _searchQuery = val.trim();
+                        _currentPage = 1;
                       });
                     },
                     decoration: InputDecoration(
@@ -239,6 +263,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                                 _searchController.clear();
                                 setState(() {
                                   _searchQuery = '';
+                                  _currentPage = 1;
                                 });
                               },
                             )
@@ -285,6 +310,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                                 if (val != null) {
                                   setState(() {
                                     _selectedDistrictFilter = val;
+                                    _currentPage = 1;
                                   });
                                 }
                               },
@@ -320,6 +346,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                                 if (val != null) {
                                   setState(() {
                                     _selectedStatusFilter = val;
+                                    _currentPage = 1;
                                   });
                                 }
                               },
@@ -341,7 +368,9 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Showing ${filteredLoanees.length} of ${loaneeProvider.totalLoanees} Accounts',
+                    totalCount == 0
+                        ? '0 of ${loaneeProvider.totalLoanees} Accounts'
+                        : 'Showing ${startIndex + 1}–$endIndex of $totalCount Accounts',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -427,13 +456,301 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                       ),
                     )
                   : ListView.builder(
+                      controller: _scrollController,
                       padding: const EdgeInsets.all(12),
-                      itemCount: filteredLoanees.length,
+                      itemCount: paginatedLoanees.length,
                       itemBuilder: (context, index) {
-                        final item = filteredLoanees[index];
+                        final item = paginatedLoanees[index];
                         return _buildLoaneeCard(context, item, loaneeProvider, isAdmin);
                       },
                     ),
+            ),
+
+            // Bottom Pagination Controls
+            if (filteredLoanees.isNotEmpty)
+              _buildPaginationControls(
+                totalCount: totalCount,
+                totalPages: totalPages,
+                startIndex: startIndex,
+                endIndex: endIndex,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _changePage(int newPage) {
+    if (newPage != _currentPage) {
+      setState(() {
+        _currentPage = newPage;
+      });
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    }
+  }
+
+  void _showJumpToPageDialog(BuildContext context, int totalPages) {
+    final controller = TextEditingController(text: '$_currentPage');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Jump to Page', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter page number (1 to $totalPages):', style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: '1 - $totalPages',
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8B1A1A),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              final val = int.tryParse(controller.text.trim());
+              if (val != null && val >= 1 && val <= totalPages) {
+                Navigator.pop(ctx);
+                _changePage(val);
+              }
+            },
+            child: const Text('Go'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationControls({
+    required int totalCount,
+    required int totalPages,
+    required int startIndex,
+    required int endIndex,
+  }) {
+    final bool canPrev = _currentPage > 1;
+    final bool canNext = _currentPage < totalPages;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          top: BorderSide(color: Colors.grey.shade300, width: 1),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Row 1: Showing indicator & Per Page selector
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  totalCount == 0
+                      ? '0 accounts'
+                      : 'Showing ${startIndex + 1}–$endIndex of $totalCount accounts',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Per Page: ',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Container(
+                      height: 28,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<int>(
+                          value: _rowsPerPage,
+                          isDense: true,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF8B1A1A),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 10, child: Text('10')),
+                            DropdownMenuItem(value: 20, child: Text('20')),
+                            DropdownMenuItem(value: 50, child: Text('50')),
+                            DropdownMenuItem(value: 100, child: Text('100')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null && val != _rowsPerPage) {
+                              setState(() {
+                                _rowsPerPage = val;
+                                _currentPage = 1;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Divider(height: 1),
+            const SizedBox(height: 6),
+            // Row 2: Navigation buttons: [<<] [< Prev] [Page X of Y] [Next >] [>>]
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // First Page Button
+                IconButton(
+                  icon: const Icon(Icons.first_page_rounded),
+                  iconSize: 20,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  color: canPrev ? const Color(0xFF8B1A1A) : Colors.grey.shade400,
+                  onPressed: canPrev ? () => _changePage(1) : null,
+                  tooltip: 'First Page',
+                ),
+                const SizedBox(width: 4),
+
+                // Previous Button
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: canPrev
+                        ? const Color(0xFF8B1A1A)
+                        : Colors.grey.shade200,
+                    foregroundColor: canPrev
+                        ? Colors.white
+                        : Colors.grey.shade400,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: canPrev ? () => _changePage(_currentPage - 1) : null,
+                  icon: const Icon(Icons.chevron_left_rounded, size: 16),
+                  label: const Text(
+                    'Prev',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 8),
+
+                // Page Indicator Chip (Tap to jump to page)
+                InkWell(
+                  onTap: totalPages > 1 ? () => _showJumpToPageDialog(context, totalPages) : null,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFF8B1A1A).withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Page $_currentPage of $totalPages',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF8B1A1A),
+                          ),
+                        ),
+                        if (totalPages > 1) ...[
+                          const SizedBox(width: 4),
+                          const Icon(Icons.unfold_more_rounded, size: 14, color: Color(0xFF8B1A1A)),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+
+                // Next Button
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: canNext
+                        ? const Color(0xFF8B1A1A)
+                        : Colors.grey.shade200,
+                    foregroundColor: canNext
+                        ? Colors.white
+                        : Colors.grey.shade400,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: canNext ? () => _changePage(_currentPage + 1) : null,
+                  label: const Text(
+                    'Next',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                  icon: const Icon(Icons.chevron_right_rounded, size: 16),
+                ),
+                const SizedBox(width: 4),
+
+                // Last Page Button
+                IconButton(
+                  icon: const Icon(Icons.last_page_rounded),
+                  iconSize: 20,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  color: canNext ? const Color(0xFF8B1A1A) : Colors.grey.shade400,
+                  onPressed: canNext ? () => _changePage(totalPages) : null,
+                  tooltip: 'Last Page',
+                ),
+              ],
             ),
           ],
         ),
