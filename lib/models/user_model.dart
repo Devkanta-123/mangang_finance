@@ -19,7 +19,10 @@ class User {
     this.status = 'Active',
   });
 
-  bool get isActive => status.toLowerCase() != 'inactive';
+  bool get isActive {
+    final s = status.trim().toLowerCase();
+    return s != 'inactive' && s != 'false' && s != 'disabled' && s != 'deactivated';
+  }
 
   User copyWith({
     String? name,
@@ -51,6 +54,16 @@ class User {
       return UserType.loanee;
     }
 
+    final rawStatus = json['status']?.toString();
+    final bool isInactiveBool = json['is_active'] == false || json['isActive'] == false;
+    String statusVal = 'Active';
+    if (rawStatus != null && rawStatus.isNotEmpty) {
+      statusVal = rawStatus;
+    }
+    if (isInactiveBool || statusVal.toLowerCase() == 'inactive' || statusVal.toLowerCase() == 'false') {
+      statusVal = 'Inactive';
+    }
+
     return User(
       name: json['name']?.toString() ?? 'User',
       mobileNo: json['mobileNo']?.toString() ?? json['mobile_no']?.toString() ?? '',
@@ -58,7 +71,7 @@ class User {
       customerId: json['customerId']?.toString() ?? json['customer_id']?.toString(),
       roName: json['roName']?.toString() ?? json['ro_name']?.toString(),
       accountName: json['accountName']?.toString() ?? json['account_name']?.toString(),
-      status: json['status']?.toString() ?? 'Active',
+      status: statusVal,
     );
   }
 
@@ -103,7 +116,10 @@ class UserAuthRecord {
   })  : createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
-  bool get isActive => status.toLowerCase() != 'inactive';
+  bool get isActive {
+    final s = status.trim().toLowerCase();
+    return s != 'inactive' && s != 'false' && s != 'disabled' && s != 'deactivated';
+  }
 
   static UserType parseUserType(String? val) {
     if (val == null) return UserType.loanee;
@@ -149,6 +165,16 @@ class UserAuthRecord {
         ? rawId
         : (custId != null && custId.isNotEmpty ? custId : (json['mobile_no']?.toString() ?? json['mobileNo']?.toString() ?? ''));
 
+    final rawStatus = json['status']?.toString();
+    final bool isInactiveBool = json['is_active'] == false || json['isActive'] == false;
+    String statusVal = 'Active';
+    if (rawStatus != null && rawStatus.isNotEmpty) {
+      statusVal = rawStatus;
+    }
+    if (isInactiveBool || statusVal.toLowerCase() == 'inactive' || statusVal.toLowerCase() == 'false') {
+      statusVal = 'Inactive';
+    }
+
     return UserAuthRecord(
       id: effectiveId,
       mobileNo: json['mobile_no']?.toString() ?? json['mobileNo']?.toString() ?? '',
@@ -158,7 +184,7 @@ class UserAuthRecord {
       name: json['name']?.toString() ?? '',
       roName: json['ro_name']?.toString() ?? json['roName']?.toString(),
       accountName: json['account_name']?.toString() ?? json['accountName']?.toString(),
-      status: json['status']?.toString() ?? 'Active',
+      status: statusVal,
       createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now() : DateTime.now(),
       updatedAt: json['updated_at'] != null ? DateTime.tryParse(json['updated_at'].toString()) ?? DateTime.now() : DateTime.now(),
     );
@@ -173,6 +199,7 @@ class UserAuthRecord {
       'ro_name': roName,
       'account_name': accountName,
       'status': status,
+      'is_active': isActive,
       'updated_at': DateTime.now().toIso8601String(),
     };
 

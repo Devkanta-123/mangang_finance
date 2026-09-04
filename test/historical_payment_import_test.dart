@@ -339,7 +339,7 @@ void main() {
     });
 
     // Test 6: Loan Account Map not found
-    test("6. Loan Account Map not found flags unmapped warning and generates collection card", () {
+    test("6. Loan Account Map not found flags row as invalid, skipped, and prevents card generation", () {
       final excelBytes = createTestExcel(
         dataRows: [
           [
@@ -366,8 +366,11 @@ void main() {
       expect(preview.unmappedRowsCount, equals(1));
       final row = preview.rowRecords.first;
       expect(row.isUnmapped, isTrue);
-      expect(row.newCollectionEntryNeeded, isTrue);
-      expect(row.newCollectionEntry?.customerId, equals("CUST-9999"));
+      expect(row.isValid, isFalse);
+      expect(row.newCollectionEntryNeeded, isFalse);
+      expect(row.newCollectionEntry, isNull);
+      expect(row.errorMessage, contains("Loanee does not exist in loanee_accounts database"));
+      expect(preview.validPaymentsCount, equals(0));
     });
 
     // Test 7: Duplicate payment in DB
@@ -421,6 +424,9 @@ void main() {
 
       // Seed provider with initial collection entry
       await collectionProvider.addCollectionEntry(sampleEntries.first);
+      for (final l in sampleLoanees) {
+        loaneeProvider.handleRealtimeLoaneeInsert(l);
+      }
 
       final excelBytes = createTestExcel(
         dataRows: [
@@ -602,7 +608,15 @@ void main() {
 
       final preview = HistoricalPaymentImportService.parseWorkbookBytes(
         bytes: excelBytes,
-        existingLoanees: [],
+        existingLoanees: [
+          sampleLoanees.first.copyWith(
+            customerid: "CUST-NEW-01",
+            accountnumber: "ACC-NEW-01",
+            loaneename: "New Loanee Profile",
+            address: "Field Route Zone",
+            loanamount: 11500.0,
+          ),
+        ],
         existingEntries: [],
         existingPayments: [],
         defaultInterestRate: 15.0,
@@ -1145,6 +1159,7 @@ void main() {
 
       // Create entry for 26LA000001
       await collectionProvider.addCollectionEntry(sampleEntries.first);
+      loaneeProvider.handleRealtimeLoaneeInsert(sampleLoanees.first);
 
       final bytes = HistoricalPaymentImportService.generateTemplateExcelBytes();
       final preview = HistoricalPaymentImportService.parseWorkbookBytes(
@@ -1472,6 +1487,42 @@ void main() {
       expect(afterDelete.loanmaturitydate, equals(customMaturity));
       expect(afterDelete.formattedSanctionDate, equals("10/02/2026"));
       expect(afterDelete.formattedMaturityDate, equals("10/07/2026"));
+    });
+
+    // Test 15: In-file duplicate Customer ID / Account Number across rows in matrix layout is flagged and blocked
+    test("15. Duplicate Customer ID / Account Number in matrix layout is flagged as duplicate and blocked", () {
+      final headers = [
+        "Customer_ID",
+        "Account_Number",
+        "Loanee_Name",
+        "Route",
+        "Collection_Type",
+        "Collected_By",
+        "01/01/2026",
+      ];
+      final rows = [
+        ["26LA000001", "MF2026A000001", "Ramesh Kumar", "Office", "Daily", "Officer 1", 100],
+        ["26LA000001", "MF2026A000001", "Ramesh Kumar", "Office", "Daily", "Officer 1", 100],
+      ];
+
+      final excelBytes = createTestExcel(headers: headers, dataRows: rows);
+      final preview = HistoricalPaymentImportService.parseWorkbookBytes(
+        bytes: excelBytes,
+        existingLoanees: sampleLoanees,
+        existingEntries: sampleEntries,
+        existingPayments: [],
+      );
+
+      expect(preview.rowRecords.length, equals(2));
+      // Row 1 is valid
+      expect(preview.rowRecords[0].isValid, isTrue);
+      expect(preview.rowRecords[0].isDuplicate, isFalse);
+
+      // Row 2 is flagged as in-file duplicate
+      expect(preview.rowRecords[1].isValid, isFalse);
+      expect(preview.rowRecords[1].isDuplicate, isTrue);
+      expect(preview.rowRecords[1].errorMessage, contains("Duplicate Customer ID"));
+      expect(preview.rowRecords[1].errorMessage, contains("Duplicate entry blocked"));
     });
   });
 }

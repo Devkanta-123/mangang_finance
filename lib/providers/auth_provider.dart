@@ -210,6 +210,7 @@ class AuthProvider extends ChangeNotifier {
     required String mobileNo,
     required String pin,
     String? customerId,
+    String status = 'Active',
   }) async {
     final cleanMobile = mobileNo.trim();
     final cleanName = name.trim();
@@ -241,7 +242,7 @@ class AuthProvider extends ChangeNotifier {
       userType: UserType.admin,
       pin: cleanPin,
       name: cleanName,
-      status: 'Active',
+      status: status,
     );
 
     final saved = await SupabaseService.instance.saveUserAuthRecord(newAdmin);
@@ -373,7 +374,37 @@ class AuthProvider extends ChangeNotifier {
       debugPrint('⚠️ Supabase Mobile & PIN login error: $e');
     }
 
-    // 2. Local saved credentials check (offline backup for created user)
+    // 2. In-memory Admin Users check (offline / mock / unit testing sync)
+    final matchingAdminMobile = _adminUsers.firstWhere(
+      (u) =>
+          (cleanMobile.isEmpty || u.mobileNo.trim() == cleanMobile) &&
+          (u.pin.trim() == cleanPin) &&
+          (userType == null || u.userType == userType),
+      orElse: () => UserAuthRecord(
+        id: '',
+        mobileNo: '',
+        userType: UserType.admin,
+        pin: '',
+        name: '',
+        status: 'Active',
+      ),
+    );
+
+    if (matchingAdminMobile.id.isNotEmpty && !matchingAdminMobile.isActive) {
+      debugPrint('🚫 Login rejected: Admin account for ${matchingAdminMobile.name} is marked INACTIVE');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_pin');
+      await prefs.remove('user_data');
+      await prefs.remove('user_role');
+
+      return const LoginResult(
+        success: false,
+        isInactive: true,
+        message: 'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
+      );
+    }
+
+    // 3. Local saved credentials check (offline backup for created user)
     final prefs = await SharedPreferences.getInstance();
     final savedPin = prefs.getString('user_pin');
     final savedData = prefs.getString('user_data');
@@ -409,9 +440,11 @@ class AuthProvider extends ChangeNotifier {
 
   /// Login exclusively using real Supabase Table PIN (with local saved PIN backup)
   Future<LoginResult> loginWithPin(String pin) async {
+    final cleanPin = pin.trim();
+
     // 1. Query live Supabase database tables (user_auth, ro_accounts, loanee_accounts)
     try {
-      final supaUser = await SupabaseService.instance.fetchUserAuthByPin(pin);
+      final supaUser = await SupabaseService.instance.fetchUserAuthByPin(cleanPin);
       if (supaUser != null) {
         // Check if account status is inactive - block login
         if (!supaUser.isActive) {
@@ -432,10 +465,10 @@ class AuthProvider extends ChangeNotifier {
         _currentUser = supaUser.toUser();
         _activeRole = supaUser.userType;
         _isLoggedIn = true;
-        _userPin = pin;
+        _userPin = cleanPin;
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_pin', pin);
+        await prefs.setString('user_pin', cleanPin);
         await prefs.setString('user_role', supaUser.userType.name);
         await prefs.setString('user_data', jsonEncode(_currentUser!.toJson()));
 
@@ -446,10 +479,37 @@ class AuthProvider extends ChangeNotifier {
       debugPrint('⚠️ Supabase PIN lookup error: $e');
     }
 
-    // 2. Local saved PIN check (offline backup for created user)
+    // 2. In-memory Admin Users check (offline / mock / unit testing sync)
+    final matchingAdminPin = _adminUsers.firstWhere(
+      (u) => u.pin.trim() == cleanPin,
+      orElse: () => UserAuthRecord(
+        id: '',
+        mobileNo: '',
+        userType: UserType.admin,
+        pin: '',
+        name: '',
+        status: 'Active',
+      ),
+    );
+
+    if (matchingAdminPin.id.isNotEmpty && !matchingAdminPin.isActive) {
+      debugPrint('🚫 Login rejected: Admin account for ${matchingAdminPin.name} is marked INACTIVE in adminUsers');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_pin');
+      await prefs.remove('user_data');
+      await prefs.remove('user_role');
+
+      return const LoginResult(
+        success: false,
+        isInactive: true,
+        message: 'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
+      );
+    }
+
+    // 3. Local saved PIN check (offline backup for created user)
     final prefs = await SharedPreferences.getInstance();
     final savedPin = prefs.getString('user_pin');
-    if (savedPin == pin && savedPin != null) {
+    if (savedPin == cleanPin && savedPin != null) {
       final savedData = prefs.getString('user_data');
       if (savedData != null) {
         try {
@@ -467,7 +527,7 @@ class AuthProvider extends ChangeNotifier {
       }
 
       _isLoggedIn = true;
-      _userPin = pin;
+      _userPin = cleanPin;
       notifyListeners();
       return LoginResult(success: true, message: 'Login successful (Offline)', user: _currentUser);
     }
@@ -586,12 +646,23 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
     }
 
+    final bool isDeactivating = newStatus.trim().toLowerCase() == 'inactive';
+
     if (_currentUser != null &&
         (_currentUser!.customerId == id ||
             _currentUser!.mobileNo == id ||
             (customerId != null && _currentUser!.customerId == customerId) ||
             (mobileNo != null && _currentUser!.mobileNo == mobileNo))) {
       _currentUser = _currentUser!.copyWith(status: newStatus);
+      if (isDeactivating) {
+        _isLoggedIn = false;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('user_pin');
+          await prefs.remove('user_data');
+          await prefs.remove('user_role');
+        } catch (_) {}
+      }
       notifyListeners();
     }
 
@@ -602,6 +673,12 @@ class AuthProvider extends ChangeNotifier {
       mobileNo: mobileNo ?? targetRecord?.mobileNo,
       userType: userType ?? targetRecord?.userType,
     );
+
+    // Sync latest from Supabase
+    try {
+      await fetchAdminUsers();
+    } catch (_) {}
+
     return success;
   }
 

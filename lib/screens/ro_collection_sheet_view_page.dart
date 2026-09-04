@@ -84,6 +84,13 @@ class _RoCollectionSheetViewPageState
     final settingsProvider =
         Provider.of<SettingsProvider>(context, listen: false);
 
+    try {
+      await Future.wait([
+        loaneeProvider.fetchFromSupabase(),
+        collectionProvider.fetchFromSupabase(),
+      ]);
+    } catch (_) {}
+
     final preview = await HistoricalPaymentImportService.pickAndParseHistoricalPayments(
       context: context,
       loaneeProvider: loaneeProvider,

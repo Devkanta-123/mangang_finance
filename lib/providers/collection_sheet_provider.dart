@@ -214,20 +214,35 @@ class CollectionSheetProvider extends ChangeNotifier {
     await SupabaseService.instance.deleteRoute(id);
   }
 
+  /// Check if a collection card entry already exists for a Customer ID or Account Number
+  bool hasCollectionEntry({required String customerId, required String accountNumber}) {
+    final cleanCust = customerId.trim().toLowerCase();
+    final cleanAcc = accountNumber.trim().toLowerCase();
+    return _collectionEntries.any((e) =>
+        (cleanCust.isNotEmpty && e.customerId.trim().toLowerCase() == cleanCust) ||
+        (cleanAcc.isNotEmpty && e.accountNumber.trim().toLowerCase() == cleanAcc));
+  }
+
   // COLLECTION SHEET CARD MASTER ENTRY METHODS
   /// Add master collection card entry to 'ro_collection_entries' table ONLY (no default payment inserted)
   Future<bool> addCollectionEntry(RoCollectionEntry entry) async {
-    // Check if card entry already exists for customerId & accountNumber
-    final existingIndex = _collectionEntries.indexWhere((e) =>
-        e.customerId == entry.customerId || e.accountNumber == entry.accountNumber);
+    final cleanCust = entry.customerId.trim().toLowerCase();
+    final cleanAcc = entry.accountNumber.trim().toLowerCase();
 
-    if (existingIndex == -1) {
-      _collectionEntries.insert(0, entry);
-      await SupabaseService.instance.saveCollectionEntry(entry);
+    // Check if card entry already exists for customerId & accountNumber
+    final isDuplicate = _collectionEntries.any((e) =>
+        (cleanCust.isNotEmpty && e.customerId.trim().toLowerCase() == cleanCust) ||
+        (cleanAcc.isNotEmpty && e.accountNumber.trim().toLowerCase() == cleanAcc));
+
+    if (isDuplicate) {
+      debugPrint('⚠️ Duplicate collection card rejected: Cust: ${entry.customerId} / Acc: ${entry.accountNumber}');
+      return false;
     }
 
+    _collectionEntries.insert(0, entry);
+    final saved = await SupabaseService.instance.saveCollectionEntry(entry);
     notifyListeners();
-    return true;
+    return saved;
   }
 
   /// Add dedicated payment record strictly to 'ro_collection_payments' table

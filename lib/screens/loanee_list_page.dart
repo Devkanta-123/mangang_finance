@@ -210,7 +210,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                             onPressed: widget.onCreateLoaneePressed,
                             icon: const Icon(Icons.add_rounded, size: 18),
                             label: const Text(
-                              'New Account',
+                              'New',
                               style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                             ),
                           ),

@@ -1128,11 +1128,14 @@ class SupabaseService {
               .eq('pin', cleanPin);
 
           if (response.isNotEmpty) {
-            final dynamic matchJson = response.firstWhere(
-              (r) => r['status']?.toString().trim().toLowerCase() != 'inactive',
-              orElse: () => response.first,
-            );
-            final authRecord = UserAuthRecord.fromJson(Map<String, dynamic>.from(matchJson));
+            const rolePriority = {'admin': 0, 'manager': 1, 'ro': 2, 'loanee': 3};
+            final sorted = List<dynamic>.from(response);
+            sorted.sort((a, b) {
+              final aRole = rolePriority[a['user_type']?.toString().trim().toLowerCase()] ?? 99;
+              final bRole = rolePriority[b['user_type']?.toString().trim().toLowerCase()] ?? 99;
+              return aRole.compareTo(bRole);
+            });
+            final authRecord = UserAuthRecord.fromJson(Map<String, dynamic>.from(sorted.first));
             return _enrichAndCheckInactive(authRecord, supaClient);
           }
         } catch (e) {
@@ -1210,9 +1213,26 @@ class SupabaseService {
     final custId = (authRecord.customerId ?? authRecord.id).trim();
     final mobile = authRecord.mobileNo.trim();
 
-    bool isInactive = authRecord.status.trim().toLowerCase() == 'inactive';
+    bool isInactive = !authRecord.isActive;
 
-    if (!isInactive && authRecord.userType == UserType.ro) {
+    if (!isInactive && (authRecord.userType == UserType.admin || authRecord.userType == UserType.manager)) {
+      try {
+        var adminQuery = supaClient.from('user_auth').select('status,is_active');
+        if (custId.isNotEmpty) {
+          adminQuery = adminQuery.eq('customer_id', custId);
+        } else {
+          adminQuery = adminQuery.eq('mobile_no', mobile).eq('user_type', authRecord.userType.name);
+        }
+        final adminData = await adminQuery.maybeSingle();
+        if (adminData != null) {
+          final st = adminData['status']?.toString().trim().toLowerCase();
+          final ia = adminData['is_active'];
+          if (st == 'inactive' || st == 'false' || st == 'disabled' || st == 'deactivated' || ia == false) {
+            isInactive = true;
+          }
+        }
+      } catch (_) {}
+    } else if (!isInactive && authRecord.userType == UserType.ro) {
       try {
         var roQuery = supaClient.from('ro_accounts').select('status');
         if (custId.isNotEmpty) {
@@ -1304,16 +1324,19 @@ class SupabaseService {
               final authRecord = UserAuthRecord.fromJson(Map<String, dynamic>.from(match));
               return _enrichAndCheckInactive(authRecord, supaClient);
             } else {
-              // Sort deterministically: Active first, then Admin > Manager > RO > Loanee
+              // Priority: Admin > Manager > RO > Loanee
               const rolePriority = {'admin': 0, 'manager': 1, 'ro': 2, 'loanee': 3};
               final sorted = List<dynamic>.from(response);
               sorted.sort((a, b) {
-                final aInactive = a['status']?.toString().trim().toLowerCase() == 'inactive' ? 1 : 0;
-                final bInactive = b['status']?.toString().trim().toLowerCase() == 'inactive' ? 1 : 0;
-                if (aInactive != bInactive) return aInactive.compareTo(bInactive);
                 final aRole = rolePriority[a['user_type']?.toString().trim().toLowerCase()] ?? 99;
                 final bRole = rolePriority[b['user_type']?.toString().trim().toLowerCase()] ?? 99;
-                return aRole.compareTo(bRole);
+                if (aRole != bRole) return aRole.compareTo(bRole);
+
+                final aStatus = (a['status'] ?? '').toString().trim().toLowerCase();
+                final aInactive = (aStatus == 'inactive' || aStatus == 'false' || aStatus == 'disabled' || a['is_active'] == false) ? 1 : 0;
+                final bStatus = (b['status'] ?? '').toString().trim().toLowerCase();
+                final bInactive = (bStatus == 'inactive' || bStatus == 'false' || bStatus == 'disabled' || b['is_active'] == false) ? 1 : 0;
+                return aInactive.compareTo(bInactive);
               });
 
               final authRecord = UserAuthRecord.fromJson(Map<String, dynamic>.from(sorted.first));
@@ -2040,25 +2063,84 @@ class SupabaseService {
         final bool isActiveBool = newStatus.toLowerCase() != 'inactive';
 
         // 1. Update status in 'user_auth' table scoped strictly to the specific account
-        try {
-          if (cleanId.isNotEmpty) {
-            await supaClient.from('user_auth').update({
+        bool authUpdated = false;
+
+        // A. If we have a customer_id (or non-numeric ID like ADM-01)
+        final targetCustId = cleanCustId.isNotEmpty
+            ? cleanCustId
+            : (int.tryParse(cleanId) == null && cleanId.isNotEmpty ? cleanId : '');
+        if (targetCustId.isNotEmpty) {
+          try {
+            final res = await supaClient.from('user_auth').update({
               'status': newStatus,
+              'is_active': isActiveBool,
               'updated_at': DateTime.now().toIso8601String(),
-            }).eq('id', cleanId);
-          } else if (cleanMobile.isNotEmpty && userType != null) {
-            await supaClient.from('user_auth').update({
-              'status': newStatus,
-              'updated_at': DateTime.now().toIso8601String(),
-            }).eq('mobile_no', cleanMobile).eq('user_type', userType.name);
-          } else if (cleanCustId.isNotEmpty) {
-            await supaClient.from('user_auth').update({
-              'status': newStatus,
-              'updated_at': DateTime.now().toIso8601String(),
-            }).eq('customer_id', cleanCustId);
+            }).eq('customer_id', targetCustId).select();
+            if (res.isNotEmpty) authUpdated = true;
+          } catch (_) {
+            try {
+              final res = await supaClient.from('user_auth').update({
+                'status': newStatus,
+                'updated_at': DateTime.now().toIso8601String(),
+              }).eq('customer_id', targetCustId).select();
+              if (res.isNotEmpty) authUpdated = true;
+            } catch (eCust) {
+              debugPrint('⚠️ user_auth status update by customer_id error: $eCust');
+            }
           }
-        } catch (eAuth) {
-          debugPrint('⚠️ Error updating user_auth status in Supabase: $eAuth');
+        }
+
+        // B. If not yet updated or cleanMobile is provided, try by mobile_no & user_type
+        if ((!authUpdated || cleanMobile.isNotEmpty) && cleanMobile.isNotEmpty) {
+          try {
+            var q = supaClient.from('user_auth').update({
+              'status': newStatus,
+              'is_active': isActiveBool,
+              'updated_at': DateTime.now().toIso8601String(),
+            }).eq('mobile_no', cleanMobile);
+            if (userType != null) {
+              q = q.eq('user_type', userType.name);
+            }
+            final res = await q.select();
+            if (res.isNotEmpty) authUpdated = true;
+          } catch (_) {
+            try {
+              var q = supaClient.from('user_auth').update({
+                'status': newStatus,
+                'updated_at': DateTime.now().toIso8601String(),
+              }).eq('mobile_no', cleanMobile);
+              if (userType != null) {
+                q = q.eq('user_type', userType.name);
+              }
+              final res = await q.select();
+              if (res.isNotEmpty) authUpdated = true;
+            } catch (eMob) {
+              debugPrint('⚠️ user_auth status update by mobile error: $eMob');
+            }
+          }
+        }
+
+        // C. If not yet updated, try by numeric id
+        if (!authUpdated && int.tryParse(cleanId) != null) {
+          final intId = int.parse(cleanId);
+          try {
+            final res = await supaClient.from('user_auth').update({
+              'status': newStatus,
+              'is_active': isActiveBool,
+              'updated_at': DateTime.now().toIso8601String(),
+            }).eq('id', intId).select();
+            if (res.isNotEmpty) authUpdated = true;
+          } catch (_) {
+            try {
+              final res = await supaClient.from('user_auth').update({
+                'status': newStatus,
+                'updated_at': DateTime.now().toIso8601String(),
+              }).eq('id', intId).select();
+              if (res.isNotEmpty) authUpdated = true;
+            } catch (eId) {
+              debugPrint('⚠️ user_auth status update by id error: $eId');
+            }
+          }
         }
 
         // Build match clause for related tables (ro_accounts and loanee_accounts)

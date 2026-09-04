@@ -138,6 +138,19 @@ class _AddLoaneeCollectionSheetPageState
       return;
     }
 
+    final cleanCust = _customerIdController.text.trim();
+    final cleanAcc = _accountNumberController.text.trim();
+
+    if (collectionProvider.hasCollectionEntry(customerId: cleanCust, accountNumber: cleanAcc)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('A collection card already exists for Customer ID "$cleanCust" / Account "$cleanAcc". Duplicate entry blocked.'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isSubmitting = true;
     });
@@ -190,7 +203,7 @@ class _AddLoaneeCollectionSheetPageState
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Failed to save collection entry.'),
+            content: Text('Failed to save collection entry (may already exist in database).'),
             backgroundColor: Colors.red,
           ),
         );
@@ -504,12 +517,17 @@ class _AddLoaneeCollectionSheetPageState
                             elevation: 1,
                           ),
                           onPressed: () async {
+                            final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
                             final parsed = await BulkCollectionImportService.pickAndParseBulkCollectionEntries(
                               context: context,
                               collectionProvider: collectionProvider,
+                              loaneeProvider: loaneeProvider,
                             );
                             if (parsed != null && parsed.isNotEmpty && context.mounted) {
-                              await BulkCollectionUploadDialog.show(context, parsedRows: parsed);
+                              final uploaded = await BulkCollectionUploadDialog.show(context, parsedRows: parsed);
+                              if (uploaded == true && context.mounted) {
+                                await collectionProvider.fetchFromSupabase();
+                              }
                             }
                           },
                           icon: const Icon(Icons.upload_file_rounded, size: 16),

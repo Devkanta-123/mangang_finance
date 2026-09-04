@@ -129,6 +129,21 @@ class _HistoricalPaymentImportDialogState
                   style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
                 ),
               ],
+              if (widget.previewResult.unmappedRowsCount > 0 || widget.previewResult.invalidRowsCount > 0) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Text(
+                    "Skipped ${widget.previewResult.unmappedRowsCount + widget.previewResult.invalidRowsCount} row(s) because the loanees do not exist in loanee_accounts database.",
+                    style: TextStyle(fontSize: 11.5, color: Colors.orange.shade900, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
             ] else ...[
               Text(
                 result.errorMessage ?? "An error occurred during import.",
@@ -233,6 +248,60 @@ class _HistoricalPaymentImportDialogState
             ),
             const SizedBox(height: 14),
 
+            if (preview.rowRecords.any((r) => r.isDuplicate))
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.orange.shade300),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.copy_rounded, color: Colors.orange.shade800, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${preview.rowRecords.where((r) => r.isDuplicate).length} record(s) are duplicates or already exist in database and are blocked from duplicate entry.',
+                        style: TextStyle(
+                          color: Colors.orange.shade900,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            if (preview.unmappedRowsCount + preview.invalidRowsCount > 0)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${preview.unmappedRowsCount + preview.invalidRowsCount} loanee record(s) do not exist in loanee_accounts and will be skipped. Only payments for registered loanees can be imported.',
+                        style: TextStyle(
+                          color: Colors.red.shade900,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Metrics Summary Grid
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -273,7 +342,7 @@ class _HistoricalPaymentImportDialogState
                   if (preview.unmappedRowsCount > 0) ...[
                     const SizedBox(width: 8),
                     _buildStatChip(
-                      title: "Unmapped Accounts",
+                      title: "Skipped (Not in DB)",
                       value: "${preview.unmappedRowsCount}",
                       color: Colors.purple.shade900,
                       bgColor: Colors.purple.shade50,
@@ -307,7 +376,7 @@ class _HistoricalPaymentImportDialogState
                   ],
                   if (preview.unmappedRowsCount > 0) ...[
                     const SizedBox(width: 6),
-                    _buildFilterTabButton("unmapped", "Unmapped (${preview.unmappedRowsCount})"),
+                    _buildFilterTabButton("unmapped", "Not in DB (${preview.unmappedRowsCount})"),
                   ],
                   if (preview.duplicatePaymentsCount > 0) ...[
                     const SizedBox(width: 6),
@@ -399,20 +468,25 @@ class _HistoricalPaymentImportDialogState
   }
 
   Widget _buildRowRecordCard(HistoricalImportRowRecord row) {
+    final bool isDuplicate = row.isDuplicate;
     final bool hasError = !row.isValid;
     final bool isUnmapped = row.isUnmapped;
 
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: hasError
-            ? Colors.red.shade50.withValues(alpha: 0.4)
-            : (isUnmapped ? Colors.purple.shade50.withValues(alpha: 0.3) : Colors.white),
+        color: isDuplicate
+            ? Colors.orange.shade50.withValues(alpha: 0.4)
+            : (hasError
+                ? Colors.red.shade50.withValues(alpha: 0.4)
+                : (isUnmapped ? Colors.purple.shade50.withValues(alpha: 0.3) : Colors.white)),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: hasError
-              ? Colors.red.shade200
-              : (isUnmapped ? Colors.purple.shade200 : Colors.grey.shade200),
+          color: isDuplicate
+              ? Colors.orange.shade300
+              : (hasError
+                  ? Colors.red.shade200
+                  : (isUnmapped ? Colors.purple.shade200 : Colors.grey.shade200)),
         ),
       ),
       child: Column(
@@ -422,13 +496,17 @@ class _HistoricalPaymentImportDialogState
           Row(
             children: [
               Icon(
-                hasError
-                    ? Icons.cancel_rounded
-                    : (isUnmapped ? Icons.help_outline_rounded : Icons.check_circle_rounded),
+                isDuplicate
+                    ? Icons.copy_rounded
+                    : (hasError
+                        ? Icons.cancel_rounded
+                        : (isUnmapped ? Icons.help_outline_rounded : Icons.check_circle_rounded)),
                 size: 18,
-                color: hasError
-                    ? Colors.red.shade700
-                    : (isUnmapped ? Colors.purple.shade700 : Colors.green.shade700),
+                color: isDuplicate
+                    ? Colors.orange.shade800
+                    : (hasError
+                        ? Colors.red.shade700
+                        : (isUnmapped ? Colors.purple.shade700 : Colors.green.shade700)),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -441,7 +519,9 @@ class _HistoricalPaymentImportDialogState
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: hasError ? Colors.red.shade900 : Colors.black87,
+                        color: isDuplicate
+                            ? Colors.orange.shade900
+                            : (hasError ? Colors.red.shade900 : Colors.black87),
                       ),
                     ),
                     if (row.rawAccountNumber.isNotEmpty)
@@ -473,6 +553,38 @@ class _HistoricalPaymentImportDialogState
                             fontSize: 9.5,
                             fontWeight: FontWeight.w600,
                             color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ),
+                    if (isDuplicate)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade100,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          "DUPLICATE • BLOCKED",
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade900,
+                          ),
+                        ),
+                      )
+                    else if (hasError || isUnmapped)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade100,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          "SKIPPED • NOT IN DB",
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade900,
                           ),
                         ),
                       ),

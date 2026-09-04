@@ -59,6 +59,7 @@ class HistoricalImportRowRecord {
 
   final List<HistoricalPaymentItem> payments;
   final bool isValid;
+  final bool isDuplicate;
   final bool isUnmapped; // Loan Account Map could not be resolved
   final String? errorMessage;
   final List<String> warnings;
@@ -77,6 +78,7 @@ class HistoricalImportRowRecord {
     this.newCollectionEntry,
     required this.payments,
     required this.isValid,
+    this.isDuplicate = false,
     this.isUnmapped = false,
     this.errorMessage,
     this.warnings = const [],
@@ -565,6 +567,8 @@ class HistoricalPaymentImportService {
 
     // 1. First, check if sheets use the NEW Vertical Template Layout (like assets/template/old_payment_history.xlsx)
     bool foundVerticalLayout = false;
+    final fileSeenCustVertical = <String, String>{};
+    final fileSeenAccVertical = <String, String>{};
 
     for (final tableEntry in excelDoc.tables.entries) {
       final sheetName = tableEntry.key;
@@ -642,31 +646,84 @@ class HistoricalPaymentImportService {
         final List<String> warnings = [];
         String? rowError;
         bool isRowValid = true;
+        bool isRowDuplicate = false;
         bool isRowUnmapped = false;
 
-        // 1. Basic validation of row identifiers
-        if (rawName.isEmpty && rawCustId.isEmpty && rawAccNo.isEmpty) {
-          isRowValid = false;
-          rowError = "Sheet '$sheetName' is missing Customer ID, Account Number, and Loanee Name.";
-        }
+        // 1. Validate existence in loanee_accounts
+        final normCust = rawCustId.trim().toLowerCase();
+        final normAcc = rawAccNo.trim().toLowerCase();
 
-        // 2. Resolve Loan Account Map
         LoaneeAccount? resolvedLoanee;
-        if (rawCustId.isNotEmpty && loaneeByCustId.containsKey(rawCustId.toLowerCase())) {
-          resolvedLoanee = loaneeByCustId[rawCustId.toLowerCase()];
-        } else if (rawAccNo.isNotEmpty && loaneeByAccNo.containsKey(rawAccNo.toLowerCase())) {
-          resolvedLoanee = loaneeByAccNo[rawAccNo.toLowerCase()];
-        } else if (rawName.isNotEmpty && loaneeByName.containsKey(rawName.toLowerCase())) {
-          resolvedLoanee = loaneeByName[rawName.toLowerCase()];
+        if (normCust.isEmpty && normAcc.isEmpty) {
+          isRowValid = false;
+          rowError = "Sheet '$sheetName' is missing Customer ID and Account Number. Loanee must exist in loanee_accounts first.";
+        } else if (normCust.isNotEmpty && normAcc.isNotEmpty) {
+          final loaneeByCust = loaneeByCustId[normCust];
+          final loaneeByAcc = loaneeByAccNo[normAcc];
+
+          if (loaneeByCust == null && loaneeByAcc == null) {
+            isRowValid = false;
+            rowError = 'Loanee does not exist in loanee_accounts database (Customer ID: "$rawCustId", Account No: "$rawAccNo"). Loanee must exist first.';
+          } else if (loaneeByCust == null) {
+            isRowValid = false;
+            rowError = 'Customer ID "$rawCustId" does not exist in loanee_accounts database. Loanee must exist first.';
+          } else if (loaneeByAcc == null) {
+            isRowValid = false;
+            rowError = 'Account Number "$rawAccNo" does not exist in loanee_accounts database. Loanee must exist first.';
+          } else if (loaneeByCust.customerId.trim().toLowerCase() != loaneeByAcc.customerId.trim().toLowerCase()) {
+            isRowValid = false;
+            rowError = 'Customer ID "$rawCustId" and Account Number "$rawAccNo" belong to different loanee accounts in database.';
+          } else {
+            resolvedLoanee = loaneeByCust;
+          }
+        } else if (normCust.isNotEmpty) {
+          final loaneeByCust = loaneeByCustId[normCust];
+          if (loaneeByCust == null) {
+            isRowValid = false;
+            rowError = 'Customer ID "$rawCustId" does not exist in loanee_accounts database. Loanee must exist first.';
+          } else {
+            resolvedLoanee = loaneeByCust;
+          }
+        } else {
+          final loaneeByAcc = loaneeByAccNo[normAcc];
+          if (loaneeByAcc == null) {
+            isRowValid = false;
+            rowError = 'Account Number "$rawAccNo" does not exist in loanee_accounts database. Loanee must exist first.';
+          } else {
+            resolvedLoanee = loaneeByAcc;
+          }
         }
 
-        // 3. Resolve Collection Entry
+        if (resolvedLoanee == null) {
+          isRowValid = false;
+          isRowUnmapped = true;
+          rowError ??= 'Loanee does not exist in loanee_accounts database. Loanee must exist first before importing collection payments.';
+        }
+
+        // Check for in-file duplicate sheet
+        if (isRowValid && resolvedLoanee != null) {
+          final normResCust = resolvedLoanee.customerId.trim().toLowerCase();
+          final normResAcc = resolvedLoanee.accountNumber.trim().toLowerCase();
+
+          if (normResCust.isNotEmpty && fileSeenCustVertical.containsKey(normResCust)) {
+            isRowValid = false;
+            isRowDuplicate = true;
+            rowError = 'Duplicate Customer ID "${resolvedLoanee.customerId}" in Excel file (already in sheet "${fileSeenCustVertical[normResCust]}"). Duplicate entry blocked.';
+          } else if (normResAcc.isNotEmpty && fileSeenAccVertical.containsKey(normResAcc)) {
+            isRowValid = false;
+            isRowDuplicate = true;
+            rowError = 'Duplicate Account Number "${resolvedLoanee.accountNumber}" in Excel file (already in sheet "${fileSeenAccVertical[normResAcc]}"). Duplicate entry blocked.';
+          }
+
+          if (isRowValid) {
+            if (normResCust.isNotEmpty) fileSeenCustVertical[normResCust] = sheetName;
+            if (normResAcc.isNotEmpty) fileSeenAccVertical[normResAcc] = sheetName;
+          }
+        }
+
+        // 2. Resolve Collection Entry
         RoCollectionEntry? resolvedEntry;
-        if (rawCustId.isNotEmpty && entryByCustId.containsKey(rawCustId.toLowerCase())) {
-          resolvedEntry = entryByCustId[rawCustId.toLowerCase()];
-        } else if (rawAccNo.isNotEmpty && entryByAccNo.containsKey(rawAccNo.toLowerCase())) {
-          resolvedEntry = entryByAccNo[rawAccNo.toLowerCase()];
-        } else if (resolvedLoanee != null) {
+        if (resolvedLoanee != null) {
           if (entryByCustId.containsKey(resolvedLoanee.customerId.toLowerCase())) {
             resolvedEntry = entryByCustId[resolvedLoanee.customerId.toLowerCase()];
           } else if (entryByAccNo.containsKey(resolvedLoanee.accountNumber.toLowerCase())) {
@@ -679,19 +736,14 @@ class HistoricalPaymentImportService {
 
         final normRoute = rawRoute.isNotEmpty ? rawRoute : defaultRoute;
         final normType = normalizeCollectionType(rawType.isNotEmpty ? rawType : "Daily");
-        final resolvedCust = rawCustId.isNotEmpty ? rawCustId : (resolvedLoanee?.customerId ?? "CUST-1001");
-        final resolvedAcc = rawAccNo.isNotEmpty ? rawAccNo : (resolvedLoanee?.accountNumber ?? "ACC-88239001");
-        final resolvedName = rawName.isNotEmpty ? rawName : (resolvedLoanee?.loaneeName ?? "Loanee $resolvedCust");
+        final resolvedCust = resolvedLoanee != null ? resolvedLoanee.customerId : (rawCustId.isNotEmpty ? rawCustId : "N/A");
+        final resolvedAcc = resolvedLoanee != null ? resolvedLoanee.accountNumber : (rawAccNo.isNotEmpty ? rawAccNo : "N/A");
+        final resolvedName = rawName.isNotEmpty ? rawName : (resolvedLoanee?.loaneeName ?? "Unknown Loanee");
 
-        if (isRowValid) {
+        if (isRowValid && resolvedLoanee != null) {
           if (resolvedEntry == null) {
-            if (resolvedLoanee == null) {
-              isRowUnmapped = true;
-              warnings.add("Loan Account Map not found in existing loanee master; collection card will be auto-generated.");
-            }
-
             newCollectionEntryNeeded = true;
-            final double rawLoan = (resolvedLoanee != null && resolvedLoanee.loanAmount > 0)
+            final double rawLoan = resolvedLoanee.loanAmount > 0
                 ? resolvedLoanee.loanAmount
                 : defaultBasePrincipal * 1.15; // default ₹11,500
 
@@ -711,10 +763,10 @@ class HistoricalPaymentImportService {
               customerId: resolvedCust,
               accountNumber: resolvedAcc,
               loaneeName: resolvedName,
-              loaneeAddress: resolvedLoanee?.address ?? "Field Route Zone",
+              loaneeAddress: resolvedLoanee.address.isNotEmpty ? resolvedLoanee.address : "Field Route Zone",
               collectionType: normType,
               route: normRoute,
-              mobileNo: resolvedLoanee?.mobileNo ?? "",
+              mobileNo: resolvedLoanee.mobileNo,
               payableAmount: payableAmt,
               loanAmount: breakdown.loanAmount,
               actualPrincipal: breakdown.actualPrincipal,
@@ -793,6 +845,19 @@ class HistoricalPaymentImportService {
             continue;
           }
 
+          if (!isRowValid) {
+            rowPayments.add(
+              HistoricalPaymentItem(
+                paymentDate: parsedDate,
+                amount: parsedAmount,
+                interest: parsedInterest,
+                roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
+                errorMessage: "Payment skipped: Loanee does not exist in loanee_accounts database.",
+              ),
+            );
+            continue;
+          }
+
           totalPaymentsParsed++;
 
           // Duplicate Check against DB and within-file
@@ -852,6 +917,11 @@ class HistoricalPaymentImportService {
           }
         }
 
+        final bool isAllPaymentsDuplicate = rowPayments.isNotEmpty && rowPayments.every((p) => p.isDuplicate);
+        if (isAllPaymentsDuplicate) {
+          warnings.add("All payment dates in this sheet already exist in database.");
+        }
+
         if (rowPayments.isEmpty && isRowValid) {
           warnings.add("No payment records found below Date header in sheet '$sheetName'.");
         }
@@ -881,6 +951,7 @@ class HistoricalPaymentImportService {
             newCollectionEntry: newCollectionEntry,
             payments: rowPayments,
             isValid: isRowValid && rowError == null,
+            isDuplicate: isRowDuplicate || isAllPaymentsDuplicate,
             isUnmapped: isRowUnmapped,
             errorMessage: rowError,
             warnings: warnings,
@@ -1048,6 +1119,9 @@ class HistoricalPaymentImportService {
     }
 
     // Parse Data Rows
+    final fileSeenCustHorizontal = <String, int>{};
+    final fileSeenAccHorizontal = <String, int>{};
+
     for (int r = headerRowIndex + 1; r < rawRows.length; r++) {
       final row = rawRows[r];
       if (row.isEmpty || row.every((c) => c == null || c.value == null || c.value.toString().trim().isEmpty)) {
@@ -1071,34 +1145,82 @@ class HistoricalPaymentImportService {
       final List<String> warnings = [];
       String? rowError;
       bool isRowValid = true;
+      bool isRowDuplicate = false;
       bool isRowUnmapped = false;
 
-      if (rawName.isEmpty && rawCustId.isEmpty && rawAccNo.isEmpty) {
-        isRowValid = false;
-        rowError = "Row is missing Customer ID, Account Number, and Loanee Name.";
-      } else if (rawName.isEmpty) {
-        isRowValid = false;
-        rowError = "Loanee Name is required.";
-      } else if (rawCustId.isEmpty && rawAccNo.isEmpty) {
-        isRowValid = false;
-        rowError = "Customer ID or Account Number is required.";
-      }
+      final normCust = rawCustId.trim().toLowerCase();
+      final normAcc = rawAccNo.trim().toLowerCase();
 
       LoaneeAccount? resolvedLoanee;
-      if (rawCustId.isNotEmpty && loaneeByCustId.containsKey(rawCustId.toLowerCase())) {
-        resolvedLoanee = loaneeByCustId[rawCustId.toLowerCase()];
-      } else if (rawAccNo.isNotEmpty && loaneeByAccNo.containsKey(rawAccNo.toLowerCase())) {
-        resolvedLoanee = loaneeByAccNo[rawAccNo.toLowerCase()];
-      } else if (rawName.isNotEmpty && loaneeByName.containsKey(rawName.toLowerCase())) {
-        resolvedLoanee = loaneeByName[rawName.toLowerCase()];
+      if (normCust.isEmpty && normAcc.isEmpty) {
+        isRowValid = false;
+        rowError = "Row is missing Customer ID and Account Number. Loanee must exist in loanee_accounts first.";
+      } else if (normCust.isNotEmpty && normAcc.isNotEmpty) {
+        final loaneeByCust = loaneeByCustId[normCust];
+        final loaneeByAcc = loaneeByAccNo[normAcc];
+
+        if (loaneeByCust == null && loaneeByAcc == null) {
+          isRowValid = false;
+          rowError = 'Loanee does not exist in loanee_accounts database (Customer ID: "$rawCustId", Account No: "$rawAccNo"). Loanee must exist first.';
+        } else if (loaneeByCust == null) {
+          isRowValid = false;
+          rowError = 'Customer ID "$rawCustId" does not exist in loanee_accounts database. Loanee must exist first.';
+        } else if (loaneeByAcc == null) {
+          isRowValid = false;
+          rowError = 'Account Number "$rawAccNo" does not exist in loanee_accounts database. Loanee must exist first.';
+        } else if (loaneeByCust.customerId.trim().toLowerCase() != loaneeByAcc.customerId.trim().toLowerCase()) {
+          isRowValid = false;
+          rowError = 'Customer ID "$rawCustId" and Account Number "$rawAccNo" belong to different loanee accounts in database.';
+        } else {
+          resolvedLoanee = loaneeByCust;
+        }
+      } else if (normCust.isNotEmpty) {
+        final loaneeByCust = loaneeByCustId[normCust];
+        if (loaneeByCust == null) {
+          isRowValid = false;
+          rowError = 'Customer ID "$rawCustId" does not exist in loanee_accounts database. Loanee must exist first.';
+        } else {
+          resolvedLoanee = loaneeByCust;
+        }
+      } else {
+        final loaneeByAcc = loaneeByAccNo[normAcc];
+        if (loaneeByAcc == null) {
+          isRowValid = false;
+          rowError = 'Account Number "$rawAccNo" does not exist in loanee_accounts database. Loanee must exist first.';
+        } else {
+          resolvedLoanee = loaneeByAcc;
+        }
+      }
+
+      if (resolvedLoanee == null) {
+        isRowValid = false;
+        isRowUnmapped = true;
+        rowError ??= 'Loanee does not exist in loanee_accounts database. Loanee must exist first before importing collection payments.';
+      }
+
+      // Check for in-file duplicate row
+      if (isRowValid && resolvedLoanee != null) {
+        final normResCust = resolvedLoanee.customerId.trim().toLowerCase();
+        final normResAcc = resolvedLoanee.accountNumber.trim().toLowerCase();
+
+        if (normResCust.isNotEmpty && fileSeenCustHorizontal.containsKey(normResCust)) {
+          isRowValid = false;
+          isRowDuplicate = true;
+          rowError = 'Duplicate Customer ID "${resolvedLoanee.customerId}" in Excel file (already in row #${fileSeenCustHorizontal[normResCust]}). Duplicate entry blocked.';
+        } else if (normResAcc.isNotEmpty && fileSeenAccHorizontal.containsKey(normResAcc)) {
+          isRowValid = false;
+          isRowDuplicate = true;
+          rowError = 'Duplicate Account Number "${resolvedLoanee.accountNumber}" in Excel file (already in row #${fileSeenAccHorizontal[normResAcc]}). Duplicate entry blocked.';
+        }
+
+        if (isRowValid) {
+          if (normResCust.isNotEmpty) fileSeenCustHorizontal[normResCust] = r + 1;
+          if (normResAcc.isNotEmpty) fileSeenAccHorizontal[normResAcc] = r + 1;
+        }
       }
 
       RoCollectionEntry? resolvedEntry;
-      if (rawCustId.isNotEmpty && entryByCustId.containsKey(rawCustId.toLowerCase())) {
-        resolvedEntry = entryByCustId[rawCustId.toLowerCase()];
-      } else if (rawAccNo.isNotEmpty && entryByAccNo.containsKey(rawAccNo.toLowerCase())) {
-        resolvedEntry = entryByAccNo[rawAccNo.toLowerCase()];
-      } else if (resolvedLoanee != null) {
+      if (resolvedLoanee != null) {
         if (entryByCustId.containsKey(resolvedLoanee.customerId.toLowerCase())) {
           resolvedEntry = entryByCustId[resolvedLoanee.customerId.toLowerCase()];
         } else if (entryByAccNo.containsKey(resolvedLoanee.accountNumber.toLowerCase())) {
@@ -1111,18 +1233,14 @@ class HistoricalPaymentImportService {
 
       final normRoute = rawRoute.isNotEmpty ? rawRoute : defaultRoute;
       final normType = normalizeCollectionType(rawType);
-      final resolvedCust = rawCustId.isNotEmpty ? rawCustId : (resolvedLoanee?.customerId ?? "CUST-${1000 + r}");
-      final resolvedAcc = rawAccNo.isNotEmpty ? rawAccNo : (resolvedLoanee?.accountNumber ?? "ACC-${88239000 + r}");
+      final resolvedCust = resolvedLoanee != null ? resolvedLoanee.customerId : (rawCustId.isNotEmpty ? rawCustId : "N/A");
+      final resolvedAcc = resolvedLoanee != null ? resolvedLoanee.accountNumber : (rawAccNo.isNotEmpty ? rawAccNo : "N/A");
+      final resolvedName = rawName.isNotEmpty ? rawName : (resolvedLoanee?.loaneeName ?? "Unknown Loanee");
 
-      if (isRowValid) {
+      if (isRowValid && resolvedLoanee != null) {
         if (resolvedEntry == null) {
-          if (resolvedLoanee == null) {
-            isRowUnmapped = true;
-            warnings.add("Loan Account Map not found in existing loanee master; collection card will be auto-generated.");
-          }
-
           newCollectionEntryNeeded = true;
-          final double rawLoan = (resolvedLoanee != null && resolvedLoanee.loanAmount > 0)
+          final double rawLoan = (resolvedLoanee.loanAmount > 0)
               ? resolvedLoanee.loanAmount
               : defaultBasePrincipal * 1.15;
 
@@ -1141,11 +1259,11 @@ class HistoricalPaymentImportService {
             id: "COL-HIST-${DateTime.now().millisecondsSinceEpoch}-$r",
             customerId: resolvedCust,
             accountNumber: resolvedAcc,
-            loaneeName: rawName.isNotEmpty ? rawName : (resolvedLoanee?.loaneeName ?? "Loanee $resolvedCust"),
-            loaneeAddress: resolvedLoanee?.address ?? "Field Route Zone",
+            loaneeName: resolvedName,
+            loaneeAddress: resolvedLoanee.address.isNotEmpty ? resolvedLoanee.address : "Field Route Zone",
             collectionType: normType,
             route: normRoute,
-            mobileNo: resolvedLoanee?.mobileNo ?? "",
+            mobileNo: resolvedLoanee.mobileNo,
             payableAmount: payableAmt,
             loanAmount: breakdown.loanAmount,
             actualPrincipal: breakdown.actualPrincipal,
@@ -1202,6 +1320,18 @@ class HistoricalPaymentImportService {
           continue;
         }
 
+        if (!isRowValid) {
+          rowPayments.add(
+            HistoricalPaymentItem(
+              paymentDate: paymentDate,
+              amount: parsedAmount,
+              roName: rawCollectedBy,
+              errorMessage: "Payment skipped: Loanee does not exist in loanee_accounts database.",
+            ),
+          );
+          continue;
+        }
+
         totalPaymentsParsed++;
 
         final dateStr = "${paymentDate.year}-${paymentDate.month.toString().padLeft(2, "0")}-${paymentDate.day.toString().padLeft(2, "0")}";
@@ -1251,6 +1381,11 @@ class HistoricalPaymentImportService {
         }
       }
 
+      final bool isAllPaymentsDuplicate = rowPayments.isNotEmpty && rowPayments.every((p) => p.isDuplicate);
+      if (isAllPaymentsDuplicate) {
+        warnings.add("All payment dates in this row already exist in database.");
+      }
+
       if (rowPayments.isEmpty && isRowValid) {
         warnings.add("No payment amounts found in date columns for this row.");
       }
@@ -1280,6 +1415,7 @@ class HistoricalPaymentImportService {
           newCollectionEntry: newCollectionEntry,
           payments: rowPayments,
           isValid: isRowValid && rowError == null,
+          isDuplicate: isRowDuplicate || isAllPaymentsDuplicate,
           isUnmapped: isRowUnmapped,
           errorMessage: rowError,
           warnings: warnings,
@@ -1341,6 +1477,12 @@ class HistoricalPaymentImportService {
         return null;
       }
 
+      if (loaneeProvider.loanees.isEmpty) {
+        try {
+          await loaneeProvider.fetchFromSupabase();
+        } catch (_) {}
+      }
+
       return parseWorkbookBytes(
         bytes: bytes,
         existingLoanees: loaneeProvider.loanees,
@@ -1386,7 +1528,7 @@ class HistoricalPaymentImportService {
       try {
         // 1. Gather all new Collection Entries that must be created
         for (final row in previewResult.rowRecords) {
-          if (!row.isValid) continue;
+          if (!row.isValid || row.isDuplicate) continue;
 
           if (row.newCollectionEntryNeeded && row.newCollectionEntry != null) {
             final newEntry = row.newCollectionEntry!;

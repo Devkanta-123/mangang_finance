@@ -7,8 +7,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../models/loanee_model.dart';
 import '../models/ro_collection_entry_model.dart';
 import '../providers/collection_sheet_provider.dart';
+import '../providers/loanee_provider.dart';
+import 'package:provider/provider.dart';
 
 class BulkCollectionEntryRowResult {
   final int rowIndex;
@@ -21,8 +24,10 @@ class BulkCollectionEntryRowResult {
   final String route;
   final String status;
   final bool isValid;
+  final bool isDuplicate;
   final String? errorMessage;
   final RoCollectionEntry? entryModel;
+  final LoaneeAccount? matchedLoanee;
 
   BulkCollectionEntryRowResult({
     required this.rowIndex,
@@ -35,8 +40,10 @@ class BulkCollectionEntryRowResult {
     required this.route,
     this.status = 'Active',
     required this.isValid,
+    this.isDuplicate = false,
     this.errorMessage,
     this.entryModel,
+    this.matchedLoanee,
   });
 }
 
@@ -283,12 +290,243 @@ class BulkCollectionImportService {
     return rows;
   }
 
+  /// Parse rows into BulkCollectionEntryRowResult items with loanee_accounts validation
+  static List<BulkCollectionEntryRowResult> parseRows({
+    required List<List<dynamic>> rawRows,
+    required List<LoaneeAccount> existingLoanees,
+    required List<RoCollectionEntry> existingEntries,
+    List<String> availableRoutes = const [],
+  }) {
+    if (rawRows.isEmpty) return [];
+
+    // Map column headers dynamically
+    final headerRow = rawRows.first.map((e) => e.toString().toLowerCase().trim().replaceAll(' ', '_')).toList();
+
+    int custCol = headerRow.indexWhere((h) => h.contains('customer') || h == 'cust_id' || h == 'cust');
+    int accCol = headerRow.indexWhere((h) => h.contains('account') || h == 'acc_no' || h == 'acc');
+    int nameCol = headerRow.indexWhere((h) => h.contains('name') || h == 'loanee');
+    int addrCol = headerRow.indexWhere((h) => h.contains('address') || h == 'addr');
+    int phoneCol = headerRow.indexWhere((h) => h.contains('mobile') || h.contains('phone') || h == 'contact');
+    int typeCol = headerRow.indexWhere((h) => h.contains('type') || h == 'collection_type');
+    int routeCol = headerRow.indexWhere((h) => h.contains('route'));
+    int statusCol = headerRow.indexWhere((h) => h.contains('status'));
+
+    // Fallback default indices if headers not recognized
+    if (custCol == -1) custCol = 0;
+    if (accCol == -1) accCol = 1;
+    if (nameCol == -1) nameCol = 2;
+    if (addrCol == -1) addrCol = 3;
+    if (phoneCol == -1) phoneCol = 4;
+    if (typeCol == -1) typeCol = 5;
+    if (routeCol == -1) routeCol = 6;
+    if (statusCol == -1) statusCol = 7;
+
+    final dbByCustId = <String, LoaneeAccount>{};
+    final dbByAccNo = <String, LoaneeAccount>{};
+
+    for (final loanee in existingLoanees) {
+      final c = loanee.customerId.trim().toLowerCase();
+      final a = loanee.accountNumber.trim().toLowerCase();
+      if (c.isNotEmpty) dbByCustId[c] = loanee;
+      if (a.isNotEmpty) dbByAccNo[a] = loanee;
+    }
+
+    // Database duplicate trackers (already registered in RO Collection Sheet)
+    final dbCustIdsInSheet = <String>{};
+    final dbAccNosInSheet = <String>{};
+    for (final entry in existingEntries) {
+      final c = entry.customerId.trim().toLowerCase();
+      final a = entry.accountNumber.trim().toLowerCase();
+      if (c.isNotEmpty) dbCustIdsInSheet.add(c);
+      if (a.isNotEmpty) dbAccNosInSheet.add(a);
+    }
+
+    // In-file duplicate trackers (mapping identifier -> first row index where seen)
+    final fileCustIds = <String, int>{};
+    final fileAccNos = <String, int>{};
+
+    final List<BulkCollectionEntryRowResult> parsedResults = [];
+
+    for (int i = 1; i < rawRows.length; i++) {
+      final row = rawRows[i];
+      if (row.isEmpty || row.every((c) => c.toString().trim().isEmpty)) {
+        continue; // Skip empty rows
+      }
+
+      String getColVal(int colIdx) {
+        if (colIdx >= 0 && colIdx < row.length) {
+          return row[colIdx].toString().trim();
+        }
+        return '';
+      }
+
+      final custVal = getColVal(custCol);
+      final accVal = getColVal(accCol);
+      final nameVal = getColVal(nameCol);
+      final addrVal = getColVal(addrCol);
+      final phoneVal = getColVal(phoneCol);
+      String typeVal = getColVal(typeCol);
+      String routeVal = getColVal(routeCol);
+      final statusVal = getColVal(statusCol).isNotEmpty ? getColVal(statusCol) : 'Active';
+
+      // Normalizations
+      if (typeVal.isEmpty) typeVal = 'Daily';
+      if (routeVal.isEmpty) {
+        routeVal = availableRoutes.isNotEmpty ? availableRoutes.first : 'Office';
+      }
+
+      final normCust = custVal.toLowerCase().trim();
+      final normAcc = accVal.toLowerCase().trim();
+
+      bool isValid = true;
+      bool isRowDuplicate = false;
+      String? error;
+      LoaneeAccount? matchedLoanee;
+
+      // 1. Loanee existence validation against loanee_accounts
+      if (normCust.isEmpty && normAcc.isEmpty) {
+        isValid = false;
+        error = 'Customer ID and Account Number are both missing. Loanee must exist in loanee_accounts first.';
+      } else if (normCust.isNotEmpty && normAcc.isNotEmpty) {
+        final loaneeByCust = dbByCustId[normCust];
+        final loaneeByAcc = dbByAccNo[normAcc];
+
+        if (loaneeByCust == null && loaneeByAcc == null) {
+          isValid = false;
+          error = 'Loanee does not exist in loanee_accounts database (Customer ID: "$custVal", Account No: "$accVal"). Skipped.';
+        } else if (loaneeByCust == null) {
+          isValid = false;
+          error = 'Customer ID "$custVal" does not exist in loanee_accounts database. Skipped.';
+        } else if (loaneeByAcc == null) {
+          isValid = false;
+          error = 'Account Number "$accVal" does not exist in loanee_accounts database. Skipped.';
+        } else if (loaneeByCust.customerId.trim().toLowerCase() != loaneeByAcc.customerId.trim().toLowerCase()) {
+          isValid = false;
+          error = 'Customer ID "$custVal" and Account Number "$accVal" belong to different loanee accounts in database. Skipped.';
+        } else {
+          matchedLoanee = loaneeByCust;
+        }
+      } else if (normCust.isNotEmpty) {
+        final loaneeByCust = dbByCustId[normCust];
+        if (loaneeByCust == null) {
+          isValid = false;
+          error = 'Customer ID "$custVal" does not exist in loanee_accounts database. Loanee must exist first.';
+        } else {
+          matchedLoanee = loaneeByCust;
+        }
+      } else {
+        final loaneeByAcc = dbByAccNo[normAcc];
+        if (loaneeByAcc == null) {
+          isValid = false;
+          error = 'Account Number "$accVal" does not exist in loanee_accounts database. Loanee must exist first.';
+        } else {
+          matchedLoanee = loaneeByAcc;
+        }
+      }
+
+      // 2. Validate Loanee details & check for duplicates (In-file & Database)
+      if (matchedLoanee != null && isValid) {
+        final effectiveName = nameVal.isNotEmpty ? nameVal : matchedLoanee.loaneeName;
+        if (effectiveName.isEmpty) {
+          isValid = false;
+          error = 'Loanee Name is required';
+        } else {
+          final resolvedCustId = matchedLoanee.customerId.trim();
+          final resolvedAccNo = matchedLoanee.accountNumber.trim();
+          final normResCust = resolvedCustId.toLowerCase();
+          final normResAcc = resolvedAccNo.toLowerCase();
+
+          // 2a. In-file duplicate check
+          if (normResCust.isNotEmpty && fileCustIds.containsKey(normResCust)) {
+            isValid = false;
+            isRowDuplicate = true;
+            error = 'Duplicate Customer ID "$resolvedCustId" in Excel (already in row #${fileCustIds[normResCust]}). Duplicate entry blocked.';
+          } else if (normResAcc.isNotEmpty && fileAccNos.containsKey(normResAcc)) {
+            isValid = false;
+            isRowDuplicate = true;
+            error = 'Duplicate Account Number "$resolvedAccNo" in Excel (already in row #${fileAccNos[normResAcc]}). Duplicate entry blocked.';
+          }
+          // 2b. Database duplicate check (against existing collection sheet records)
+          else if (normResCust.isNotEmpty && dbCustIdsInSheet.contains(normResCust)) {
+            isValid = false;
+            isRowDuplicate = true;
+            error = 'Loanee already registered / already exists in RO Collection Sheet with Customer ID "$resolvedCustId". Duplicate entry blocked.';
+          } else if (normResAcc.isNotEmpty && dbAccNosInSheet.contains(normResAcc)) {
+            isValid = false;
+            isRowDuplicate = true;
+            error = 'Loanee already registered / already exists in RO Collection Sheet with Account Number "$resolvedAccNo". Duplicate entry blocked.';
+          }
+
+          if (isValid) {
+            if (normResCust.isNotEmpty) fileCustIds[normResCust] = i + 1;
+            if (normResAcc.isNotEmpty) fileAccNos[normResAcc] = i + 1;
+          }
+        }
+      }
+
+      RoCollectionEntry? entryModel;
+      if (isValid && !isRowDuplicate && matchedLoanee != null) {
+        final resolvedCustId = matchedLoanee.customerId;
+        final resolvedAccNo = matchedLoanee.accountNumber;
+        final effectiveName = nameVal.isNotEmpty ? nameVal : matchedLoanee.loaneeName;
+        final resolvedAddr = addrVal.isNotEmpty ? addrVal : (matchedLoanee.address.isNotEmpty ? matchedLoanee.address : 'N/A');
+        final resolvedMobile = phoneVal.isNotEmpty ? phoneVal : matchedLoanee.mobileNo;
+
+        entryModel = RoCollectionEntry(
+          id: 'COL-${DateTime.now().millisecondsSinceEpoch}-$i',
+          customerId: resolvedCustId,
+          accountNumber: resolvedAccNo,
+          loaneeName: effectiveName,
+          loaneeAddress: resolvedAddr,
+          collectionType: typeVal,
+          route: routeVal,
+          mobileNo: resolvedMobile,
+          status: statusVal,
+          loanAmount: matchedLoanee.loanAmount > 0 ? matchedLoanee.loanAmount : 0.0,
+        );
+      }
+
+      parsedResults.add(
+        BulkCollectionEntryRowResult(
+          rowIndex: i + 1,
+          customerId: custVal.isNotEmpty ? custVal : (matchedLoanee?.customerId ?? ''),
+          accountNumber: accVal.isNotEmpty ? accVal : (matchedLoanee?.accountNumber ?? ''),
+          loaneeName: nameVal.isNotEmpty ? nameVal : (matchedLoanee?.loaneeName ?? ''),
+          loaneeAddress: addrVal.isNotEmpty ? addrVal : (matchedLoanee?.address ?? ''),
+          mobileNo: phoneVal.isNotEmpty ? phoneVal : (matchedLoanee?.mobileNo ?? ''),
+          collectionType: typeVal,
+          route: routeVal,
+          status: statusVal,
+          isValid: isValid,
+          isDuplicate: isRowDuplicate,
+          errorMessage: error,
+          entryModel: entryModel,
+          matchedLoanee: matchedLoanee,
+        ),
+      );
+    }
+
+    return parsedResults;
+  }
+
   /// Pick an Excel (.xlsx/.xls) or CSV file and parse rows into RoCollectionEntry items
   static Future<List<BulkCollectionEntryRowResult>?> pickAndParseBulkCollectionEntries({
     required BuildContext context,
     required CollectionSheetProvider collectionProvider,
+    LoaneeProvider? loaneeProvider,
   }) async {
     try {
+      final lp = loaneeProvider ?? Provider.of<LoaneeProvider>(context, listen: false);
+      // Ensure both loanee_accounts and ro_collection_entries are fresh from Supabase
+      try {
+        await Future.wait([
+          lp.fetchFromSupabase(),
+          collectionProvider.fetchFromSupabase(),
+        ]);
+      } catch (syncErr) {
+        debugPrint('⚠️ Pre-import sync note: $syncErr');
+      }
+
       final List<PlatformFile> pickedFiles = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['xlsx', 'xls', 'csv'],
@@ -367,118 +605,12 @@ class BulkCollectionImportService {
         return null;
       }
 
-      // Map column headers dynamically
-      final headerRow = rawRows.first.map((e) => e.toString().toLowerCase().trim().replaceAll(' ', '_')).toList();
-
-      int custCol = headerRow.indexWhere((h) => h.contains('customer') || h == 'cust_id' || h == 'cust');
-      int accCol = headerRow.indexWhere((h) => h.contains('account') || h == 'acc_no' || h == 'acc');
-      int nameCol = headerRow.indexWhere((h) => h.contains('name') || h == 'loanee');
-      int addrCol = headerRow.indexWhere((h) => h.contains('address') || h == 'addr');
-      int phoneCol = headerRow.indexWhere((h) => h.contains('mobile') || h.contains('phone') || h == 'contact');
-      int typeCol = headerRow.indexWhere((h) => h.contains('type') || h == 'collection_type');
-      int routeCol = headerRow.indexWhere((h) => h.contains('route'));
-      int statusCol = headerRow.indexWhere((h) => h.contains('status'));
-
-      // Fallback default indices if headers not recognized
-      if (custCol == -1) custCol = 0;
-      if (accCol == -1) accCol = 1;
-      if (nameCol == -1) nameCol = 2;
-      if (addrCol == -1) addrCol = 3;
-      if (phoneCol == -1) phoneCol = 4;
-      if (typeCol == -1) typeCol = 5;
-      if (routeCol == -1) routeCol = 6;
-      if (statusCol == -1) statusCol = 7;
-
-      final existingEntries = collectionProvider.collectionEntries;
-      final availableRoutes = collectionProvider.routeNames;
-      final List<BulkCollectionEntryRowResult> parsedResults = [];
-
-      for (int i = 1; i < rawRows.length; i++) {
-        final row = rawRows[i];
-        if (row.isEmpty || row.every((c) => c.toString().trim().isEmpty)) {
-          continue; // Skip empty rows
-        }
-
-        String getColVal(int colIdx) {
-          if (colIdx >= 0 && colIdx < row.length) {
-            return row[colIdx].toString().trim();
-          }
-          return '';
-        }
-
-        final custVal = getColVal(custCol);
-        final accVal = getColVal(accCol);
-        final nameVal = getColVal(nameCol);
-        final addrVal = getColVal(addrCol);
-        final phoneVal = getColVal(phoneCol);
-        String typeVal = getColVal(typeCol);
-        String routeVal = getColVal(routeCol);
-        final statusVal = getColVal(statusCol).isNotEmpty ? getColVal(statusCol) : 'Active';
-
-        // Normalizations
-        if (typeVal.isEmpty) typeVal = 'Daily';
-        if (routeVal.isEmpty) {
-          routeVal = availableRoutes.isNotEmpty ? availableRoutes.first : 'Office';
-        }
-
-        bool isValid = true;
-        String? error;
-
-        if (nameVal.isEmpty) {
-          isValid = false;
-          error = 'Loanee Name is required';
-        } else if (accVal.isEmpty && custVal.isEmpty) {
-          isValid = false;
-          error = 'Account Number or Customer ID is required';
-        } else {
-          // Check for duplicate in existing collection sheet
-          final isDuplicate = existingEntries.any((e) =>
-              (accVal.isNotEmpty && e.accountNumber.toLowerCase().trim() == accVal.toLowerCase().trim()) ||
-              (custVal.isNotEmpty && e.customerId.toLowerCase().trim() == custVal.toLowerCase().trim()));
-
-          if (isDuplicate) {
-            isValid = false;
-            error = 'Collection card already registered for Acc: "$accVal" / Cust: "$custVal"';
-          }
-        }
-
-        RoCollectionEntry? entryModel;
-        if (isValid) {
-          final resolvedCustId = custVal.isNotEmpty ? custVal : 'CUST-${1000 + i}';
-          final resolvedAccNo = accVal.isNotEmpty ? accVal : 'ACC-${88239000 + i}';
-
-          entryModel = RoCollectionEntry(
-            id: 'COL-${DateTime.now().millisecondsSinceEpoch}-$i',
-            customerId: resolvedCustId,
-            accountNumber: resolvedAccNo,
-            loaneeName: nameVal,
-            loaneeAddress: addrVal.isNotEmpty ? addrVal : 'N/A',
-            collectionType: typeVal,
-            route: routeVal,
-            mobileNo: phoneVal.isNotEmpty ? phoneVal : '',
-            status: statusVal,
-          );
-        }
-
-        parsedResults.add(
-          BulkCollectionEntryRowResult(
-            rowIndex: i + 1,
-            customerId: custVal,
-            accountNumber: accVal,
-            loaneeName: nameVal,
-            loaneeAddress: addrVal,
-            mobileNo: phoneVal,
-            collectionType: typeVal,
-            route: routeVal,
-            status: statusVal,
-            isValid: isValid,
-            errorMessage: error,
-            entryModel: entryModel,
-          ),
-        );
-      }
-
-      return parsedResults;
+      return parseRows(
+        rawRows: rawRows,
+        existingLoanees: lp.loanees,
+        existingEntries: collectionProvider.collectionEntries,
+        availableRoutes: collectionProvider.routeNames,
+      );
     } catch (e) {
       debugPrint('⚠️ Error picking/parsing bulk file: $e');
       if (context.mounted) {
@@ -503,9 +635,9 @@ class BulkCollectionImportService {
     List<String> failedMessages = [];
 
     for (final row in validRows) {
-      if (!row.isValid || row.entryModel == null) {
+      if (!row.isValid || row.isDuplicate || row.entryModel == null) {
         failedCount++;
-        failedMessages.add('Row ${row.rowIndex}: ${row.errorMessage ?? "Invalid record"}');
+        failedMessages.add('Row ${row.rowIndex}: ${row.errorMessage ?? "Duplicate or invalid record blocked"}');
         continue;
       }
 
@@ -514,7 +646,7 @@ class BulkCollectionImportService {
         addedCount++;
       } else {
         failedCount++;
-        failedMessages.add('Row ${row.rowIndex}: Failed to save collection card entry.');
+        failedMessages.add('Row ${row.rowIndex}: Failed to save collection card entry (duplicate or database error).');
       }
     }
 

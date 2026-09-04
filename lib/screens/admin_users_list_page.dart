@@ -98,8 +98,8 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
               Expanded(
                 child: Text(
                   willBeActive
-                      ? 'Account for ${userRecord.name} is now ACTIVE (Synced across all tables)'
-                      : 'Account for ${userRecord.name} is now INACTIVE (Login Disabled & Synced)',
+                      ? 'Account for ${userRecord.name} is now ACTIVE (Login Enabled)'
+                      : 'Account for ${userRecord.name} is now INACTIVE (Login Disabled)',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
@@ -116,6 +116,8 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final bool isAdmin = authProvider.activeRole == UserType.admin;
+    final bool isManager = authProvider.activeRole == UserType.manager;
+    final bool canManage = isAdmin || isManager;
     final allUsers = authProvider.adminUsers;
     final filteredUsers = _filterUsers(allUsers);
 
@@ -368,7 +370,7 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         elevation: 1,
                         child: InkWell(
-                          onTap: () => _showUserDetailsModal(context, item, authProvider, isAdmin),
+                          onTap: () => _showUserDetailsModal(context, item, authProvider, canManage),
                           borderRadius: BorderRadius.circular(12),
                           child: Padding(
                             padding: const EdgeInsets.all(12),
@@ -453,63 +455,87 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                                 ),
                                 const SizedBox(width: 8),
 
-                                // Status Pill & Switch (Switch ONLY for Admin)
+                                // Status Pill & Switch (Interactive Status Toggle)
                                 Column(
                                   crossAxisAlignment: CrossAxisAlignment.end,
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: isItemActive ? Colors.green.shade50 : Colors.red.shade50,
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(
-                                          color: isItemActive ? Colors.green.shade300 : Colors.red.shade300,
+                                    InkWell(
+                                      onTap: canManage
+                                          ? () => _handleToggleStatus(context, authProvider, item)
+                                          : null,
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                        decoration: BoxDecoration(
+                                          color: isItemActive ? Colors.green.shade50 : Colors.red.shade50,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: isItemActive ? Colors.green.shade300 : Colors.red.shade300,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                              width: 6,
+                                              height: 6,
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: isItemActive ? Colors.green.shade700 : Colors.red.shade700,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              isItemActive ? 'ACTIVE' : 'INACTIVE',
+                                              style: TextStyle(
+                                                fontSize: 9.5,
+                                                fontWeight: FontWeight.bold,
+                                                color: isItemActive ? Colors.green.shade800 : Colors.red.shade800,
+                                                letterSpacing: 0.3,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Container(
-                                            width: 5,
-                                            height: 5,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: isItemActive ? Colors.green.shade700 : Colors.red.shade700,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            isItemActive ? 'ACTIVE' : 'INACTIVE',
-                                            style: TextStyle(
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.bold,
-                                              color: isItemActive ? Colors.green.shade800 : Colors.red.shade800,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
                                     ),
-                                     if (isAdmin) ...[
-                                       const SizedBox(height: 2),
-                                       Transform.scale(
-                                         scale: 0.65,
-                                         child: SizedBox(
-                                           width: 36,
-                                           height: 20,
-                                           child: Switch(
-                                             value: isItemActive,
-                                             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                             activeColor: Colors.green.shade700,
-                                             activeTrackColor: Colors.green.shade200,
-                                             inactiveThumbColor: Colors.red.shade700,
-                                             inactiveTrackColor: Colors.red.shade200,
-                                             onChanged: (val) {
-                                               _handleToggleStatus(context, authProvider, item);
-                                             },
-                                           ),
-                                         ),
-                                       ),
-                                     ],
+                                    if (isAdmin) ...[
+                                      const SizedBox(height: 2),
+                                      Tooltip(
+                                        message: isItemActive
+                                            ? 'Toggle to Inactive (Login Disabled)'
+                                            : 'Toggle to Active (Login Enabled)',
+                                        child: Transform.scale(
+                                          scale: 0.72,
+                                          child: SizedBox(
+                                            width: 38,
+                                            height: 22,
+                                            child: Switch(
+                                              value: isItemActive,
+                                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              activeColor: Colors.green.shade700,
+                                              activeTrackColor: Colors.green.shade200,
+                                              inactiveThumbColor: Colors.red.shade700,
+                                              inactiveTrackColor: Colors.red.shade200,
+                                              onChanged: (val) {
+                                                _handleToggleStatus(context, authProvider, item);
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ] else if (isManager) ...[
+                                      const SizedBox(height: 2),
+                                      _StatusToggleSwitch(
+                                        value: isItemActive,
+                                        tooltip: isItemActive
+                                            ? 'Toggle to Inactive (Login Disabled)'
+                                            : 'Toggle to Active (Login Enabled)',
+                                        onChanged: (val) {
+                                          _handleToggleStatus(context, authProvider, item);
+                                        },
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ],
@@ -578,17 +604,26 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
     BuildContext context,
     UserAuthRecord userRecord,
     AuthProvider authProvider,
-    bool isAdmin,
+    bool canManage,
   ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
+        UserAuthRecord currentRecord = userRecord;
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final isItemActive = userRecord.isActive;
-            final isItemAdmin = userRecord.userType == UserType.admin;
+            final liveMatch = authProvider.adminUsers.firstWhere(
+              (u) =>
+                  u.id == currentRecord.id ||
+                  (u.customerId != null && u.customerId == currentRecord.customerId) ||
+                  (u.mobileNo == currentRecord.mobileNo),
+              orElse: () => currentRecord,
+            );
+            currentRecord = liveMatch;
+            final isItemActive = currentRecord.isActive;
+            final isItemAdmin = currentRecord.userType == UserType.admin;
 
             return Container(
               padding: const EdgeInsets.all(20),
@@ -634,11 +669,11 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              userRecord.name,
+                              currentRecord.name,
                               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                             ),
                             Text(
-                              '${userRecord.userType.name.toUpperCase()} ACCOUNT',
+                              '${currentRecord.userType.name.toUpperCase()} ACCOUNT',
                               style: const TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
@@ -654,16 +689,16 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                   const Divider(),
                   const SizedBox(height: 8),
 
-                  _buildModalRow('Customer ID', userRecord.customerId ?? userRecord.id),
-                  _buildModalRow('Mobile Number', userRecord.mobileNo.isNotEmpty ? userRecord.mobileNo : 'Not Set'),
+                  _buildModalRow('Customer ID', currentRecord.customerId ?? currentRecord.id),
+                  _buildModalRow('Mobile Number', currentRecord.mobileNo.isNotEmpty ? currentRecord.mobileNo : 'Not Set'),
                   _buildModalRow('Account Status', isItemActive ? 'Active (Login Enabled)' : 'Inactive (Login Disabled)'),
-                  _buildModalRow('Account Role', userRecord.userType.name.toUpperCase()),
-                  _buildModalRow('Created Date', userRecord.createdAt.toString().split(' ').first),
+                  _buildModalRow('Account Role', currentRecord.userType.name.toUpperCase()),
+                  _buildModalRow('Created Date', currentRecord.createdAt.toString().split(' ').first),
 
                   const SizedBox(height: 16),
 
-                  // Status Toggle Bar (ONLY FOR ADMIN)
-                  if (isAdmin) ...[
+                  // Status Toggle Bar (FOR ADMIN & MANAGER)
+                  if (canManage) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
@@ -700,8 +735,10 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                             inactiveThumbColor: Colors.red.shade700,
                             inactiveTrackColor: Colors.red.shade200,
                             onChanged: (val) async {
-                              await _handleToggleStatus(context, authProvider, userRecord);
-                              setModalState(() {});
+                              await _handleToggleStatus(context, authProvider, currentRecord);
+                              setModalState(() {
+                                currentRecord = currentRecord.copyWith(status: val ? 'Active' : 'Inactive');
+                              });
                             },
                           ),
                         ],
@@ -722,7 +759,7 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Manager role has monitoring access only. User account status modification is restricted to Administrators.',
+                              'Account status modification is restricted to Administrators and Managers.',
                               style: TextStyle(fontSize: 11, color: Colors.grey),
                             ),
                           ),
@@ -798,6 +835,7 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
     final pinController = TextEditingController(text: '123456');
     bool isSaving = false;
     bool obscurePin = false;
+    bool isAccountActive = true;
 
     final existingAdminIds = authProvider.adminUsers
         .map((u) => u.customerId ?? '')
@@ -987,6 +1025,69 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                         ),
                         const SizedBox(height: 20),
 
+                        // Account Status Toggle (Active / Inactive)
+                        _buildFieldLabel('Account Status'),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: isAccountActive ? Colors.green.shade50 : Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isAccountActive ? Colors.green.shade300 : Colors.red.shade300,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: isAccountActive ? Colors.green.shade700 : Colors.red.shade700,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        isAccountActive ? 'ACTIVE (Login Enabled)' : 'INACTIVE (Login Disabled)',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: isAccountActive ? Colors.green.shade900 : Colors.red.shade900,
+                                        ),
+                                      ),
+                                      Text(
+                                        isAccountActive
+                                            ? 'Admin can sign in immediately'
+                                            : 'Login access disabled upon creation',
+                                        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              Switch.adaptive(
+                                value: isAccountActive,
+                                activeColor: Colors.green.shade700,
+                                activeTrackColor: Colors.green.shade200,
+                                inactiveThumbColor: Colors.red.shade700,
+                                inactiveTrackColor: Colors.red.shade200,
+                                onChanged: (val) {
+                                  setModalState(() {
+                                    isAccountActive = val;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
                         // Info note
                         Container(
                           padding: const EdgeInsets.all(10),
@@ -1001,7 +1102,7 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'This Admin account will be assigned ID $nextAdminId with Active status and instant database login privileges.',
+                                  'This Admin account will be assigned ID $nextAdminId with ${isAccountActive ? "Active" : "Inactive"} status.',
                                   style: TextStyle(fontSize: 11, color: Colors.blue.shade900),
                                 ),
                               ),
@@ -1042,6 +1143,7 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
                                             mobileNo: mobileController.text.trim(),
                                             pin: pinController.text.trim(),
                                             customerId: nextAdminId,
+                                            status: isAccountActive ? 'Active' : 'Inactive',
                                           );
 
                                           setModalState(() {
@@ -1173,5 +1275,64 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
         borderSide: BorderSide(color: Colors.red.shade700, width: 1.5),
       ),
     );
+  }
+}
+
+/// A custom interactive animated toggle switch used for executive roles like Manager,
+/// offering smooth sliding animation and immediate feedback.
+class _StatusToggleSwitch extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final String? tooltip;
+
+  const _StatusToggleSwitch({
+    required this.value,
+    required this.onChanged,
+    this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final toggle = GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 36,
+        height: 20,
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: value ? Colors.green.shade700 : Colors.red.shade700,
+        ),
+        child: AnimatedAlign(
+          duration: const Duration(milliseconds: 200),
+          alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+          child: Container(
+            width: 16,
+            height: 16,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 2,
+                  offset: Offset(0, 1),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (tooltip != null) {
+      return Tooltip(
+        message: tooltip!,
+        child: toggle,
+      );
+    }
+    return toggle;
   }
 }
