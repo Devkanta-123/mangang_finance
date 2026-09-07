@@ -55,12 +55,11 @@ class User {
     }
 
     final rawStatus = json['status']?.toString();
-    final bool isInactiveBool = json['is_active'] == false || json['isActive'] == false;
     String statusVal = 'Active';
     if (rawStatus != null && rawStatus.isNotEmpty) {
       statusVal = rawStatus;
     }
-    if (isInactiveBool || statusVal.toLowerCase() == 'inactive' || statusVal.toLowerCase() == 'false') {
+    if (statusVal.toLowerCase() == 'inactive' || statusVal.toLowerCase() == 'false' || statusVal.toLowerCase() == 'disabled' || statusVal.toLowerCase() == 'deactivated') {
       statusVal = 'Inactive';
     }
 
@@ -166,12 +165,11 @@ class UserAuthRecord {
         : (custId != null && custId.isNotEmpty ? custId : (json['mobile_no']?.toString() ?? json['mobileNo']?.toString() ?? ''));
 
     final rawStatus = json['status']?.toString();
-    final bool isInactiveBool = json['is_active'] == false || json['isActive'] == false;
     String statusVal = 'Active';
     if (rawStatus != null && rawStatus.isNotEmpty) {
       statusVal = rawStatus;
     }
-    if (isInactiveBool || statusVal.toLowerCase() == 'inactive' || statusVal.toLowerCase() == 'false') {
+    if (statusVal.toLowerCase() == 'inactive' || statusVal.toLowerCase() == 'false' || statusVal.toLowerCase() == 'disabled' || statusVal.toLowerCase() == 'deactivated') {
       statusVal = 'Inactive';
     }
 
@@ -199,7 +197,6 @@ class UserAuthRecord {
       'ro_name': roName,
       'account_name': accountName,
       'status': status,
-      'is_active': isActive,
       'updated_at': DateTime.now().toIso8601String(),
     };
 

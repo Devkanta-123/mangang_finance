@@ -1077,6 +1077,7 @@ class SupabaseService {
         );
 
         final jsonPayload = finalRecord.toSupabaseJson();
+        jsonPayload.remove('is_active');
 
         try {
           await supaClient
@@ -1105,6 +1106,21 @@ class SupabaseService {
               debugPrint('⚠️ Fallback update failed: $updErr');
             }
           }
+
+          // Fallback direct insert if upsert failed
+          try {
+            final insertRes = await supaClient
+                .from('user_auth')
+                .insert(jsonPayload)
+                .select();
+            if (insertRes.isNotEmpty) {
+              debugPrint('✅ Inserted User Auth Record (${finalRecord.userType.name}) for $cleanMobile to Supabase via insert fallback.');
+              return true;
+            }
+          } catch (insErr) {
+            debugPrint('⚠️ Fallback insert note: $insErr');
+          }
+
           rethrow;
         }
       }
@@ -1217,7 +1233,7 @@ class SupabaseService {
 
     if (!isInactive && (authRecord.userType == UserType.admin || authRecord.userType == UserType.manager)) {
       try {
-        var adminQuery = supaClient.from('user_auth').select('status,is_active');
+        var adminQuery = supaClient.from('user_auth').select('status');
         if (custId.isNotEmpty) {
           adminQuery = adminQuery.eq('customer_id', custId);
         } else {
@@ -1226,8 +1242,7 @@ class SupabaseService {
         final adminData = await adminQuery.maybeSingle();
         if (adminData != null) {
           final st = adminData['status']?.toString().trim().toLowerCase();
-          final ia = adminData['is_active'];
-          if (st == 'inactive' || st == 'false' || st == 'disabled' || st == 'deactivated' || ia == false) {
+          if (st == 'inactive' || st == 'false' || st == 'disabled' || st == 'deactivated') {
             isInactive = true;
           }
         }
@@ -2073,20 +2088,11 @@ class SupabaseService {
           try {
             final res = await supaClient.from('user_auth').update({
               'status': newStatus,
-              'is_active': isActiveBool,
               'updated_at': DateTime.now().toIso8601String(),
             }).eq('customer_id', targetCustId).select();
             if (res.isNotEmpty) authUpdated = true;
-          } catch (_) {
-            try {
-              final res = await supaClient.from('user_auth').update({
-                'status': newStatus,
-                'updated_at': DateTime.now().toIso8601String(),
-              }).eq('customer_id', targetCustId).select();
-              if (res.isNotEmpty) authUpdated = true;
-            } catch (eCust) {
-              debugPrint('⚠️ user_auth status update by customer_id error: $eCust');
-            }
+          } catch (eCust) {
+            debugPrint('⚠️ user_auth status update by customer_id error: $eCust');
           }
         }
 
@@ -2095,7 +2101,6 @@ class SupabaseService {
           try {
             var q = supaClient.from('user_auth').update({
               'status': newStatus,
-              'is_active': isActiveBool,
               'updated_at': DateTime.now().toIso8601String(),
             }).eq('mobile_no', cleanMobile);
             if (userType != null) {
@@ -2103,20 +2108,8 @@ class SupabaseService {
             }
             final res = await q.select();
             if (res.isNotEmpty) authUpdated = true;
-          } catch (_) {
-            try {
-              var q = supaClient.from('user_auth').update({
-                'status': newStatus,
-                'updated_at': DateTime.now().toIso8601String(),
-              }).eq('mobile_no', cleanMobile);
-              if (userType != null) {
-                q = q.eq('user_type', userType.name);
-              }
-              final res = await q.select();
-              if (res.isNotEmpty) authUpdated = true;
-            } catch (eMob) {
-              debugPrint('⚠️ user_auth status update by mobile error: $eMob');
-            }
+          } catch (eMob) {
+            debugPrint('⚠️ user_auth status update by mobile error: $eMob');
           }
         }
 
@@ -2126,20 +2119,11 @@ class SupabaseService {
           try {
             final res = await supaClient.from('user_auth').update({
               'status': newStatus,
-              'is_active': isActiveBool,
               'updated_at': DateTime.now().toIso8601String(),
             }).eq('id', intId).select();
             if (res.isNotEmpty) authUpdated = true;
-          } catch (_) {
-            try {
-              final res = await supaClient.from('user_auth').update({
-                'status': newStatus,
-                'updated_at': DateTime.now().toIso8601String(),
-              }).eq('id', intId).select();
-              if (res.isNotEmpty) authUpdated = true;
-            } catch (eId) {
-              debugPrint('⚠️ user_auth status update by id error: $eId');
-            }
+          } catch (eId) {
+            debugPrint('⚠️ user_auth status update by id error: $eId');
           }
         }
 
