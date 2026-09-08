@@ -906,8 +906,8 @@ class HomePage extends StatelessWidget {
                                     Flexible(
                                       child: Text(
                                         breakdown.isOverdue
-                                            ? 'Payable: ₹${breakdown.totalPayableAmount.toStringAsFixed(2)} (${breakdown.lateUnits}${primaryEntry.isDaily ? "d" : "w"})'
-                                            : 'Payable: ₹${breakdown.totalPayableAmount.toStringAsFixed(2)}',
+                                            ? 'Status: Overdue'
+                                            : 'Payable: ₹${breakdown.currentInstallment.toStringAsFixed(2)}',
                                         style: TextStyle(
                                           color: breakdown.isOverdue ? Colors.amberAccent : Colors.lightGreenAccent,
                                           fontSize: 11,
@@ -921,26 +921,6 @@ class HomePage extends StatelessWidget {
                               ),
                             ],
                           ),
-                          if (breakdown.calculatedLateFine > 0) ...[
-                            const SizedBox(height: 4),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    'Late Payment Fee (${breakdown.lateUnits} ${breakdown.isDaily ? "days" : "weeks"} @ ₹${breakdown.lateFineRate.toStringAsFixed(0)}/${breakdown.isDaily ? "day" : "wk"}):',
-                                    style: const TextStyle(color: Colors.white70, fontSize: 10),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '₹ ${breakdown.calculatedLateFine.toStringAsFixed(2)}',
-                                  style: const TextStyle(color: Colors.amberAccent, fontSize: 11, fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            ),
-                          ],
                         ],
                       ),
                     );
@@ -1003,31 +983,6 @@ class HomePage extends StatelessWidget {
                           ),
                         ],
                       ),
-                      if (loaneeAccount?.isPastMaturity == true) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade900.withValues(alpha: 0.85),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.amberAccent),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.amberAccent),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Post-Maturity Alert: Loan has exceeded the maturity date. Under servicing policy, overdue interest is auto-applied on the unpaid remaining balance.',
-                                  style: const TextStyle(fontSize: 10.5, color: Colors.white, fontWeight: FontWeight.w600, height: 1.25),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -1728,7 +1683,7 @@ class HomePage extends StatelessWidget {
 }
 
 /// =========================================================
-/// DEDICATED LOANEE LATE FINE & OVERDUE ACKNOWLEDGMENT SECTION
+/// DEDICATED LOANEE OVERDUE NOTICE SECTION
 /// =========================================================
 class _LoaneeLateFineAcknowledgmentSection extends StatefulWidget {
   final User? user;
@@ -1752,15 +1707,12 @@ class _LoaneeLateFineAcknowledgmentSection extends StatefulWidget {
 
 class _LoaneeLateFineAcknowledgmentSectionState
     extends State<_LoaneeLateFineAcknowledgmentSection> {
-  bool _isAcknowledged = false;
-  String? _acknowledgmentIsoTime;
-  bool _hasCheckedAck = false;
   bool _modalAutoShown = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _checkAndPromptAcknowledgment();
+    _checkAndPromptOverdueNotice();
   }
 
   @override
@@ -1768,36 +1720,27 @@ class _LoaneeLateFineAcknowledgmentSectionState
     super.didUpdateWidget(oldWidget);
     if (oldWidget.user?.customerId != widget.user?.customerId ||
         oldWidget.loaneePayments.length != widget.loaneePayments.length) {
-      _checkAndPromptAcknowledgment();
+      _checkAndPromptOverdueNotice();
     }
   }
 
-  Future<void> _checkAndPromptAcknowledgment() async {
+  void _checkAndPromptOverdueNotice() {
     final customerId = _resolveCustomerId();
     if (customerId.isEmpty) return;
 
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    final acknowledged = await settings.isFineAcknowledgedToday(customerId);
-    final timeStr = await settings.getAcknowledgmentTimestamp(customerId);
+    final status = _calculateStatus(settings);
+    final isOverdue = status.overdueUnits > 0 || status.isPastMaturity;
 
-    if (mounted) {
-      setState(() {
-        _isAcknowledged = acknowledged;
-        _acknowledgmentIsoTime = timeStr;
-        _hasCheckedAck = true;
+    if (isOverdue && !_modalAutoShown) {
+      _modalAutoShown = true;
+      final totalAmount = _resolveTotalLoaneeAmount();
+      final overdueDuration = _resolveOverdueDurationText(status);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showLoaneeOverdueNoticeModal(context, totalAmount, overdueDuration);
+        }
       });
-
-      // If fine is accrued or past maturity date, and not yet acknowledged today, auto-prompt the Loanee
-      final status = _calculateStatus(settings);
-      final bool hasOverdueOrPostMaturity = status.calculatedLateFine > 0 || status.isPastMaturity;
-      if (hasOverdueOrPostMaturity && !acknowledged && !_modalAutoShown) {
-        _modalAutoShown = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _showLoaneeFineAcknowledgmentModal(context, status, settings);
-          }
-        });
-      }
     }
   }
 
@@ -1812,6 +1755,51 @@ class _LoaneeLateFineAcknowledgmentSectionState
       return widget.loaneeEntries.first.customerId;
     }
     return widget.user?.mobileNo ?? '';
+  }
+
+  double _resolveTotalLoaneeAmount() {
+    if (widget.loaneeAccount != null && widget.loaneeAccount!.loanAmount > 0) {
+      return widget.loaneeAccount!.loanAmount;
+    }
+    for (final entry in widget.loaneeEntries) {
+      if (entry.loanAmount != null && entry.loanAmount! > 0) {
+        return entry.loanAmount!;
+      }
+    }
+    if (widget.loaneeAccount != null && widget.loaneeAccount!.dueAmount > 0) {
+      return widget.loaneeAccount!.dueAmount;
+    }
+    return 0.0;
+  }
+
+  String _resolveOverdueDurationText(LoaneeLateFineStatus status) {
+    if (status.isPastMaturity || (status.postMaturityBreakdown != null && status.postMaturityBreakdown!.isPastMaturity)) {
+      final int months = status.postMaturityBreakdown?.overdueMonths ?? 0;
+      final maturity = status.postMaturityBreakdown?.maturityDate ?? widget.loaneeAccount?.loanMaturityDate;
+      int days = 0;
+      if (maturity != null) {
+        final cleanMaturity = DateTime(maturity.year, maturity.month, maturity.day);
+        final today = DateTime.now();
+        final cleanToday = DateTime(today.year, today.month, today.day);
+        if (cleanToday.isAfter(cleanMaturity)) {
+          days = cleanToday.difference(cleanMaturity).inDays;
+        }
+      }
+      if (months > 0 && days > 0) {
+        return '$months ${months == 1 ? "Month" : "Months"} ($days ${days == 1 ? "Day" : "Days"}) Overdue';
+      } else if (months > 0) {
+        return '$months ${months == 1 ? "Month" : "Months"} Overdue';
+      } else if (days > 0) {
+        return '$days ${days == 1 ? "Day" : "Days"} Overdue';
+      }
+    }
+
+    if (status.isDaily) {
+      return '${status.overdueUnits} ${status.overdueUnits == 1 ? "Day" : "Days"} Overdue';
+    } else {
+      final int days = status.overdueUnits * 7;
+      return '$days Days Overdue (${status.overdueUnits} ${status.overdueUnits == 1 ? "Week" : "Weeks"})';
+    }
   }
 
   LoaneeLateFineStatus _calculateStatus(SettingsProvider settings) {
@@ -1838,82 +1826,26 @@ class _LoaneeLateFineAcknowledgmentSectionState
     );
   }
 
-  Future<void> _handleAcknowledge(LoaneeLateFineStatus status, SettingsProvider settings) async {
-    final customerId = _resolveCustomerId();
-    if (customerId.isEmpty) return;
-
-    await settings.acknowledgeFineForToday(customerId);
-    final now = DateTime.now();
-
-    if (mounted) {
-      setState(() {
-        _isAcknowledged = true;
-        _acknowledgmentIsoTime = now.toIso8601String();
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          backgroundColor: Colors.green.shade800,
-          content: Row(
-            children: [
-              const Icon(Icons.check_circle_rounded, color: Colors.white),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Late Fine Assessment Acknowledged',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-                    ),
-                    Text(
-                      'Notice for ${status.collectionType} scheme recorded on ${SettingsProvider.formatDate(now)}.',
-                      style: const TextStyle(fontSize: 11, color: Colors.white70),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-  }
-
-  String _formatAckTimestamp(String? iso) {
-    if (iso == null) return 'Today';
-    final dt = DateTime.tryParse(iso);
-    if (dt == null) return 'Today';
-    final hour = dt.hour.toString().padLeft(2, '0');
-    final minute = dt.minute.toString().padLeft(2, '0');
-    return '${SettingsProvider.formatDate(dt)} at $hour:$minute';
-  }
-
   @override
   Widget build(BuildContext context) {
     final settings = Provider.of<SettingsProvider>(context);
     final status = _calculateStatus(settings);
-    final hasFine = status.calculatedLateFine > 0;
-    final isDaily = status.isDaily;
-
-    final primaryThemeColor = hasFine ? const Color(0xFF8B1A1A) : Colors.teal.shade800;
-    final cardBgColor = Colors.white;
-    final cardBorderColor = hasFine
-        ? (_isAcknowledged ? Colors.grey.shade300 : const Color(0xFF8B1A1A).withValues(alpha: 0.35))
-        : Colors.teal.shade200;
+    final isOverdue = status.overdueUnits > 0 || status.isPastMaturity;
+    final totalLoaneeAmount = _resolveTotalLoaneeAmount();
+    final overdueDuration = isOverdue ? _resolveOverdueDurationText(status) : '';
 
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: cardBgColor,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cardBorderColor, width: hasFine && !_isAcknowledged ? 1.5 : 1.0),
+        border: Border.all(
+          color: isOverdue ? const Color(0xFF8B1A1A).withValues(alpha: 0.35) : Colors.teal.shade200,
+          width: isOverdue ? 1.5 : 1.0,
+        ),
         boxShadow: [
           BoxShadow(
-            color: hasFine
+            color: isOverdue
                 ? const Color(0xFF8B1A1A).withValues(alpha: 0.08)
                 : Colors.grey.withValues(alpha: 0.05),
             blurRadius: 12,
@@ -1924,12 +1856,12 @@ class _LoaneeLateFineAcknowledgmentSectionState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. Top Header Banner
+          // 1. Header Banner
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: hasFine
+                colors: isOverdue
                     ? [const Color(0xFF8B1A1A), const Color(0xFF6B1414)]
                     : [Colors.teal.shade800, Colors.teal.shade900],
                 begin: Alignment.topLeft,
@@ -1943,15 +1875,15 @@ class _LoaneeLateFineAcknowledgmentSectionState
                 Row(
                   children: [
                     Icon(
-                      hasFine ? Icons.warning_amber_rounded : Icons.verified_user_rounded,
-                      color: hasFine ? Colors.amber.shade300 : Colors.white,
+                      isOverdue ? Icons.warning_amber_rounded : Icons.verified_user_rounded,
+                      color: isOverdue ? Colors.amber.shade300 : Colors.white,
                       size: 20,
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'LATE FINE & OVERDUE STATUS',
-                      style: TextStyle(
-                        fontSize: 12.5,
+                      isOverdue ? 'OVERDUE NOTICE' : 'ACCOUNT STATUS',
+                      style: const TextStyle(
+                        fontSize: 13,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                         letterSpacing: 0.6,
@@ -1959,568 +1891,154 @@ class _LoaneeLateFineAcknowledgmentSectionState
                     ),
                   ],
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        isDaily ? Icons.calendar_today_rounded : Icons.date_range_rounded,
-                        size: 11,
-                        color: Colors.white,
+                if (isOverdue)
+                  GestureDetector(
+                    onTap: () => _showLoaneeOverdueNoticeModal(context, totalLoaneeAmount, overdueDuration),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        isDaily
-                            ? 'DAILY (₹${settings.dailyLateFine.toStringAsFixed(0)}/day)'
-                            : 'WEEKLY (₹${settings.weeklyLateFine.toStringAsFixed(0)}/wk)',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.info_outline_rounded, size: 12, color: Colors.white),
+                          SizedBox(width: 4),
+                          Text(
+                            'Notice',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
               ],
             ),
           ),
 
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 2. Database ro_collection_payments Table Status Pill
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: status.hasPaymentsInTable
-                        ? Colors.green.shade50
-                        : Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: status.hasPaymentsInTable
-                          ? Colors.green.shade200
-                          : Colors.orange.shade300,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        status.hasPaymentsInTable
-                            ? Icons.check_circle_rounded
-                            : Icons.info_outline_rounded,
-                        size: 14,
-                        color: status.hasPaymentsInTable
-                            ? Colors.green.shade800
-                            : Colors.orange.shade900,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          status.hasPaymentsInTable
-                              ? 'Last Records: ${status.paymentRecordsCount} payment entries found (Last: ${SettingsProvider.formatDate(status.lastPaymentDate!)})'
-                              : 'Last Records: No payment entries found in database table (Start: ${SettingsProvider.formatDate(status.loanStartDate)})',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: status.hasPaymentsInTable
-                                ? Colors.green.shade900
-                                : Colors.orange.shade900,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 14),
-
-                // 3. Grid of Assessment Metrics
-                Row(
-                  children: [
-                    // Scheme Type Box
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Loan Scheme',
-                              style: TextStyle(fontSize: 10, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              status.collectionType,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1E1E1E),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              isDaily ? 'Daily Schedule' : '₹${settings.weeklyInstallmentAmount.toStringAsFixed(0)}/wk scheme',
-                              style: TextStyle(fontSize: 9.5, color: Colors.grey.shade500),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-
-                    // Overdue Duration Box
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: status.overdueUnits > 0 ? Colors.red.shade50 : Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: status.overdueUnits > 0 ? Colors.red.shade200 : Colors.grey.shade200,
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              isDaily ? 'Overdue Days' : 'Overdue Weeks',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: status.overdueUnits > 0 ? Colors.red.shade700 : Colors.grey.shade600,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              '${status.overdueUnits} ${isDaily ? 'Days' : 'Weeks'}',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: status.overdueUnits > 0 ? Colors.red.shade800 : Colors.black87,
-                              ),
-                            ),
-                            Text(
-                              status.overdueUnits > 0 ? 'Penalty Accruing' : 'Up to Date',
-                              style: TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w600,
-                                color: status.overdueUnits > 0 ? Colors.red.shade700 : Colors.green.shade700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-
-                    // Late Fine Rate Box (Admin Settings)
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.amber.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Fine Rate',
-                              style: TextStyle(fontSize: 10, color: Colors.amber.shade900, fontWeight: FontWeight.w500),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              '₹${status.lateFineRate.toStringAsFixed(0)}/${isDaily ? 'day' : 'wk'}',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.amber.shade900,
-                              ),
-                            ),
-                            Text(
-                              'Admin Config',
-                              style: TextStyle(fontSize: 9.5, color: Colors.amber.shade800),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                // 4. Mathematical Calculation Explanation Box
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: Row(
+            child: isOverdue
+                ? Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.calculate_outlined, size: 16, color: primaryThemeColor),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Calculation Method',
-                              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF1E1E1E)),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              status.calculationExplanation,
-                              style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.3),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                if (status.postMaturityBreakdown != null && status.postMaturityBreakdown!.isPastMaturity) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.amber.shade400, width: 1.2),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.warning_amber_rounded, size: 18, color: Colors.amber.shade900),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'POST-MATURITY OVERDUE INTEREST NOTICE',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.amber.shade900,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Maturity date (${SettingsProvider.formatDate(status.postMaturityBreakdown!.maturityDate)}) exceeded (${status.postMaturityBreakdown!.overdueMonths} month(s) overdue). Under terms, overdue interest applies strictly on completed month basis.',
-                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.amber.shade900),
-                        ),
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.amber.shade200),
-                          ),
-                          child: Column(
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Expanded(child: Text('Unpaid Remaining Balance:', style: TextStyle(fontSize: 10.5, color: Colors.black87), overflow: TextOverflow.ellipsis)),
-                                  const SizedBox(width: 6),
-                                  Text('₹ ${status.postMaturityBreakdown!.remainingBalance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold)),
-                                ],
-                              ),
-                              const SizedBox(height: 3),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Expanded(child: Text('Standard Rate (5m Tenure):', style: TextStyle(fontSize: 10.5, color: Colors.black54), overflow: TextOverflow.ellipsis)),
-                                  const SizedBox(width: 6),
-                                  Text('${status.postMaturityBreakdown!.normalInterestRate.toStringAsFixed(1)}%', style: const TextStyle(fontSize: 10.5, color: Colors.black54)),
-                                ],
-                              ),
-                              const SizedBox(height: 3),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(child: Text('Overdue Interest Status:', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.red.shade900), overflow: TextOverflow.ellipsis)),
-                                  const SizedBox(width: 6),
-                                  Text('Active (${status.postMaturityBreakdown!.overdueMonths > 0 ? "${status.postMaturityBreakdown!.overdueMonths}m " : ""}Compounded)', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.red.shade900)),
-                                ],
-                              ),
-                              const SizedBox(height: 3),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Expanded(child: Text('Accrued Overdue Interest:', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)), overflow: TextOverflow.ellipsis)),
-                                  const SizedBox(width: 6),
-                                  Text('₹ ${status.postMaturityBreakdown!.postMaturityInterestAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A))),
-                                ],
-                              ),
-                              const SizedBox(height: 3),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(child: Text('Total Payable (Due + Interest):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade900), overflow: TextOverflow.ellipsis)),
-                                  const SizedBox(width: 6),
-                                  Text('₹ ${status.postMaturityBreakdown!.postMaturityPayableAmount.toStringAsFixed(2)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal.shade900)),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 14),
-
-                // 5. Total Financial Summary Row (Late Fine vs Total Overdue)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: hasFine ? const Color(0xFF8B1A1A).withValues(alpha: 0.06) : Colors.teal.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: hasFine ? const Color(0xFF8B1A1A).withValues(alpha: 0.25) : Colors.teal.shade200,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Row(
                         children: [
-                          Text(
-                            'Late Fine Penalty',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: hasFine ? Colors.red.shade900 : Colors.teal.shade800,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '₹ ${status.calculatedLateFine.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: hasFine ? const Color(0xFF8B1A1A) : Colors.teal.shade900,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Container(height: 28, width: 1, color: Colors.grey.shade300),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            isDaily ? 'Total Overdue Fine' : 'Total Overdue (EMI + Fine)',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: hasFine ? Colors.red.shade900 : Colors.teal.shade800,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '₹ ${status.totalOverdueAmount.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: hasFine ? const Color(0xFF8B1A1A) : Colors.teal.shade900,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 14),
-
-                // 6. Acknowledgment Action & Status Strip
-                if (hasFine) ...[
-                  if (_isAcknowledged)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.green.shade200),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.verified_rounded, color: Colors.green.shade800, size: 18),
-                          const SizedBox(width: 8),
+                          // Total Loanee Amount
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Acknowledged by Loanee',
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.green.shade900,
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Total Loanee Amount',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade600,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  _formatAckTimestamp(_acknowledgmentIsoTime),
-                                  style: TextStyle(fontSize: 10, color: Colors.green.shade800),
-                                ),
-                              ],
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    '₹ ${totalLoaneeAmount.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1E1E1E),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                          TextButton(
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.green.shade900,
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          const SizedBox(width: 12),
+
+                          // Overdue Months or Days
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.red.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Overdue',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.red.shade700,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    overdueDuration,
+                                    style: TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.red.shade900,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
                             ),
-                            onPressed: () {
-                              _showLoaneeFineAcknowledgmentModal(context, status, settings);
-                            },
-                            child: const Text('View Notice', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                           ),
                         ],
                       ),
-                    )
-                  else
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.amber.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.amber.shade200),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.notifications_active_outlined, size: 14, color: Colors.amber.shade900),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  'Notice unacknowledged. Please acknowledge your overdue fine assessment.',
-                                  style: TextStyle(fontSize: 10.5, color: Colors.amber.shade900, fontWeight: FontWeight.w500),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 3,
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF8B1A1A),
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                onPressed: () async {
-                                  await _handleAcknowledge(status, settings);
-                                },
-                                icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
-                                label: const Text(
-                                  'Acknowledge Notice',
-                                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              flex: 2,
-                              child: OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: const Color(0xFF8B1A1A),
-                                  side: const BorderSide(color: Color(0xFF8B1A1A)),
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                onPressed: () {
-                                  _showLoaneeFineAcknowledgmentModal(context, status, settings);
-                                },
-                                child: const Text(
-                                  'Breakdown',
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                ] else ...[
-                  // Up to date banner
-                  Container(
+                    ],
+                  )
+                : Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: Colors.teal.shade50,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: Colors.teal.shade200),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.check_circle_rounded, color: Colors.teal.shade800, size: 16),
+                        Icon(Icons.check_circle_rounded, color: Colors.teal.shade800, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Account in good standing! No overdue late fines accrued.',
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade900),
+                            'Account in good standing! No overdue accrued.',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.teal.shade900,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
-                ],
-              ],
-            ),
           ),
         ],
       ),
     );
   }
 
-  /// Interactive Modal Dialog / Bottom Sheet for Loanee Acknowledgment
-  void _showLoaneeFineAcknowledgmentModal(
+  /// Clean Overdue Notice Modal Dialog
+  void _showLoaneeOverdueNoticeModal(
     BuildContext context,
-    LoaneeLateFineStatus status,
-    SettingsProvider settings,
+    double totalLoaneeAmount,
+    String overdueDurationText,
   ) {
     showModalBottomSheet(
       context: context,
@@ -2530,374 +2048,156 @@ class _LoaneeLateFineAcknowledgmentSectionState
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
-        return StatefulBuilder(
-          builder: (modalContext, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 16,
-                bottom: MediaQuery.of(modalContext).viewInsets.bottom + 20,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Handle Bar
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade300,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Modal Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.gavel_rounded,
-                                color: Color(0xFF8B1A1A),
-                                size: 22,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Overdue Notice & Acknowledgment',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF8B1A1A),
-                                  ),
-                                ),
-                                Text(
-                                  'Official assessment under Admin Late Fine Rules',
-                                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded),
-                          onPressed: () => Navigator.pop(ctx),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 14),
-                    const Divider(),
-                    const SizedBox(height: 10),
-
-                    // Loanee Account Particulars Card
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: Column(
-                        children: [
-                          _buildModalInfoRow('Loanee Name', status.loaneeName),
-                          const SizedBox(height: 6),
-                          _buildModalInfoRow('Customer ID', status.customerId),
-                          const SizedBox(height: 6),
-                          _buildModalInfoRow('Account Number', status.accountNumber),
-                          const SizedBox(height: 6),
-                          _buildModalInfoRow(
-                            'Collection Scheme',
-                            '${status.collectionType} (${status.isDaily ? "Daily" : "Weekly ₹${settings.weeklyInstallmentAmount.toStringAsFixed(0)}/wk"})',
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // ro_collection_payments Table Status Banner
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: status.hasPaymentsInTable ? Colors.green.shade50 : Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: status.hasPaymentsInTable ? Colors.green.shade200 : Colors.red.shade200,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            status.hasPaymentsInTable ? Icons.storage_rounded : Icons.search_off_rounded,
-                            size: 16,
-                            color: status.hasPaymentsInTable ? Colors.green.shade800 : Colors.red.shade800,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              status.hasPaymentsInTable
-                                  ? 'Supabase Table "ro_collection_payments": Data found (${status.paymentRecordsCount} records, Total Paid: ₹${status.totalPaidAmount.toStringAsFixed(2)})'
-                                  : 'Supabase Table "ro_collection_payments": No payment entries recorded for this account since ${SettingsProvider.formatDate(status.loanStartDate)}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: status.hasPaymentsInTable ? Colors.green.shade900 : Colors.red.shade900,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Detailed Calculation Breakdown Table
-                    const Text(
-                      'Assessment Calculation Breakdown',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1E1E1E)),
-                    ),
-                    const SizedBox(height: 8),
-
-                    Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade200),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Column(
-                        children: [
-                          _buildBreakdownItem(
-                            'Base Installment (${status.isDaily ? 'Daily' : 'Weekly'})',
-                            '₹ ${(status.latePayableBreakdown?.baseInstallment ?? (status.isDaily ? 100.0 : 650.0)).toStringAsFixed(2)} / ${status.isDaily ? 'day' : 'wk'}',
-                          ),
-                          const Divider(height: 1),
-                          _buildBreakdownItem(
-                            'Late Elapsed Duration',
-                            '${status.overdueUnits} ${status.isDaily ? (status.overdueUnits == 1 ? "Late Day" : "Late Days") : (status.overdueUnits == 1 ? "Late Week" : "Late Weeks")}',
-                          ),
-                          if (status.overdueUnits > 0) ...[
-                            const Divider(height: 1),
-                            _buildBreakdownItem(
-                              'Missed Overdue Installments (${status.overdueUnits} × ₹${(status.latePayableBreakdown?.baseInstallment ?? (status.isDaily ? 100.0 : 650.0)).toStringAsFixed(0)})',
-                              '₹ ${(status.latePayableBreakdown?.overdueMissedAmount ?? (status.overdueUnits * (status.isDaily ? 100.0 : 650.0))).toStringAsFixed(2)}',
-                              valueColor: Colors.red.shade800,
-                            ),
-                          ],
-                          const Divider(height: 1),
-                          _buildBreakdownItem(
-                            'Today\'s Scheduled Installment',
-                            '₹ ${(status.latePayableBreakdown?.currentInstallment ?? (status.isDaily ? 100.0 : 650.0)).toStringAsFixed(2)}',
-                            valueColor: Colors.teal.shade800,
-                          ),
-                          if (status.postMaturityBreakdown != null && status.postMaturityBreakdown!.isPastMaturity) ...[
-                            const Divider(height: 1),
-                            _buildBreakdownItem(
-                              'Overdue Interest Status',
-                              'Active Overdue Compounding',
-                              valueColor: Colors.red.shade900,
-                              isBold: true,
-                            ),
-                            const Divider(height: 1),
-                            _buildBreakdownItem(
-                              'Unpaid Remaining Balance',
-                              '₹ ${status.postMaturityBreakdown!.remainingBalance.toStringAsFixed(2)}',
-                              valueColor: const Color(0xFF8B1A1A),
-                              isBold: true,
-                            ),
-                            const Divider(height: 1),
-                            _buildBreakdownItem(
-                              'Accrued Overdue Interest',
-                              '₹ ${status.postMaturityBreakdown!.postMaturityInterestAmount.toStringAsFixed(2)}',
-                              valueColor: Colors.red.shade900,
-                              isBold: true,
-                            ),
-                          ],
-                          const Divider(height: 1),
-                          _buildBreakdownItem(
-                            'Late Payment Fine Rate',
-                            '₹ ${status.lateFineRate.toStringAsFixed(2)} / ${status.isDaily ? 'day' : 'wk'}',
-                          ),
-                          const Divider(height: 1),
-                          _buildBreakdownItem(
-                            'System Late Payment Fine Penalty',
-                            '₹ ${status.calculatedLateFine.toStringAsFixed(2)}',
-                            valueColor: Colors.red.shade800,
-                            isBold: true,
-                          ),
-                          const Divider(height: 1),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
-                            child: Column(
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text(
-                                      'Total Auto-Calculated Payable',
-                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF8B1A1A)),
-                                    ),
-                                    Text(
-                                      '₹ ${(status.latePayableBreakdown?.totalPayableAmount ?? (status.totalOverdueAmount)).toStringAsFixed(2)}',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF8B1A1A)),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  status.latePayableBreakdown?.explanation ?? status.calculationExplanation,
-                                  style: TextStyle(fontSize: 10, color: Colors.grey.shade700, fontStyle: FontStyle.italic),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Legal / Servicing Acknowledgment Disclaimer
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.amber.shade200),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(Icons.info_outline_rounded, size: 15, color: Colors.amber.shade900),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              status.isPastMaturity
-                                  ? 'Acknowledgment Notice: Your loan exceeded the 5-month maturity period. Under Mangang Finance servicing terms, overdue interest is automatically applied to your unpaid remaining balance.'
-                                  : 'By clicking acknowledge below, you verify you have viewed and accepted your account overdue notice, late fine penalty, and payment calculations under Mangang Finance terms.',
-                              style: TextStyle(fontSize: 10.5, color: Colors.amber.shade900, height: 1.3),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Action Buttons
                     Row(
                       children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.grey.shade700,
-                              side: BorderSide(color: Colors.grey.shade300),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            ),
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text('Dismiss', style: TextStyle(fontWeight: FontWeight.w600)),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.warning_amber_rounded,
+                            color: Color(0xFF8B1A1A),
+                            size: 22,
                           ),
                         ),
                         const SizedBox(width: 10),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF8B1A1A),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Overdue Notice',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF8B1A1A),
+                              ),
                             ),
-                            onPressed: () async {
-                              Navigator.pop(ctx);
-                              await _handleAcknowledge(status, settings);
-                            },
-                            icon: const Icon(Icons.check_circle_rounded, size: 18),
-                            label: const Text(
-                              'I Acknowledge Notice',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            Text(
+                              'Account status notification',
+                              style: TextStyle(fontSize: 11, color: Colors.grey),
                             ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
                   ],
                 ),
-              ),
-            );
-          },
+                const SizedBox(height: 14),
+                const Divider(),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Total Loanee Amount',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          Text(
+                            '₹ ${totalLoaneeAmount.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF8B1A1A),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const Divider(height: 1),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Overdue',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          Text(
+                            overdueDurationText,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF8B1A1A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text(
+                      'Dismiss',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
-    );
-  }
-
-  Widget _buildModalInfoRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1E1E1E)),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBreakdownItem(
-    String title,
-    String value, {
-    Color? valueColor,
-    bool isBold = false,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
-              color: valueColor ?? const Color(0xFF1E1E1E),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
