@@ -48,12 +48,16 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  User? get currentUser => _currentUser ?? User(
+  User? get currentUser =>
+      _currentUser ??
+      User(
         name: _activeRole == UserType.admin
             ? 'Administrator'
             : (_activeRole == UserType.manager
                 ? 'Branch Manager'
-                : (_activeRole == UserType.ro ? 'RO Officer' : 'Loanee Account')),
+                : (_activeRole == UserType.ro
+                    ? 'RO Officer'
+                    : 'Loanee Account')),
         mobileNo: '',
         userType: _activeRole,
         customerId: _activeRole == UserType.admin
@@ -130,17 +134,25 @@ class AuthProvider extends ChangeNotifier {
     // Local fallback check
     if (localRos != null && localRos.isNotEmpty) {
       final cleanCustId = customerId.trim().toLowerCase();
-      final cleanName = roName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+      final cleanName =
+          roName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
       final cleanMobile = mobileNo.replaceAll(RegExp(r'\D'), '');
-      final normMobile = cleanMobile.length >= 10 ? cleanMobile.substring(cleanMobile.length - 10) : cleanMobile;
+      final normMobile = cleanMobile.length >= 10
+          ? cleanMobile.substring(cleanMobile.length - 10)
+          : cleanMobile;
 
       for (final r in localRos) {
         final rCust = r.customerId.trim().toLowerCase();
-        final rName = r.roName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+        final rName =
+            r.roName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
         final rawRMobile = r.mobileNo.replaceAll(RegExp(r'\D'), '');
-        final rMobile = rawRMobile.length >= 10 ? rawRMobile.substring(rawRMobile.length - 10) : rawRMobile;
+        final rMobile = rawRMobile.length >= 10
+            ? rawRMobile.substring(rawRMobile.length - 10)
+            : rawRMobile;
 
-        if (rCust == cleanCustId && rName == cleanName && rMobile == normMobile) {
+        if (rCust == cleanCustId &&
+            rName == cleanName &&
+            rMobile == normMobile) {
           final isInactive = !r.isActive;
           return {
             'matched': true,
@@ -164,7 +176,8 @@ class AuthProvider extends ChangeNotifier {
     required String mobileNo,
     List<LoaneeAccount>? localLoanees,
   }) async {
-    final result = await SupabaseService.instance.verifyLoaneeAccountRegistration(
+    final result =
+        await SupabaseService.instance.verifyLoaneeAccountRegistration(
       customerId: customerId,
       loaneeName: loaneeName,
       mobileNo: mobileNo,
@@ -177,17 +190,25 @@ class AuthProvider extends ChangeNotifier {
     // Local fallback check
     if (localLoanees != null && localLoanees.isNotEmpty) {
       final cleanCustId = customerId.trim().toLowerCase();
-      final cleanName = loaneeName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+      final cleanName =
+          loaneeName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
       final cleanMobile = mobileNo.replaceAll(RegExp(r'\D'), '');
-      final normMobile = cleanMobile.length >= 10 ? cleanMobile.substring(cleanMobile.length - 10) : cleanMobile;
+      final normMobile = cleanMobile.length >= 10
+          ? cleanMobile.substring(cleanMobile.length - 10)
+          : cleanMobile;
 
       for (final l in localLoanees) {
         final lCust = l.customerId.trim().toLowerCase();
-        final lName = l.loaneeName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+        final lName =
+            l.loaneeName.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
         final rawLMobile = l.mobileNo.replaceAll(RegExp(r'\D'), '');
-        final lMobile = rawLMobile.length >= 10 ? rawLMobile.substring(rawLMobile.length - 10) : rawLMobile;
+        final lMobile = rawLMobile.length >= 10
+            ? rawLMobile.substring(rawLMobile.length - 10)
+            : rawLMobile;
 
-        if (lCust == cleanCustId && lName == cleanName && lMobile == normMobile) {
+        if (lCust == cleanCustId &&
+            lName == cleanName &&
+            lMobile == normMobile) {
           final isInactive = !l.isActive;
           return {
             'matched': true,
@@ -226,13 +247,15 @@ class AuthProvider extends ChangeNotifier {
     if (dupResult['isDuplicate'] == true) {
       return {
         'success': false,
-        'message': dupResult['message'] ?? 'An account with this Mobile Number or Customer ID already exists.',
+        'message': dupResult['message'] ??
+            'An account with this Mobile Number or Customer ID already exists.',
       };
     }
 
     String finalCustId = customerId?.trim() ?? '';
     if (finalCustId.isEmpty) {
-      finalCustId = await SupabaseService.instance.fetchNextRoleCustomerId(UserType.admin);
+      finalCustId = await SupabaseService.instance
+          .fetchNextRoleCustomerId(UserType.admin);
     }
 
     final newAdmin = UserAuthRecord(
@@ -250,7 +273,8 @@ class AuthProvider extends ChangeNotifier {
       await fetchAdminUsers();
       return {
         'success': true,
-        'message': 'Admin account ($finalCustId) for $cleanName added successfully.',
+        'message':
+            'Admin account ($finalCustId) for $cleanName added successfully.',
         'user': newAdmin,
       };
     } else {
@@ -274,7 +298,8 @@ class AuthProvider extends ChangeNotifier {
       return {
         'success': false,
         'isDuplicate': true,
-        'message': dupResult['message'] ?? 'An account matching these details is already registered.',
+        'message': dupResult['message'] ??
+            'An account matching these details is already registered.',
       };
     }
 
@@ -291,7 +316,8 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Create and persist 6-Digit PIN in Supabase user_auth table
-  Future<bool> setPin(String pin, {UserType? userType, String? mobileNo}) async {
+  Future<bool> setPin(String pin,
+      {UserType? userType, String? mobileNo}) async {
     final cleanPin = pin.trim();
     _userPin = cleanPin;
     final prefs = await SharedPreferences.getInstance();
@@ -299,7 +325,8 @@ class AuthProvider extends ChangeNotifier {
     _isLoggedIn = true;
 
     final effectiveUserType = userType ?? _currentUser?.userType ?? _activeRole;
-    final effectiveMobile = mobileNo?.trim() ?? _currentUser?.mobileNo.trim() ?? '';
+    final effectiveMobile =
+        mobileNo?.trim() ?? _currentUser?.mobileNo.trim() ?? '';
 
     // Save & sync User Auth Record directly to Supabase table
     final authRecord = UserAuthRecord(
@@ -313,13 +340,16 @@ class AuthProvider extends ChangeNotifier {
               ? 'Administrator'
               : (effectiveUserType == UserType.manager
                   ? 'Branch Manager'
-                  : (effectiveUserType == UserType.ro ? 'RO Officer' : 'Loanee Account'))),
+                  : (effectiveUserType == UserType.ro
+                      ? 'RO Officer'
+                      : 'Loanee Account'))),
       roName: _currentUser?.roName,
       accountName: _currentUser?.accountName,
       status: _currentUser?.status ?? 'Active',
     );
 
-    final success = await SupabaseService.instance.saveUserAuthRecord(authRecord);
+    final success =
+        await SupabaseService.instance.saveUserAuthRecord(authRecord);
     notifyListeners();
     return success;
   }
@@ -333,9 +363,10 @@ class AuthProvider extends ChangeNotifier {
     final cleanMobile = mobileNo.trim();
     final cleanPin = pin.trim();
 
-    // 1. Query live Supabase database tables (user_auth, ro_accounts, loanee_accounts) by Mobile, PIN, and UserType
+    // 1. Query live Supabase database user_auth table by Mobile, PIN, and UserType
     try {
-      final supaUser = await SupabaseService.instance.fetchUserAuthByMobileAndPin(
+      final supaUser =
+          await SupabaseService.instance.fetchUserAuthByMobileAndPin(
         mobileNo: cleanMobile,
         pin: cleanPin,
         userType: userType,
@@ -343,7 +374,8 @@ class AuthProvider extends ChangeNotifier {
       if (supaUser != null) {
         // Check if account status is inactive - block login
         if (!supaUser.isActive) {
-          debugPrint('🚫 Login rejected: Account for ${supaUser.name} (${supaUser.userType.name}) is INACTIVE');
+          debugPrint(
+              '🚫 Login rejected: Account for ${supaUser.name} (${supaUser.userType.name}) is INACTIVE');
 
           final prefs = await SharedPreferences.getInstance();
           await prefs.remove('user_pin');
@@ -353,7 +385,8 @@ class AuthProvider extends ChangeNotifier {
           return const LoginResult(
             success: false,
             isInactive: true,
-            message: 'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
+            message:
+                'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
           );
         }
 
@@ -368,7 +401,8 @@ class AuthProvider extends ChangeNotifier {
         await prefs.setString('user_data', jsonEncode(_currentUser!.toJson()));
 
         notifyListeners();
-        return LoginResult(success: true, message: 'Login successful', user: _currentUser);
+        return LoginResult(
+            success: true, message: 'Login successful', user: _currentUser);
       }
     } catch (e) {
       debugPrint('⚠️ Supabase Mobile & PIN login error: $e');
@@ -391,7 +425,8 @@ class AuthProvider extends ChangeNotifier {
     );
 
     if (matchingAdminMobile.id.isNotEmpty && !matchingAdminMobile.isActive) {
-      debugPrint('🚫 Login rejected: Admin account for ${matchingAdminMobile.name} is marked INACTIVE');
+      debugPrint(
+          '🚫 Login rejected: Admin account for ${matchingAdminMobile.name} is marked INACTIVE');
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('user_pin');
       await prefs.remove('user_data');
@@ -400,7 +435,8 @@ class AuthProvider extends ChangeNotifier {
       return const LoginResult(
         success: false,
         isInactive: true,
-        message: 'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
+        message:
+            'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
       );
     }
 
@@ -411,13 +447,24 @@ class AuthProvider extends ChangeNotifier {
     if (savedPin == cleanPin && savedPin != null && savedData != null) {
       try {
         final cachedUser = User.fromJson(jsonDecode(savedData));
-        if ((cachedUser.mobileNo.trim() == cleanMobile || cleanMobile.isEmpty) &&
+        // All RO logins must be cross-verified from user_auth only. RO accounts cannot log in via offline cache.
+        if (cachedUser.userType == UserType.ro || userType == UserType.ro) {
+          return const LoginResult(
+            success: false,
+            isInactive: false,
+            message: 'Unable to Login: Accounts must be verified',
+          );
+        }
+
+        if ((cachedUser.mobileNo.trim() == cleanMobile ||
+                cleanMobile.isEmpty) &&
             (userType == null || cachedUser.userType == userType)) {
           if (!cachedUser.isActive) {
             return const LoginResult(
               success: false,
               isInactive: true,
-              message: 'Your account is INACTIVE. Login access has been deactivated by the Administrator.',
+              message:
+                  'Your account is INACTIVE. Login access has been deactivated by the Administrator.',
             );
           }
           _currentUser = cachedUser;
@@ -425,16 +472,21 @@ class AuthProvider extends ChangeNotifier {
           _isLoggedIn = true;
           _userPin = cleanPin;
           notifyListeners();
-          return LoginResult(success: true, message: 'Login successful (Offline)', user: _currentUser);
+          return LoginResult(
+              success: true,
+              message: 'Login successful (Offline)',
+              user: _currentUser);
         }
       } catch (_) {}
     }
 
-    final roleMsg = userType != null ? ' for ${userType.name.toUpperCase()} role' : '';
+    final roleMsg =
+        userType != null ? ' for ${userType.name.toUpperCase()} role' : '';
     return LoginResult(
       success: false,
       isInactive: false,
-      message: 'Invalid Mobile Number or Security PIN$roleMsg. Please check your credentials.',
+      message:
+          'Invalid Mobile Number or Security PIN$roleMsg. Please check your credentials.',
     );
   }
 
@@ -442,14 +494,16 @@ class AuthProvider extends ChangeNotifier {
   Future<LoginResult> loginWithPin(String pin) async {
     final cleanPin = pin.trim();
 
-    // 1. Query live Supabase database tables (user_auth, ro_accounts, loanee_accounts)
+    // 1. Query live Supabase database user_auth table by PIN
     try {
-      final supaUser = await SupabaseService.instance.fetchUserAuthByPin(cleanPin);
+      final supaUser =
+          await SupabaseService.instance.fetchUserAuthByPin(cleanPin);
       if (supaUser != null) {
         // Check if account status is inactive - block login
         if (!supaUser.isActive) {
-          debugPrint('🚫 Login rejected: Account for ${supaUser.name} (${supaUser.userType.name}) is INACTIVE');
-          
+          debugPrint(
+              '🚫 Login rejected: Account for ${supaUser.name} (${supaUser.userType.name}) is INACTIVE');
+
           final prefs = await SharedPreferences.getInstance();
           await prefs.remove('user_pin');
           await prefs.remove('user_data');
@@ -458,7 +512,8 @@ class AuthProvider extends ChangeNotifier {
           return const LoginResult(
             success: false,
             isInactive: true,
-            message: 'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
+            message:
+                'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
           );
         }
 
@@ -473,7 +528,8 @@ class AuthProvider extends ChangeNotifier {
         await prefs.setString('user_data', jsonEncode(_currentUser!.toJson()));
 
         notifyListeners();
-        return LoginResult(success: true, message: 'Login successful', user: _currentUser);
+        return LoginResult(
+            success: true, message: 'Login successful', user: _currentUser);
       }
     } catch (e) {
       debugPrint('⚠️ Supabase PIN lookup error: $e');
@@ -493,7 +549,8 @@ class AuthProvider extends ChangeNotifier {
     );
 
     if (matchingAdminPin.id.isNotEmpty && !matchingAdminPin.isActive) {
-      debugPrint('🚫 Login rejected: Admin account for ${matchingAdminPin.name} is marked INACTIVE in adminUsers');
+      debugPrint(
+          '🚫 Login rejected: Admin account for ${matchingAdminPin.name} is marked INACTIVE in adminUsers');
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('user_pin');
       await prefs.remove('user_data');
@@ -502,7 +559,8 @@ class AuthProvider extends ChangeNotifier {
       return const LoginResult(
         success: false,
         isInactive: true,
-        message: 'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
+        message:
+            'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
       );
     }
 
@@ -514,11 +572,20 @@ class AuthProvider extends ChangeNotifier {
       if (savedData != null) {
         try {
           final cachedUser = User.fromJson(jsonDecode(savedData));
+          // All RO logins must be cross-verified from user_auth only. RO accounts cannot log in via offline cache.
+          if (cachedUser.userType == UserType.ro) {
+            return const LoginResult(
+              success: false,
+              isInactive: false,
+              message: 'Unable to Login: Accounts must be verified',
+            );
+          }
           if (!cachedUser.isActive) {
             return const LoginResult(
               success: false,
               isInactive: true,
-              message: 'Your account is INACTIVE. Login access has been deactivated by the Administrator.',
+              message:
+                  'Your account is INACTIVE. Login access has been deactivated by the Administrator.',
             );
           }
           _currentUser = cachedUser;
@@ -529,13 +596,17 @@ class AuthProvider extends ChangeNotifier {
       _isLoggedIn = true;
       _userPin = cleanPin;
       notifyListeners();
-      return LoginResult(success: true, message: 'Login successful (Offline)', user: _currentUser);
+      return LoginResult(
+          success: true,
+          message: 'Login successful (Offline)',
+          user: _currentUser);
     }
 
     return const LoginResult(
       success: false,
       isInactive: false,
-      message: 'Invalid Security PIN. No matching user account found in database.',
+      message:
+          'Invalid Security PIN. No matching user account found in database.',
     );
   }
 
@@ -546,7 +617,8 @@ class AuthProvider extends ChangeNotifier {
     required String newPin,
     UserType? userType,
   }) async {
-    final result = await SupabaseService.instance.resetUserPinByCustomerIdAndMobile(
+    final result =
+        await SupabaseService.instance.resetUserPinByCustomerIdAndMobile(
       customerId: customerId,
       mobileNo: mobileNo,
       newPin: newPin,
@@ -559,7 +631,8 @@ class AuthProvider extends ChangeNotifier {
       _userPin = newPin;
 
       if (_currentUser != null &&
-          (_currentUser!.customerId == customerId || _currentUser!.mobileNo == mobileNo)) {
+          (_currentUser!.customerId == customerId ||
+              _currentUser!.mobileNo == mobileNo)) {
         _currentUser = _currentUser!.copyWith(mobileNo: mobileNo);
       }
       notifyListeners();
@@ -614,7 +687,8 @@ class AuthProvider extends ChangeNotifier {
       final remoteList = await SupabaseService.instance.fetchAdminUsers();
       if (remoteList != null) {
         _adminUsers.clear();
-        _adminUsers.addAll(remoteList.where((r) => r.userType == UserType.admin));
+        _adminUsers
+            .addAll(remoteList.where((r) => r.userType == UserType.admin));
       }
     } catch (e) {
       debugPrint('⚠️ Error fetching admin users in provider: $e');

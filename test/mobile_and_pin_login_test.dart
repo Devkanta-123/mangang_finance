@@ -63,7 +63,7 @@ void main() {
       expect(authProvider.isLoggedIn, isTrue);
     });
 
-    test('loginWithMobileAndPin validates and authenticates offline cached RO Officer', () async {
+    test('loginWithMobileAndPin rejects RO Officer without user_auth verification (no offline cache bypass)', () async {
       final prefs = await SharedPreferences.getInstance();
       final roUser = User(
         name: 'RO Tomba',
@@ -82,19 +82,18 @@ void main() {
         pin: '998877',
       );
 
-      expect(result.success, isTrue);
-      expect(result.user?.name, equals('RO Tomba'));
-      expect(result.user?.userType, equals(UserType.ro));
-      expect(authProvider.isLoggedIn, isTrue);
+      // RO accounts cannot login via offline cache and must be verified in user_auth
+      expect(result.success, isFalse);
+      expect(authProvider.isLoggedIn, isFalse);
     });
 
     test('loginWithMobileAndPin blocks Inactive user account', () async {
       final prefs = await SharedPreferences.getInstance();
       final inactiveUser = User(
-        name: 'Inactive RO',
+        name: 'Inactive Admin',
         mobileNo: '9876543213',
-        userType: UserType.ro,
-        customerId: 'RO-002',
+        userType: UserType.admin,
+        customerId: 'ADM-002',
         status: 'Inactive',
       );
       await prefs.setString('user_pin', '123456');

@@ -3764,11 +3764,11 @@ class __AddPaymentEntryModalContentState
           if (supaClient != null) {
             final authRes = await supaClient
                 .from('user_auth')
-                .select('pincode, name, customerid')
-                .eq('customerid', currentUser?.customerId ?? 'ADM-01')
+                .select('pin, name, customer_id')
+                .eq('customer_id', currentUser?.customerId ?? 'ADM-01')
                 .maybeSingle();
             if (authRes != null) {
-              final dbPin = authRes['pincode']?.toString().trim() ?? '';
+              final dbPin = authRes['pin']?.toString().trim() ?? '';
               if (dbPin == cleanPass) {
                 isAuthPinMatch = true;
               }
@@ -3803,53 +3803,57 @@ class __AddPaymentEntryModalContentState
       isAuthPinMatch = true;
     }
 
-    // 2. If loggedInPin not in memory, match with logged-in user's account in RoProvider
+    // 2. Resolve matched RoAccount for name and route metadata
     RoAccount? matchedRo;
     if (currentUser?.customerId != null && currentUser!.customerId!.isNotEmpty) {
       for (final ro in roProvider.roAccounts) {
         if (ro.customerid.trim().toLowerCase() ==
             currentUser.customerId!.trim().toLowerCase()) {
           matchedRo = ro;
-          if (ro.pincode.trim() == cleanPass) {
-            isAuthPinMatch = true;
-          }
           break;
         }
       }
     }
 
-    // 3. Check live Supabase database for the logged-in user's authentication PIN
+    // 3. Check live Supabase user_auth table for the logged-in RO's authentication PIN
     if (!isAuthPinMatch && currentUser != null) {
       try {
-        final custId = currentUser.customerId ?? '';
-        final mobile = currentUser.mobileNo;
+        final custId = currentUser.customerId?.trim() ?? '';
+        final mobile = currentUser.mobileNo.trim();
         final supaClient = SupabaseService.instance.client;
 
         if (supaClient != null && (custId.isNotEmpty || mobile.isNotEmpty)) {
-          final roResponse = await supaClient
-              .from('ro_accounts')
-              .select('roname, customerid, pincode, mobileno')
-              .or('customerid.eq.$custId,mobileno.eq.$mobile')
-              .maybeSingle();
+          final orClauses = [
+            if (custId.isNotEmpty) 'customer_id.eq.$custId',
+            if (mobile.isNotEmpty) 'mobile_no.eq.$mobile',
+          ];
+          if (orClauses.isNotEmpty) {
+            final authResponse = await supaClient
+                .from('user_auth')
+                .select('name, customer_id, pin, mobile_no')
+                .eq('user_type', 'ro')
+                .or(orClauses.join(','))
+                .maybeSingle();
 
-          if (roResponse != null && roResponse.isNotEmpty) {
-            final dbPin = roResponse['pincode']?.toString().trim() ?? '';
-            final dbName = roResponse['roname']?.toString().trim() ?? '';
-            final dbId = roResponse['customerid']?.toString().trim() ?? '';
+            if (authResponse != null && authResponse.isNotEmpty) {
+              final dbPin = authResponse['pin']?.toString().trim() ?? '';
+              final dbName = authResponse['name']?.toString().trim() ?? '';
+              final dbId = authResponse['customer_id']?.toString().trim() ?? '';
 
-            if (dbPin == cleanPass) {
-              isAuthPinMatch = true;
-              return {
-                'name': dbName.isNotEmpty ? dbName : (currentUser.name),
-                'id': dbId.isNotEmpty ? dbId : (currentUser.customerId ?? ''),
-                'role': 'RO',
-                'route': matchedRo?.route ?? '',
-              };
+              if (dbPin == cleanPass) {
+                isAuthPinMatch = true;
+                return {
+                  'name': dbName.isNotEmpty ? dbName : (currentUser.name),
+                  'id': dbId.isNotEmpty ? dbId : (currentUser.customerId ?? ''),
+                  'role': 'RO',
+                  'route': matchedRo?.route ?? '',
+                };
+              }
             }
           }
         }
       } catch (e) {
-        debugPrint('⚠️ Supabase login auth PIN check: $e');
+        debugPrint('⚠️ Supabase user_auth PIN check: $e');
       }
     }
 
