@@ -6,6 +6,7 @@ import '../models/ro_collection_entry_model.dart';
 import '../models/collection_payment_model.dart';
 import '../services/customer_id_service.dart';
 import '../services/supabase_service.dart';
+import 'settings_provider.dart';
 
 class CollectionSheetProvider extends ChangeNotifier {
   // Routes Master List - Pulled directly from Supabase table route_master
@@ -94,9 +95,21 @@ class CollectionSheetProvider extends ChangeNotifier {
     }).fold(0.0, (sum, p) => sum + p.lateFine);
   }
 
+  /// Get unpaid late fee carried forward for a collection entry
+  double getUnpaidLateFeeForCollection(String collectionId) {
+    final entry = getCollectionEntryById(collectionId);
+    if (entry == null) return 0.0;
+    final cardPayments = getPaymentsForCollection(collectionId);
+    return SettingsProvider.calculatePreviousUnpaidLateFee(
+      entry: entry,
+      payments: cardPayments,
+    );
+  }
+
   /// Get the latest remaining balance for a collection card ID.
   /// Dynamically computes (initialBal + totalInterest - totalPaid) so that
   /// all past payment records in ro_collection_payments are subtracted from the initial balance.
+  /// Note: Unpaid late fees are tracked separately and NOT automatically added to the loan remaining balance.
   double getLatestRemainingBalance(String collectionId, [double fallback = 0.0]) {
     final entry = getCollectionEntryById(collectionId);
     final initialBal = fallback > 0
@@ -112,6 +125,14 @@ class CollectionSheetProvider extends ChangeNotifier {
       return cardPayments.first.remainingBalance;
     }
     return 0.0;
+  }
+
+  /// Get the total outstanding due including carried-forward unpaid late fee:
+  /// (Remaining Balance + Unpaid Late Fee)
+  double getLatestTotalOutstandingDue(String collectionId, [double fallback = 0.0]) {
+    final bal = getLatestRemainingBalance(collectionId, fallback);
+    final unpaidFee = getUnpaidLateFeeForCollection(collectionId);
+    return bal + unpaidFee;
   }
 
   /// Strictly check payment table (ro_collection_payments) for payment on a specific date (default today)

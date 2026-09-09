@@ -22,6 +22,7 @@ class _TransactionPageState extends State<TransactionPage> {
   final _formKey = GlobalKey<FormState>();
 
   RoCollectionEntry? _selectedCard;
+  CollectionLatePayableBreakdown? _selectedBreakdown;
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _lateFineController = TextEditingController(text: '0.00');
   final TextEditingController _passcodeController = TextEditingController();
@@ -134,6 +135,13 @@ class _TransactionPageState extends State<TransactionPage> {
     final currentBal = provider.getLatestRemainingBalance(_selectedCard!.id);
     final newRemainingBalance = (currentBal - paymentAmount).clamp(0.0, 999999.0);
 
+    final double totalAssessedFee = _selectedBreakdown?.calculatedLateFine ?? 0.0;
+    final double unpaidCarried = (totalAssessedFee > lateFine) ? (totalAssessedFee - lateFine) : 0.0;
+    final String lateFeeNote = unpaidCarried > 0
+        ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
+        : (lateFine > 0 ? ' | Late Fee: ₹${lateFine.toStringAsFixed(2)} cleared' : '');
+    final finalRemarks = remarks != null ? '$remarks$lateFeeNote' : (lateFeeNote.isNotEmpty ? lateFeeNote.replaceFirst(' | ', '') : null);
+
     final payment = CollectionPaymentModel(
       id: 'PAY-${DateTime.now().millisecondsSinceEpoch}',
       collectionId: _selectedCard!.id,
@@ -145,7 +153,7 @@ class _TransactionPageState extends State<TransactionPage> {
       roName: roName,
       roId: roId,
       roRoute: roRoute,
-      remarks: remarks,
+      remarks: finalRemarks,
     );
 
     final success = await provider.addCollectionPayment(payment);
@@ -156,10 +164,19 @@ class _TransactionPageState extends State<TransactionPage> {
       });
 
       if (success) {
+        final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+        loaneeProvider.recordPaymentForLoanee(
+          customerId: _selectedCard!.customerId,
+          accountNumber: _selectedCard!.accountNumber,
+          paymentAmount: paymentAmount,
+          newRemainingBalance: newRemainingBalance,
+        );
+
         _amountController.clear();
         _passcodeController.clear();
         _lateFineController.text = '0.00';
         _selectedCard = null;
+        _selectedBreakdown = null;
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -453,10 +470,14 @@ class _TransactionPageState extends State<TransactionPage> {
                                       maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
                                       sanctionDate: loanee?.loanSanctionDate ?? val.createdAt,
                                     );
+                                    _selectedBreakdown = breakdown;
                                     _amountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
                                     _lateFineController.text = breakdown.calculatedLateFine.toStringAsFixed(2);
-                                    _lateFineFormulaText = breakdown.explanation;
+                                    _lateFineFormulaText = (breakdown.carriedForwardExplanation?.isNotEmpty == true)
+                                        ? '${breakdown.explanation}\n• ${breakdown.carriedForwardExplanation}'
+                                        : breakdown.explanation;
                                   } else {
+                                    _selectedBreakdown = null;
                                     _lateFineFormulaText = '';
                                     _lateFineController.text = '0.00';
                                     _amountController.clear();
@@ -512,6 +533,87 @@ class _TransactionPageState extends State<TransactionPage> {
                                 },
                               ),
                             ],
+                            if (_selectedCard != null && _selectedBreakdown != null) ...[
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.shade50.withOpacity(0.6),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.amber.shade300),
+                                ),
+                                child: Column(
+                                  children: [
+                                    if (_selectedBreakdown!.previousUnpaidLateFee > 0) ...[
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange.shade50,
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: Colors.orange.shade300),
+                                        ),
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Icon(Icons.info_outline_rounded, size: 14, color: Colors.orange.shade900),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                'Carry Forward: ₹${_selectedBreakdown!.previousUnpaidLateFee.toStringAsFixed(2)} unpaid late fee from previous payment.',
+                                                style: TextStyle(
+                                                  fontSize: 10.5,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.orange.shade900,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text('Amount Due Till Last Month:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                        Text('₹ ${collectionProvider.getLatestRemainingBalance(_selectedCard!.id).toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                    if (_selectedBreakdown!.calculatedLateFine > 0) ...[
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            'Late Payment Fee (${_selectedBreakdown!.lateUnits} ${_selectedBreakdown!.isDaily ? (_selectedBreakdown!.lateUnits == 1 ? "day" : "days") : (_selectedBreakdown!.lateUnits == 1 ? "wk" : "wks")}):',
+                                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
+                                          ),
+                                          Text(
+                                            '+ ₹ ${_selectedBreakdown!.calculatedLateFine.toStringAsFixed(2)}',
+                                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          const Text(
+                                            'Late Due Amount Till Last Month:',
+                                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
+                                          ),
+                                          Text(
+                                            '₹ ${(collectionProvider.getLatestRemainingBalance(_selectedCard!.id) + _selectedBreakdown!.calculatedLateFine).toStringAsFixed(2)}',
+                                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
                             const SizedBox(height: 12),
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -540,6 +642,35 @@ class _TransactionPageState extends State<TransactionPage> {
                                           prefixIcon: Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
                                         ),
                                       ),
+                                      if (_selectedBreakdown != null && _selectedBreakdown!.calculatedLateFine > 0) ...[
+                                        const SizedBox(height: 4),
+                                        Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: InkWell(
+                                            onTap: () {
+                                              setState(() {
+                                                _lateFineController.text = '0.00';
+                                              });
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.orange.shade50,
+                                                borderRadius: BorderRadius.circular(4),
+                                                border: Border.all(color: Colors.orange.shade300),
+                                              ),
+                                              child: Text(
+                                                'Carry Forward (₹0.00)',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.orange.shade900,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                       if (_lateFineFormulaText.isNotEmpty) ...[
                                         const SizedBox(height: 3),
                                         Text(

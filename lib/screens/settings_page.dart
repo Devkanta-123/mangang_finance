@@ -681,37 +681,42 @@ class _SettingsPageState extends State<SettingsPage> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Row(
-                                children: [
-                                  Icon(
-                                    Icons.account_balance_rounded,
-                                    color: Color(0xFF8B1A1A),
-                                    size: 22,
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'Investment & Interest Rate Rules',
-                                    style: TextStyle(
-                                      fontSize: 15.5,
-                                      fontWeight: FontWeight.bold,
+                              const Expanded(
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.account_balance_rounded,
                                       color: Color(0xFF8B1A1A),
+                                      size: 22,
                                     ),
-                                  ),
-                                ],
+                                    SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        'Investment & Interest Rate Rules',
+                                        style: TextStyle(
+                                          fontSize: 15.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF8B1A1A),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
+                              const SizedBox(width: 8),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
                                   color: Colors.green.shade50,
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(20),
                                   border: Border.all(color: Colors.green.shade300),
                                 ),
                                 child: Text(
                                   'system_settings DB',
                                   style: TextStyle(
-                                    fontSize: 9.5,
+                                    fontSize: 11,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.green.shade900,
+                                    color: Colors.green.shade800,
                                   ),
                                 ),
                               ),
@@ -1064,15 +1069,15 @@ class _SettingsPageState extends State<SettingsPage> {
 
                           // FIELD 1: DAILY LATE FINE
                           _buildFieldHeader(
-                            title: '1. Daily Late Fine',
-                            badgeText: 'Default: ₹3 / day',
+                            title: '1. Daily Late Fine (Loan-Based Slabs)',
+                            badgeText: 'Slabs: ₹3 / ₹6 / ₹9 per day',
                             badgeColor: Colors.blue.shade100,
                             badgeTextColor: Colors.blue.shade900,
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Applied to daily collection accounts when an installment date is missed.',
-                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                            'Daily late fees are automatically determined by the loan amount:\n• Loan amount ≤ ₹10,000 → ₹3 / day\n• Loan amount > ₹10,000 and < ₹30,000 → ₹6 / day (e.g., ₹23,000 loan)\n• Loan amount ≥ ₹30,000 → ₹9 / day\nBase rate below sets the standard Tier-1 rate.',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.35),
                           ),
                           const SizedBox(height: 8),
                           TextFormField(
@@ -1088,7 +1093,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               color: Color(0xFF1E1E1E),
                             ),
                             decoration: InputDecoration(
-                              labelText: 'DAILY LATE FINE AMOUNT (₹) *',
+                              labelText: 'TIER-1 BASE DAILY LATE FINE (₹) *',
                               hintText: '3.00',
                               prefixIcon: const Icon(Icons.today_rounded, color: Color(0xFF8B1A1A), size: 20),
                               prefixText: '₹ ',
@@ -1142,7 +1147,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
-                                    'Daily Formula: Daily Late Fine (₹${_previewDailyFine.toStringAsFixed(2)}) × number of late days\n• 1 day late = ₹${(1 * _previewDailyFine).toStringAsFixed(2)} | 2 days = ₹${(2 * _previewDailyFine).toStringAsFixed(2)} | 5 days = ₹${(5 * _previewDailyFine).toStringAsFixed(2)}',
+                                    'Dynamic Slabs: ≤₹10k (₹3/d) • >₹10k & <₹30k (₹6/d) • ≥₹30k (₹9/d)\n• Example: ₹23,000 loan late by 2 days = 2 × ₹6 = ₹12.00\n• Unpaid late fees carry forward across payments until explicitly cleared.',
                                     style: TextStyle(
                                       fontSize: 10.5,
                                       fontWeight: FontWeight.w600,
@@ -1636,14 +1641,17 @@ class _SettingsPageState extends State<SettingsPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF1E1E1E),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E1E1E),
+            ),
           ),
         ),
+        const SizedBox(width: 8),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(

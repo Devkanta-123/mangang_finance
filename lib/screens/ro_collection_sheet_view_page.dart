@@ -531,6 +531,24 @@ class _RoCollectionSheetViewPageState
                               isBold: true,
                               valueColor: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade800 : Colors.green.shade800,
                             ),
+                            if (latePayable.previousUnpaidLateFee > 0) ...[
+                              const Divider(height: 16),
+                              _buildDetailRow(
+                                'Previous Unpaid Late Fee',
+                                '+ ₹ ${latePayable.previousUnpaidLateFee.toStringAsFixed(2)}',
+                                Icons.history_toggle_off_rounded,
+                                isBold: true,
+                                valueColor: Colors.orange.shade900,
+                              ),
+                              const Divider(height: 16),
+                              _buildDetailRow(
+                                'Total Outstanding Due',
+                                '₹ ${latePayable.totalOutstandingDue.toStringAsFixed(2)}',
+                                Icons.account_balance_wallet_rounded,
+                                isBold: true,
+                                valueColor: const Color(0xFF8B1A1A),
+                              ),
+                            ],
                             const Divider(height: 16),
                             _buildDetailRow(
                               'Late Payment Fee (Auto)',
@@ -3599,8 +3617,6 @@ class __AddPaymentEntryModalContentState
 
   double _currentDueBalance = 0.0;
   bool _initializedBalance = false;
-  int _lateUnits = 0;
-  double _calculatedFine = 0.0;
   CollectionLatePayableBreakdown? _payableBreakdown;
 
   String _selectedPaymentType = 'Cash';
@@ -3625,6 +3641,7 @@ class __AddPaymentEntryModalContentState
     _selectedPaymentType = 'Cash';
 
     _paymentAmountController.addListener(_updateRemainingBalanceDisplay);
+    _lateFineController.addListener(_updateRemainingBalanceDisplay);
   }
 
   @override
@@ -3656,8 +3673,6 @@ class __AddPaymentEntryModalContentState
       );
 
       _payableBreakdown = breakdown;
-      _lateUnits = breakdown.lateUnits;
-      _calculatedFine = breakdown.calculatedLateFine;
 
       final initialBal = (widget.entry.loanAmount != null && widget.entry.loanAmount! > 0)
           ? widget.entry.loanAmount!
@@ -3681,6 +3696,7 @@ class __AddPaymentEntryModalContentState
       if (_paymentAmountController.text.trim().isEmpty) {
         _paymentAmountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
       }
+      // Autofill late fee directly inside the late payment fees input field
       _lateFineController.text = breakdown.calculatedLateFine.toStringAsFixed(2);
       _updateRemainingBalanceDisplay();
     }
@@ -3689,11 +3705,15 @@ class __AddPaymentEntryModalContentState
   void _updateRemainingBalanceDisplay() {
     final payment =
         double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
-    final totalTarget = (_payableBreakdown?.isPastMaturity == true)
-        ? _payableBreakdown!.totalPayableAmount
+
+    final breakdown = _payableBreakdown;
+    final double baseTarget = (breakdown?.isPastMaturity == true)
+        ? breakdown!.totalPayableAmount
         : _currentDueBalance;
-    final calculatedBal = (totalTarget >= payment)
-        ? (totalTarget - payment)
+
+    // Remaining Balance is strictly loan balance after deducting payment amount (NOT added to Remaining Balance auto)
+    final calculatedBal = (baseTarget >= payment)
+        ? (baseTarget - payment)
         : 0.0;
     _remainingBalanceController.text = calculatedBal.toStringAsFixed(2);
     if (mounted) {
@@ -3704,6 +3724,7 @@ class __AddPaymentEntryModalContentState
   @override
   void dispose() {
     _paymentAmountController.removeListener(_updateRemainingBalanceDisplay);
+    _lateFineController.removeListener(_updateRemainingBalanceDisplay);
     _remainingBalanceController.dispose();
     _paymentAmountController.dispose();
     _lateFineController.dispose();
@@ -3954,13 +3975,24 @@ class __AddPaymentEntryModalContentState
     final lateFine =
         double.tryParse(_lateFineController.text.trim()) ?? 0.0;
 
-    final totalTarget = (_payableBreakdown?.isPastMaturity == true)
-        ? _payableBreakdown!.totalPayableAmount
+    final breakdown = _payableBreakdown;
+    final double totalAssessedFee = breakdown?.calculatedLateFine ?? 0.0;
+    final double baseTarget = (breakdown?.isPastMaturity == true)
+        ? breakdown!.totalPayableAmount
         : _currentDueBalance;
 
-    final newRemainingBalance = (totalTarget >= paymentAmount)
-        ? (totalTarget - paymentAmount)
+    // Loan Remaining balance: strictly loan balance minus payment amount (NOT added to Remaining Balance auto)
+    final newRemainingBalance = (baseTarget >= paymentAmount)
+        ? (baseTarget - paymentAmount)
         : 0.0;
+
+    final double unpaidCarried = (totalAssessedFee > lateFine)
+        ? (totalAssessedFee - lateFine)
+        : 0.0;
+    final String lateFeeNote = unpaidCarried > 0
+        ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
+        : (lateFine > 0 ? ' | Late Fee: ₹${lateFine.toStringAsFixed(2)} cleared' : '');
+    final String? finalRemarks = remarks != null ? '$remarks$lateFeeNote' : (lateFeeNote.isNotEmpty ? lateFeeNote.replaceFirst(' | ', '') : null);
 
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
@@ -3980,7 +4012,7 @@ class __AddPaymentEntryModalContentState
       roName: realRoName,
       roId: realRoId,
       roRoute: roAssignedRoute,
-      remarks: remarks,
+      remarks: finalRemarks,
     );
 
     final success = await collectionProvider.addCollectionPayment(payment);
@@ -4299,6 +4331,34 @@ class __AddPaymentEntryModalContentState
 
                         return Column(
                           children: [
+                            if (breakdown.previousUnpaidLateFee > 0) ...[
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: Colors.orange.shade300),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.info_outline_rounded, size: 14, color: Colors.orange.shade900),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        'Carry Forward: ₹${breakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid late fee from previous payment.',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.orange.shade900,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -4338,6 +4398,36 @@ class __AddPaymentEntryModalContentState
                                 ),
                               ],
                             ),
+                            if (breakdown.calculatedLateFine > 0) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Late Payment Fee (${breakdown.lateUnits} ${breakdown.isDaily ? (breakdown.lateUnits == 1 ? "day" : "days") : (breakdown.lateUnits == 1 ? "wk" : "wks")}):',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
+                                  ),
+                                  Text(
+                                    '+ ₹ ${breakdown.calculatedLateFine.toStringAsFixed(2)}',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'Late Due Amount Till Last Month:',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
+                                  ),
+                                  Text(
+                                    '₹ ${(((postMaturity != null && postMaturity.isPastMaturity) ? postMaturity.remainingBalance : _currentDueBalance) + breakdown.calculatedLateFine).toStringAsFixed(2)}',
+                                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
+                                  ),
+                                ],
+                              ),
+                            ],
                             if (postMaturity != null && postMaturity.isPastMaturity) ...[
                               const SizedBox(height: 6),
                               Row(
@@ -4377,17 +4467,7 @@ class __AddPaymentEntryModalContentState
                                 ),
                               ],
                             ),
-                            if (breakdown.calculatedLateFine > 0) ...[
-                              const SizedBox(height: 6),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('Late Payment Fee:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900)),
-                                  Text('₹ ${breakdown.calculatedLateFine.toStringAsFixed(2)}', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.orange.shade900)),
-                                ],
-                              ),
-                            ],
-                            if (isManager) ...[
+                            if (isManager || breakdown.isOverdue || breakdown.previousUnpaidLateFee > 0) ...[
                               const SizedBox(height: 8),
                               Container(
                                 width: double.infinity,
@@ -4638,6 +4718,33 @@ class __AddPaymentEntryModalContentState
                             ),
                           ),
                         ),
+                        if (_payableBreakdown != null && _payableBreakdown!.calculatedLateFine > 0) ...[
+                          const SizedBox(height: 4),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: InkWell(
+                              onTap: () {
+                                _lateFineController.text = '0.00';
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.orange.shade300),
+                                ),
+                                child: Text(
+                                  'Carry Forward (₹0.00)',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange.shade900,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

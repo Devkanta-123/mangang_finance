@@ -94,14 +94,15 @@ class _LateFinesPageState extends State<LateFinesPage> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Row(
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       const Text(
                         'Live calculation from Admin Settings: ',
                         style: TextStyle(fontSize: 12, color: Colors.white70),
                       ),
                       Text(
-                        'Daily ₹${settingsProvider.dailyLateFine.toStringAsFixed(0)}/day • Weekly ₹${settingsProvider.weeklyLateFine.toStringAsFixed(0)}/wk',
+                        'Daily Slabs: ≤₹10k (₹3/d) • >₹10k-₹30k (₹6/d) • ≥₹30k (₹9/d) • Weekly ₹${settingsProvider.weeklyLateFine.toStringAsFixed(0)}/wk',
                         style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
