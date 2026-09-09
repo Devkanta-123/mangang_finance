@@ -85,8 +85,12 @@ class HistoricalImportRowRecord {
   });
 
   /// Count of valid, non-duplicate payments in this row
-  int get validPaymentsCount =>
-      payments.where((p) => !p.isDuplicate && p.errorMessage == null && p.amount > 0).length;
+  int get validPaymentsCount => payments
+      .where((p) =>
+          !p.isDuplicate &&
+          p.errorMessage == null &&
+          (p.amount > 0 || p.interest > 0))
+      .length;
 
   /// Count of duplicate payments in this row
   int get duplicatePaymentsCount => payments.where((p) => p.isDuplicate).length;
@@ -98,7 +102,7 @@ class HistoricalImportRowRecord {
 
   /// Sum of valid non-duplicate interest amounts in this row
   double get totalRowInterest => payments
-      .where((p) => !p.isDuplicate && p.errorMessage == null && p.amount > 0)
+      .where((p) => !p.isDuplicate && p.errorMessage == null && p.interest > 0)
       .fold(0.0, (sum, p) => sum + p.interest);
 }
 
@@ -816,8 +820,27 @@ class HistoricalPaymentImportService {
               ? (parseNumericAmount(rawInterestCell) ?? 0.0)
               : 0.0;
 
-          if (parsedAmount == null) {
-            final amtStr = row.length > amountColIdx ? getCellString(row[amountColIdx]) : "";
+          final amtStr = row.length > amountColIdx ? getCellString(row[amountColIdx]) : "";
+          final bool isAmountBlank = rawAmountCell == null || amtStr.trim().isEmpty || amtStr.trim() == "-" || amtStr.trim() == "0";
+
+          double effectiveAmount = 0.0;
+          if (parsedAmount != null) {
+            if (parsedAmount < 0) {
+              rowPayments.add(
+                HistoricalPaymentItem(
+                  paymentDate: parsedDate,
+                  amount: parsedAmount,
+                  interest: parsedInterest,
+                  roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
+                  errorMessage: "Payment amount cannot be negative (₹$parsedAmount) at row ${r + 1}",
+                ),
+              );
+              continue;
+            }
+            effectiveAmount = parsedAmount;
+          } else if (isAmountBlank) {
+            effectiveAmount = 0.0;
+          } else {
             rowPayments.add(
               HistoricalPaymentItem(
                 paymentDate: parsedDate,
@@ -830,18 +853,21 @@ class HistoricalPaymentImportService {
             continue;
           }
 
-          if (parsedAmount <= 0) {
-            if (parsedAmount < 0) {
-              rowPayments.add(
-                HistoricalPaymentItem(
-                  paymentDate: parsedDate,
-                  amount: parsedAmount,
-                  interest: parsedInterest,
-                  roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
-                  errorMessage: "Payment amount cannot be negative (₹$parsedAmount) at row ${r + 1}",
-                ),
-              );
-            }
+          if (parsedInterest < 0) {
+            rowPayments.add(
+              HistoricalPaymentItem(
+                paymentDate: parsedDate,
+                amount: effectiveAmount,
+                interest: parsedInterest,
+                roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
+                errorMessage: "Interest amount cannot be negative (₹$parsedInterest) at row ${r + 1}",
+              ),
+            );
+            continue;
+          }
+
+          // If both payment amount and interest are 0, there is no transaction on this date to record
+          if (effectiveAmount == 0 && parsedInterest == 0) {
             continue;
           }
 
@@ -849,7 +875,7 @@ class HistoricalPaymentImportService {
             rowPayments.add(
               HistoricalPaymentItem(
                 paymentDate: parsedDate,
-                amount: parsedAmount,
+                amount: effectiveAmount,
                 interest: parsedInterest,
                 roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
                 errorMessage: "Payment skipped: Loanee does not exist in loanee_accounts database.",
@@ -874,7 +900,7 @@ class HistoricalPaymentImportService {
             rowPayments.add(
               HistoricalPaymentItem(
                 paymentDate: parsedDate,
-                amount: parsedAmount,
+                amount: effectiveAmount,
                 interest: parsedInterest,
                 roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
                 isDuplicate: true,
@@ -885,13 +911,13 @@ class HistoricalPaymentImportService {
           } else {
             filePaymentKeys.add(fileAccountKey);
             validPaymentsCount++;
-            totalAmountToImport += parsedAmount;
+            totalAmountToImport += effectiveAmount;
             totalInterestToImport += parsedInterest;
 
             final paymentModel = CollectionPaymentModel(
               id: "PAY-HIST-${targetCollectionId}_${dateStr.replaceAll("-", "")}",
               collectionId: targetCollectionId,
-              paymentAmount: parsedAmount,
+              paymentAmount: effectiveAmount,
               interest: parsedInterest,
               remainingBalance: 0.0,
               lateFine: 0.0,
@@ -908,7 +934,7 @@ class HistoricalPaymentImportService {
             rowPayments.add(
               HistoricalPaymentItem(
                 paymentDate: parsedDate,
-                amount: parsedAmount,
+                amount: effectiveAmount,
                 interest: parsedInterest,
                 roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
                 paymentModel: paymentModel,
@@ -1568,12 +1594,16 @@ class HistoricalPaymentImportService {
           // Running remaining balance
           double runningBalance = initialBal + priorInterest - priorPaid;
 
-          for (final p in row.payments) {
+          // Ensure payments are processed chronologically in ascending order
+          final sortedPayments = List<HistoricalPaymentItem>.from(row.payments)
+            ..sort((a, b) => a.paymentDate.compareTo(b.paymentDate));
+
+          for (final p in sortedPayments) {
             if (p.isDuplicate) {
               duplicateSkipped++;
               continue;
             }
-            if (p.errorMessage != null || p.amount <= 0) {
+            if (p.errorMessage != null || (p.amount <= 0 && p.interest <= 0)) {
               continue;
             }
 
@@ -1622,7 +1652,9 @@ class HistoricalPaymentImportService {
                 );
               }
             } else {
-              failures.add("Failed to save payment of ₹${p.amount} on ${p.formattedDate} for ${row.rawLoaneeName}");
+              failures.add(p.interest > 0 && p.amount == 0
+                  ? "Failed to save interest of ₹${p.interest.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}"
+                  : "Failed to save payment of ₹${p.amount} on ${p.formattedDate} for ${row.rawLoaneeName}");
             }
           }
         }

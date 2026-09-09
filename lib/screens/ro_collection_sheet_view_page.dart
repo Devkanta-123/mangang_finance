@@ -4300,9 +4300,6 @@ class __AddPaymentEntryModalContentState
                     const Divider(height: 14),
                     Builder(
                       builder: (context) {
-                        final authProvider = Provider.of<AuthProvider>(context, listen: false);
-                        final isManager = authProvider.activeRole == UserType.manager ||
-                            authProvider.currentUser?.userType == UserType.manager;
                         final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
                         final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
                         final collectionProvider = Provider.of<CollectionSheetProvider>(context, listen: false);
@@ -4467,35 +4464,6 @@ class __AddPaymentEntryModalContentState
                                 ),
                               ],
                             ),
-                            if (isManager || breakdown.isOverdue || breakdown.previousUnpaidLateFee > 0) ...[
-                              const SizedBox(height: 8),
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: breakdown.isOverdue ? Colors.amber.shade50 : Colors.grey.shade100,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: breakdown.isOverdue ? Colors.amber.shade300 : Colors.grey.shade300),
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(Icons.lightbulb_outline_rounded, size: 14, color: breakdown.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Text(
-                                        'Why this amount: ${breakdown.explanation}',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: breakdown.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
                           ],
                         );
                       },
