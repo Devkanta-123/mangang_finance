@@ -7,6 +7,8 @@ import '../models/collection_payment_model.dart';
 import '../services/customer_id_service.dart';
 import '../services/supabase_service.dart';
 import 'settings_provider.dart';
+import '../models/loanee_model.dart';
+import 'loanee_provider.dart';
 
 class CollectionSheetProvider extends ChangeNotifier {
   // Routes Master List - Pulled directly from Supabase table route_master
@@ -144,6 +146,76 @@ class CollectionSheetProvider extends ChangeNotifier {
           p.createdAt.month == date.month &&
           p.createdAt.day == date.day;
     });
+  }
+
+  /// Checks whether a collection entry's loan amount has been fully paid / cleared (remaining balance <= 0).
+  /// Accounts for:
+  /// - Explicit closed/completed status in RoCollectionEntry or LoaneeAccount
+  /// - Sum of all payments in ro_collection_payments reaching or exceeding initial balance + interest
+  /// - LoaneeAccount dueAmount reaching <= 0 with positive paidAmount
+  bool isEntryCompleted(RoCollectionEntry entry, {LoaneeProvider? loaneeProvider}) {
+    // 1. Check if entry is explicitly marked closed or completed
+    final entryStatus = entry.status.trim().toLowerCase();
+    if (entryStatus == 'closed' || entryStatus == 'completed') {
+      return true;
+    }
+
+    // 2. Check LoaneeAccount if available
+    LoaneeAccount? loanee;
+    if (loaneeProvider != null) {
+      loanee = loaneeProvider.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+    }
+
+    if (loanee != null) {
+      final loaneeStatus = loanee.status.trim().toLowerCase();
+      if (loaneeStatus == 'closed' || loaneeStatus == 'completed') {
+        return true;
+      }
+      if (loanee.loanAmount > 0 && loanee.dueAmount <= 0.01 && loanee.paidAmount > 0) {
+        return true;
+      }
+      if (loanee.loanAmount > 0 && loanee.paidAmount >= loanee.loanAmount) {
+        return true;
+      }
+    }
+
+    // 3. Dynamic payment calculation from ro_collection_payments records
+    final totalCollected = getTotalPaidForCollection(entry.id);
+    final totalInterest = getTotalInterestForCollection(entry.id);
+    final totalLoanAmount = (entry.loanAmount != null && entry.loanAmount! > 0)
+        ? entry.loanAmount!
+        : ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : entry.initialBalance);
+
+    if (totalLoanAmount > 0 && totalCollected > 0) {
+      final remaining = (totalLoanAmount + totalInterest - totalCollected);
+      if (remaining <= 0.01) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /// Returns the count of collection entries whose payments are fully completed
+  int getCompletedEntriesCount({String? selectedRoute, LoaneeProvider? loaneeProvider}) {
+    final list = (selectedRoute != null && selectedRoute.isNotEmpty && selectedRoute != 'All Routes')
+        ? _collectionEntries.where((e) => e.route.trim().toLowerCase() == selectedRoute.trim().toLowerCase())
+        : _collectionEntries;
+    return list.where((e) => isEntryCompleted(e, loaneeProvider: loaneeProvider)).length;
+  }
+
+  /// Returns the count of collection entries whose payments are ongoing (not completed)
+  int getOngoingEntriesCount({String? selectedRoute, LoaneeProvider? loaneeProvider}) {
+    final list = (selectedRoute != null && selectedRoute.isNotEmpty && selectedRoute != 'All Routes')
+        ? _collectionEntries.where((e) => e.route.trim().toLowerCase() == selectedRoute.trim().toLowerCase())
+        : _collectionEntries;
+    return list.where((e) => !isEntryCompleted(e, loaneeProvider: loaneeProvider)).length;
   }
 
   /// Find a single collection entry by its ID

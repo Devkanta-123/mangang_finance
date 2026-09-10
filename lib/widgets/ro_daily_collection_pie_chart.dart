@@ -209,15 +209,17 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
             ? roDataList[_hoveredIndex]
             : null;
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: isDark ? const Color(0xFF333333) : Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.06),
+            color: isDark ? Colors.black.withValues(alpha: 0.25) : Colors.grey.withValues(alpha: 0.06),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -230,18 +232,18 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
+              Expanded(
                 child: Row(
                   children: [
-                    Icon(Icons.pie_chart_rounded, color: Color(0xFF1B5E20), size: 22),
-                    SizedBox(width: 8),
+                    Icon(Icons.pie_chart_rounded, color: isDark ? Colors.green.shade400 : const Color(0xFF1B5E20), size: 22),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'RO Daily Collection Analytics',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E1E1E),
+                          color: isDark ? Colors.white : const Color(0xFF1E1E1E),
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -253,9 +255,9 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1B5E20).withValues(alpha: 0.1),
+                  color: isDark ? Colors.green.shade900.withValues(alpha: 0.25) : const Color(0xFF1B5E20).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF1B5E20).withValues(alpha: 0.2)),
+                  border: Border.all(color: isDark ? Colors.green.shade700.withValues(alpha: 0.4) : const Color(0xFF1B5E20).withValues(alpha: 0.2)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -263,18 +265,18 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                     Container(
                       width: 7,
                       height: 7,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF1B5E20),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.green.shade400 : const Color(0xFF1B5E20),
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 5),
                     Text(
                       'Today: $dateString',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10.5,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF1B5E20),
+                        color: isDark ? Colors.green.shade300 : const Color(0xFF1B5E20),
                       ),
                     ),
                   ],
@@ -286,10 +288,10 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
           const SizedBox(height: 4),
           Text(
             "Today's live collection breakdown across Relationship Officers (RO)",
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
           ),
 
-          const Divider(height: 20),
+          Divider(height: 20, color: isDark ? Colors.grey.shade800 : Colors.grey.shade200),
 
           if (roDataList.isEmpty) ...[
             // Empty State for Today
@@ -301,28 +303,28 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Colors.green.shade50,
+                        color: isDark ? Colors.green.shade900.withValues(alpha: 0.3) : Colors.green.shade50,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
                         Icons.check_circle_outline_rounded,
                         size: 32,
-                        color: Colors.green.shade700,
+                        color: isDark ? Colors.green.shade300 : Colors.green.shade700,
                       ),
                     ),
                     const SizedBox(height: 10),
                     Text(
                       'No Collections Recorded for Today ($dateString)',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E1E1E),
+                        color: isDark ? Colors.white : const Color(0xFF1E1E1E),
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'When ROs record payments today, the 3D visual breakdown will appear here in real-time.',
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -393,9 +395,9 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
 
             const SizedBox(height: 12),
 
-            // Stable Height Information Spotlight Card (Prevents layout jumping)
-            SizedBox(
-              height: 110,
+            // Flexible Height Information Spotlight Card (Prevents layout jumping & overflow)
+            Container(
+              constraints: const BoxConstraints(minHeight: 110),
               child: _buildSpotlightInformationCard(
                 hoveredData: hoveredData,
                 totalCollection: totalCollection,
@@ -411,10 +413,10 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
             // Interactive RO Legend Grid
             Text(
               "Today's Active Collectors (${roDataList.length} Officers)",
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF1E1E1E),
+                color: isDark ? Colors.white : const Color(0xFF1E1E1E),
               ),
             ),
             const SizedBox(height: 8),
@@ -450,11 +452,11 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? data.color.withValues(alpha: 0.12)
-                            : Colors.grey.shade50,
+                            ? data.color.withValues(alpha: isDark ? 0.22 : 0.12)
+                            : (isDark ? const Color(0xFF252525) : Colors.grey.shade50),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: isSelected ? data.color : Colors.grey.shade200,
+                          color: isSelected ? data.color : (isDark ? const Color(0xFF383838) : Colors.grey.shade200),
                           width: isSelected ? 1.5 : 1.0,
                         ),
                         boxShadow: isSelected
@@ -497,7 +499,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold,
-                                      color: isSelected ? data.color : Colors.grey.shade900,
+                                      color: isSelected ? data.color : (isDark ? Colors.white : Colors.grey.shade900),
                                     ),
                                   ),
                                   const SizedBox(width: 4),
@@ -506,7 +508,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                                     style: TextStyle(
                                       fontSize: 10,
                                       fontWeight: FontWeight.w600,
-                                      color: isSelected ? data.color : Colors.grey.shade600,
+                                      color: isSelected ? data.color : (isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                                     ),
                                   ),
                                 ],
@@ -515,7 +517,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                                 '₹ ${data.collectedAmount.toStringAsFixed(0)} • ${data.route}',
                                 style: TextStyle(
                                   fontSize: 9.5,
-                                  color: Colors.grey.shade600,
+                                  color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
                                 ),
                               ),
                             ],
@@ -541,6 +543,8 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
     required int activeRoCount,
     required RoDailyCollectionData? topRo,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     if (hoveredData != null) {
       // Hovered RO Specific Information Card
       final avgPerTx = hoveredData.transactionCount > 0
@@ -550,9 +554,14 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: hoveredData.color.withValues(alpha: 0.05),
+          color: isDark
+              ? hoveredData.color.withValues(alpha: 0.12)
+              : hoveredData.color.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: hoveredData.color.withValues(alpha: 0.35), width: 1.5),
+          border: Border.all(
+            color: hoveredData.color.withValues(alpha: isDark ? 0.55 : 0.35),
+            width: 1.5,
+          ),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -560,47 +569,58 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 14,
-                      backgroundColor: hoveredData.color,
-                      child: Text(
-                        hoveredData.roName.isNotEmpty ? hoveredData.roName[0].toUpperCase() : 'R',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 14,
+                        backgroundColor: hoveredData.color,
+                        child: Text(
+                          hoveredData.roName.isNotEmpty ? hoveredData.roName[0].toUpperCase() : 'R',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          hoveredData.roName,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1E1E1E),
-                          ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              hoveredData.roName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : const Color(0xFF1E1E1E),
+                              ),
+                            ),
+                            Text(
+                              'ID: ${hoveredData.roId.isNotEmpty ? hoveredData.roId : "RO"} • Route: ${hoveredData.route}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ),
-                        Text(
-                          'ID: ${hoveredData.roId.isNotEmpty ? hoveredData.roId : "RO"} • Route: ${hoveredData.route}',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey.shade600,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                   decoration: BoxDecoration(
                     color: hoveredData.color,
                     borderRadius: BorderRadius.circular(10),
@@ -618,7 +638,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
               ],
             ),
             const SizedBox(height: 8),
-            const Divider(height: 1),
+            Divider(height: 1, color: isDark ? Colors.grey.shade800 : Colors.grey.shade200),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -634,7 +654,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                   child: _buildInfoItem(
                     label: 'Receipts Count',
                     value: '${hoveredData.transactionCount} entries',
-                    valueColor: const Color(0xFF1E1E1E),
+                    valueColor: isDark ? Colors.white70 : const Color(0xFF1E1E1E),
                     icon: Icons.receipt_long_rounded,
                   ),
                 ),
@@ -642,7 +662,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                   child: _buildInfoItem(
                     label: 'Avg / Collection',
                     value: '₹ ${avgPerTx.toStringAsFixed(0)}',
-                    valueColor: Colors.teal.shade800,
+                    valueColor: isDark ? Colors.tealAccent.shade200 : Colors.teal.shade800,
                     icon: Icons.trending_up_rounded,
                   ),
                 ),
@@ -657,9 +677,9 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
+        color: isDark ? const Color(0xFF252525) : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: isDark ? const Color(0xFF383838) : Colors.grey.shade200),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -668,33 +688,33 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   "Today's RO Performance Overview",
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF1B5E20),
+                    color: isDark ? Colors.green.shade300 : const Color(0xFF1B5E20),
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               const SizedBox(width: 8),
-              const Row(
+              Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.touch_app_rounded, size: 12, color: Colors.grey),
-                  SizedBox(width: 3),
+                  Icon(Icons.touch_app_rounded, size: 12, color: isDark ? Colors.grey.shade400 : Colors.grey),
+                  const SizedBox(width: 3),
                   Text(
                     'Hover slice to view RO',
-                    style: TextStyle(fontSize: 10, color: Colors.grey),
+                    style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey),
                   ),
                 ],
               ),
             ],
           ),
           const SizedBox(height: 8),
-          const Divider(height: 1),
+          Divider(height: 1, color: isDark ? Colors.grey.shade800 : Colors.grey.shade200),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -702,7 +722,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                 child: _buildInfoItem(
                   label: "Total Today's Collection",
                   value: '₹ ${totalCollection.toStringAsFixed(2)}',
-                  valueColor: Colors.green.shade800,
+                  valueColor: isDark ? Colors.greenAccent : Colors.green.shade800,
                   icon: Icons.monetization_on_rounded,
                 ),
               ),
@@ -710,7 +730,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                 child: _buildInfoItem(
                   label: 'Active Officers',
                   value: '$activeRoCount ROs',
-                  valueColor: Colors.blue.shade800,
+                  valueColor: isDark ? Colors.lightBlueAccent : Colors.blue.shade800,
                   icon: Icons.groups_rounded,
                 ),
               ),
@@ -719,7 +739,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
                   child: _buildInfoItem(
                     label: 'Top Collector',
                     value: '${topRo.roName} (${topRo.percentage.toStringAsFixed(0)}%)',
-                    valueColor: Colors.amber.shade900,
+                    valueColor: isDark ? Colors.amberAccent : Colors.amber.shade900,
                     icon: Icons.workspace_premium_rounded,
                   ),
                 ),
@@ -736,17 +756,18 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
     required Color valueColor,
     required IconData icon,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Icon(icon, size: 12, color: Colors.grey.shade600),
+            Icon(icon, size: 12, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
             const SizedBox(width: 4),
             Expanded(
               child: Text(
                 label,
-                style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600),
+                style: TextStyle(fontSize: 9.5, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -761,6 +782,7 @@ class _RoDailyCollectionPieChartState extends State<RoDailyCollectionPieChart>
             color: valueColor,
           ),
           overflow: TextOverflow.ellipsis,
+          maxLines: 1,
         ),
       ],
     );

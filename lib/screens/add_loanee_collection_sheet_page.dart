@@ -409,7 +409,7 @@ class _AddLoaneeCollectionSheetPageState
                           Icon(Icons.post_add_rounded, color: Colors.white, size: 24),
                           SizedBox(width: 10),
                           Text(
-                            'Add Loanee on R.O. Collection Sheet',
+                            'R.O. Collection Sheet',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,

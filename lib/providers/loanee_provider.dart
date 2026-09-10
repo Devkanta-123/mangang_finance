@@ -28,6 +28,14 @@ class LoaneeProvider extends ChangeNotifier {
   double get totalDueAmount =>
       _loanees.fold(0, (sum, item) => sum + item.dueAmount);
 
+  int get completedLoaneesCount => _loanees.where((l) =>
+      l.status.toLowerCase() == 'closed' ||
+      l.status.toLowerCase() == 'completed' ||
+      (l.loanAmount > 0 && l.dueAmount <= 0.01 && l.paidAmount > 0) ||
+      (l.loanAmount > 0 && l.paidAmount >= l.loanAmount)).length;
+
+  int get ongoingLoaneesCount => (_loanees.length - completedLoaneesCount).clamp(0, _loanees.length);
+
   /// Check connection first, then save directly to Supabase table
   Future<Map<String, dynamic>> addLoaneeWithConnectionCheck(LoaneeAccount loanee) async {
     // 1. Pre-flight Supabase Connection Check

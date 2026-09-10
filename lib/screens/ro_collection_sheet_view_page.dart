@@ -345,6 +345,8 @@ class _RoCollectionSheetViewPageState
             : entry.initialBalance);
     final remainingBal =
         (totalLoanAmount + totalInterest - totalCollected).clamp(0.0, double.infinity);
+    final isCompleted =
+        collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider) || remainingBal <= 0.01;
     final hasPaidToday = collectionProvider.hasPaymentForDate(entry.id);
     final payments = collectionProvider.getPaymentsForCollection(entry.id);
     final now = DateTime.now();
@@ -410,29 +412,84 @@ class _RoCollectionSheetViewPageState
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: hasPaidToday
-                          ? Colors.green.shade50
-                          : Colors.orange.shade50,
+                      color: isCompleted
+                          ? Colors.teal.shade50
+                          : (hasPaidToday
+                              ? Colors.green.shade50
+                              : Colors.orange.shade50),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: hasPaidToday
-                            ? Colors.green.shade300
-                            : Colors.orange.shade300,
+                        color: isCompleted
+                            ? Colors.teal.shade300
+                            : (hasPaidToday
+                                ? Colors.green.shade300
+                                : Colors.orange.shade300),
                       ),
                     ),
-                    child: Text(
-                      hasPaidToday ? 'Collected Today' : 'Pending Today',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: hasPaidToday
-                            ? Colors.green.shade900
-                            : Colors.orange.shade900,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isCompleted
+                              ? Icons.verified_rounded
+                              : (hasPaidToday
+                                  ? Icons.check_circle_rounded
+                                  : Icons.access_time_rounded),
+                          size: 13,
+                          color: isCompleted
+                              ? Colors.teal.shade700
+                              : (hasPaidToday
+                                  ? Colors.green.shade700
+                                  : Colors.orange.shade800),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          isCompleted
+                              ? 'Loan Completed'
+                              : (hasPaidToday ? 'Collected Today' : 'Pending Today'),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isCompleted
+                                ? Colors.teal.shade900
+                                : (hasPaidToday
+                                    ? Colors.green.shade900
+                                    : Colors.orange.shade900),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
+              if (isCompleted) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.teal.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.verified_rounded, size: 18, color: Colors.teal.shade700),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Payment Completed: All loan amounts have been fully paid & cleared (₹0.00 Remaining Balance).',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF004D40),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const Divider(height: 28),
               Wrap(
                 spacing: 8,
@@ -846,6 +903,21 @@ class _RoCollectionSheetViewPageState
           backgroundColor: Colors.red.shade800,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    // Check if loan is already fully completed / cleared
+    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    if (collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Loan for ${entry.loaneeName} is already fully cleared and completed! No further payment required.',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.teal.shade800,
         ),
       );
       return;
@@ -1363,6 +1435,8 @@ class _RoCollectionSheetViewPageState
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<CollectionSheetProvider>(context);
+    final loaneeProvider = Provider.of<LoaneeProvider>(context);
+    final roProvider = Provider.of<RoProvider>(context);
     final authProvider = Provider.of<AuthProvider>(context);
     final isRoPanel = authProvider.activeRole == UserType.ro;
     final isAdmin = authProvider.activeRole == UserType.admin;
@@ -1399,11 +1473,25 @@ class _RoCollectionSheetViewPageState
                 selectedRoute: _selectedRoute, selectedType: 'All Types')
             .length;
 
+    final completedInSelectedRoute = provider.getCompletedEntriesCount(
+      selectedRoute: _selectedRoute,
+      loaneeProvider: loaneeProvider,
+    );
+
+    final ongoingInSelectedRoute = provider.getOngoingEntriesCount(
+      selectedRoute: _selectedRoute,
+      loaneeProvider: loaneeProvider,
+    );
+
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
       body: RefreshIndicator(
         onRefresh: () async {
-          await provider.fetchFromSupabase();
+          await Future.wait([
+            provider.fetchFromSupabase(),
+            loaneeProvider.fetchFromSupabase(),
+            roProvider.fetchFromSupabase(),
+          ]);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -1418,6 +1506,14 @@ class _RoCollectionSheetViewPageState
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Summary Metric Cards (Small, Gradient Colors: Ongoing Loanees & Completed Payments)
+                    _buildQuickSummaryCards(
+                      ongoingCount: ongoingInSelectedRoute,
+                      completedCount: completedInSelectedRoute,
+                    ),
+
+                    const SizedBox(height: 14),
+
                     // Section 1: Route Selection (Small Compact Cards)
                     _buildRouteSelectionCardsSection(
                         provider, availableRoutes),
@@ -1427,7 +1523,7 @@ class _RoCollectionSheetViewPageState
                     // Section 2: Selected Route Title & Collection Types
                     if (_selectedRoute != null) ...[
                       _buildSelectedRouteHeaderBanner(
-                          totalInSelectedRoute, totalFilteredAmount),
+                          totalInSelectedRoute, completedInSelectedRoute, totalFilteredAmount),
                       const SizedBox(height: 12),
                       _buildCollectionTypeCardsSection(provider),
                       const SizedBox(height: 16),
@@ -1438,7 +1534,7 @@ class _RoCollectionSheetViewPageState
                       _buildNoRouteSelectedState(availableRoutes.length)
                     else
                       _buildDataTableSection(
-                          filteredEntries, provider, isRoPanel, isAdmin, totalFilteredAmount),
+                          filteredEntries, provider, isRoPanel, isAdmin, totalFilteredAmount, completedInSelectedRoute),
                   ],
                 ),
               ),
@@ -1447,6 +1543,136 @@ class _RoCollectionSheetViewPageState
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // ==========================================
+  // QUICK SUMMARY METRIC CARDS (SMALL & GRADIENT)
+  // ==========================================
+  Widget _buildQuickSummaryCards({
+    required int ongoingCount,
+    required int completedCount,
+  }) {
+    final cardOngoing = _buildSmallMetricCard(
+      title: _selectedRoute != null ? 'Route Ongoing Loanees' : 'Ongoing Payment Loanees',
+      value: '$ongoingCount',
+      subtitle: 'Active Accounts',
+      icon: Icons.pending_actions_rounded,
+      gradientColors: const [Color(0xFF6A11CB), Color(0xFF2575FC)], // Violet -> Royal Blue
+    );
+
+    final cardCompleted = _buildSmallMetricCard(
+      title: _selectedRoute != null ? 'Route Completed' : 'Completed Payments ',
+      value: '$completedCount',
+      subtitle: 'Fully Cleared',
+      icon: Icons.verified_rounded,
+      gradientColors: const [Color(0xFF0BA360), Color(0xFF3CBA92)], // Emerald -> Mint
+    );
+
+    return Row(
+      children: [
+        Expanded(child: cardOngoing),
+        const SizedBox(width: 8),
+        Expanded(child: cardCompleted),
+      ],
+    );
+  }
+
+  Widget _buildSmallMetricCard({
+    required String title,
+    required String value,
+    required String subtitle,
+    required IconData icon,
+    required List<Color> gradientColors,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: gradientColors,
+        ),
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: gradientColors.first.withValues(alpha: 0.32),
+            blurRadius: 5,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.22),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(icon, color: Colors.white, size: 12),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 9.5,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: Colors.white.withValues(alpha: 0.85),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1818,7 +2044,7 @@ class _RoCollectionSheetViewPageState
   // 2. SELECTED ROUTE TITLE & COLLECTION TYPES
   // ==========================================
   Widget _buildSelectedRouteHeaderBanner(
-      int totalInRoute, double totalCollected) {
+      int totalInRoute, int completedInRoute, double totalCollected) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
@@ -1862,7 +2088,7 @@ class _RoCollectionSheetViewPageState
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        "$totalInRoute Loanee Accounts • Today Collected: ₹ ${totalCollected.toStringAsFixed(2)}",
+                        "$totalInRoute Loanee Accounts • $completedInRoute Completed • Today Collected: ₹ ${totalCollected.toStringAsFixed(2)}",
                         style: TextStyle(
                           fontSize: 10.5,
                           color: Colors.grey.shade700,
@@ -2054,6 +2280,7 @@ class _RoCollectionSheetViewPageState
     bool isRoPanel,
     bool isAdmin,
     double totalFilteredAmount,
+    int completedCount,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2160,7 +2387,7 @@ class _RoCollectionSheetViewPageState
             runSpacing: 4,
             children: [
               Text(
-                "Showing ${entries.length} Records in ${_selectedRoute!}",
+                "Showing ${entries.length} Records in ${_selectedRoute!} ($completedCount Completed)",
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.bold,
@@ -2274,6 +2501,8 @@ class _RoCollectionSheetViewPageState
               rows: entries.asMap().entries.map((mapEntry) {
                 final idx = mapEntry.key + 1;
                 final entry = mapEntry.value;
+                final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                final bool isCompleted = provider.isEntryCompleted(entry, loaneeProvider: loaneeProvider);
                 final todayCollected =
                     provider.getTodayPaidForCollection(entry.id);
                 final todayLateFine =
@@ -2295,9 +2524,38 @@ class _RoCollectionSheetViewPageState
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(entry.loaneeName,
-                              style: const TextStyle(
-                                  fontSize: 12, fontWeight: FontWeight.bold)),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(entry.loaneeName,
+                                    style: const TextStyle(
+                                        fontSize: 12, fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis),
+                              ),
+                              if (isCompleted) ...[
+                                const SizedBox(width: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal.shade50,
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(
+                                        color: Colors.teal.shade300, width: 0.8),
+                                  ),
+                                  child: Text(
+                                    "COMPLETED",
+                                    style: TextStyle(
+                                      fontSize: 7.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.teal.shade800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
                           Text(entry.mobileNo,
                               style: TextStyle(
                                   fontSize: 10, color: Colors.grey.shade600)),
@@ -2377,6 +2635,26 @@ class _RoCollectionSheetViewPageState
                             );
                           }
 
+                          if (isCompleted) {
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.teal.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.teal.shade200),
+                              ),
+                              child: Text(
+                                "₹ 0.00 (Cleared)",
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.teal.shade800,
+                                ),
+                              ),
+                            );
+                          }
+
                           final payableText = entry.getFormattedPayableAmount(
                             loaneeLoanAmount: loanee?.loanAmount,
                             configuredInterestRate: settingsProvider.investmentInterestRate,
@@ -2399,6 +2677,12 @@ class _RoCollectionSheetViewPageState
                     DataCell(
                       Builder(
                         builder: (context) {
+                          if (isCompleted) {
+                            return Text("-",
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey.shade400));
+                          }
+
                           final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
                           final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
                           final loanee = loaneeProvider.getLoaneeForUser(
@@ -2521,36 +2805,61 @@ class _RoCollectionSheetViewPageState
                       ),
                     ),
                     DataCell(
-                      hasPaidToday
+                      isCompleted
                           ? Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.green.shade50,
+                                color: Colors.teal.shade50,
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.green.shade200),
+                                border: Border.all(color: Colors.teal.shade300),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.check_circle,
-                                      size: 11, color: Colors.green.shade700),
+                                  Icon(Icons.check_circle_rounded,
+                                      size: 11, color: Colors.teal.shade700),
                                   const SizedBox(width: 2),
                                   Text(
-                                    "Paid",
+                                    "Completed",
                                     style: TextStyle(
                                         fontSize: 9,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.green.shade800),
+                                        color: Colors.teal.shade800),
                                   ),
                                 ],
                               ),
                             )
-                          : Text("Pending",
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.orange.shade800,
-                                  fontWeight: FontWeight.w600)),
+                          : (hasPaidToday
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.green.shade200),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.check_circle,
+                                          size: 11, color: Colors.green.shade700),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        "Paid",
+                                        style: TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green.shade800),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : Text("Pending",
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.orange.shade800,
+                                      fontWeight: FontWeight.w600))),
                     ),
                     // ACTIONS DROPDOWN (KEEP ALL ACTIONS UNDER DROPDOWN + ADD VIEW HISTORY)
                     DataCell(
@@ -2582,7 +2891,16 @@ class _RoCollectionSheetViewPageState
                         onSelected: (action) async {
                           switch (action) {
                             case "payment":
-                              _showAddPaymentEntryModal(context, entry);
+                              if (isCompleted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text("Loan for ${entry.loaneeName} is fully cleared and completed. No payment required."),
+                                    backgroundColor: Colors.teal.shade700,
+                                  ),
+                                );
+                              } else {
+                                _showAddPaymentEntryModal(context, entry);
+                              }
                               break;
                             case "view_details":
                               _showViewDetailsModal(context, entry);
@@ -2620,7 +2938,7 @@ class _RoCollectionSheetViewPageState
                           }
                         },
                         itemBuilder: (ctx) {
-                          final bool canRecordPayment = isAdmin || isRoPanel;
+                          final bool canRecordPayment = (isAdmin || isRoPanel) && !isCompleted;
 
                           return [
                             if (canRecordPayment && !hasPaidToday)
@@ -2631,6 +2949,18 @@ class _RoCollectionSheetViewPageState
                                     Icon(Icons.add_card_rounded, size: 16, color: Colors.green),
                                     SizedBox(width: 8),
                                     Text("Payment", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                  ],
+                                ),
+                              ),
+                            if (isCompleted)
+                              const PopupMenuItem(
+                                enabled: false,
+                                value: "completed_info",
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.verified_rounded, size: 16, color: Colors.teal),
+                                    SizedBox(width: 8),
+                                    Text("Payment Completed", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal)),
                                   ],
                                 ),
                               ),
@@ -2875,6 +3205,8 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final collectionProvider = Provider.of<CollectionSheetProvider>(context);
+    final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    final bool isCompleted = collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider);
     final bool hasPaidToday = collectionProvider.hasPaymentForDate(entry.id);
     final bool isAdmin = authProvider.activeRole == UserType.admin ||
         authProvider.currentUser?.userType == UserType.admin;
@@ -2928,37 +3260,39 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
-                    color: hasPaidToday
-                        ? Colors.green.shade50
-                        : Colors.orange.shade50,
+                    color: isCompleted
+                        ? Colors.teal.shade50
+                        : (hasPaidToday ? Colors.green.shade50 : Colors.orange.shade50),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                      color: hasPaidToday
-                          ? Colors.green.shade300
-                          : Colors.orange.shade300,
+                      color: isCompleted
+                          ? Colors.teal.shade300
+                          : (hasPaidToday ? Colors.green.shade300 : Colors.orange.shade300),
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        hasPaidToday
+                        isCompleted
                             ? Icons.check_circle_rounded
-                            : Icons.access_time_rounded,
+                            : (hasPaidToday ? Icons.check_circle_rounded : Icons.access_time_rounded),
                         size: 11,
-                        color: hasPaidToday
-                            ? Colors.green.shade700
-                            : Colors.orange.shade800,
+                        color: isCompleted
+                            ? Colors.teal.shade700
+                            : (hasPaidToday ? Colors.green.shade700 : Colors.orange.shade800),
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        hasPaidToday ? "Paid Today" : "Pending Today",
+                        isCompleted
+                            ? "Completed"
+                            : (hasPaidToday ? "Paid Today" : "Pending Today"),
                         style: TextStyle(
                           fontSize: 9.5,
                           fontWeight: FontWeight.bold,
-                          color: hasPaidToday
-                              ? Colors.green.shade800
-                              : Colors.orange.shade900,
+                          color: isCompleted
+                              ? Colors.teal.shade800
+                              : (hasPaidToday ? Colors.green.shade800 : Colors.orange.shade900),
                         ),
                       ),
                     ],
@@ -2989,14 +3323,39 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        entry.loaneeName,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              entry.loaneeName,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isCompleted) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: Colors.teal.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.teal.shade300, width: 0.8),
+                              ),
+                              child: Text(
+                                "COMPLETED",
+                                style: TextStyle(
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.teal.shade800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       Text(
                         "${entry.mobileNo} • ${entry.route}",
@@ -3013,15 +3372,32 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                   icon: const Icon(Icons.more_vert_rounded, size: 20),
                   tooltip: "Actions",
                   onSelected: (action) {
-                    if (action == "payment") onTapAddPayment();
+                    if (action == "payment") {
+                      if (isCompleted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Loan for ${entry.loaneeName} is fully cleared and completed. No payment required."),
+                            backgroundColor: Colors.teal.shade700,
+                          ),
+                        );
+                      } else {
+                        onTapAddPayment();
+                      }
+                    }
                     if (action == "view_details") onTapView();
                     if (action == "view_history" && onTapViewHistory != null) onTapViewHistory!();
                     if (action == "edit_card" && onTapEditCard != null) onTapEditCard!();
                     if (action == "delete" && onTapDelete != null) onTapDelete!();
                   },
                   itemBuilder: (ctx) => [
-                    if ((isAdmin || isRoPanel) && !hasPaidToday)
+                    if ((isAdmin || isRoPanel) && !hasPaidToday && !isCompleted)
                       const PopupMenuItem(value: "payment", child: Text("Payment")),
+                    if (isCompleted)
+                      const PopupMenuItem(
+                        enabled: false,
+                        value: "completed_info",
+                        child: Text("Payment Completed", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
+                      ),
                     const PopupMenuItem(value: "view_details", child: Text("Collection")),
                     const PopupMenuItem(value: "view_history", child: Text("View History")),
                     if (isAdmin) ...[
