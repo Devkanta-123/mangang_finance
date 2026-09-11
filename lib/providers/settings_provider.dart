@@ -933,6 +933,7 @@ class SettingsProvider extends ChangeNotifier {
     DateTime? maturityDate,
     DateTime? sanctionDate,
     DateTime? asOfDate,
+    double? overrideTotalPaid,
   }) {
     final type = entry.collectionType.toLowerCase().trim();
     final isDaily = type == 'daily';
@@ -947,7 +948,10 @@ class SettingsProvider extends ChangeNotifier {
     );
 
     // Compute remaining balance directly from DB records
-    final double totalPaid = payments.fold(0.0, (sum, p) => sum + p.paymentAmount);
+    final double inMemPaid = payments.fold(0.0, (sum, p) => sum + p.paymentAmount);
+    final double totalPaid = (overrideTotalPaid != null && overrideTotalPaid > inMemPaid)
+        ? overrideTotalPaid
+        : inMemPaid;
     final double totalInterest = payments.fold(0.0, (sum, p) => sum + p.interest);
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!

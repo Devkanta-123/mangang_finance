@@ -1772,22 +1772,64 @@ class SupabaseService {
     return null;
   }
 
+  /// Calculate total collected directly from public.ro_collection_payments for a collection ID
+  /// Equivalent to:
+  /// SELECT COALESCE(SUM(payment_amount), 0)
+  /// FROM public.ro_collection_payments
+  /// WHERE collection_id = <collectionId>;
+  Future<double> fetchTotalCollectedForCollection(String collectionId) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null && collectionId.isNotEmpty) {
+        final response = await supaClient
+            .from('ro_collection_payments')
+            .select('payment_amount')
+            .eq('collection_id', collectionId);
+
+        if (response.isNotEmpty) {
+          double total = 0.0;
+          for (final row in response) {
+            final val = row['payment_amount'];
+            if (val != null) {
+              if (val is num) {
+                total += val.toDouble();
+              } else {
+                total += double.tryParse(val.toString()) ?? 0.0;
+              }
+            }
+          }
+          return total;
+        }
+        return 0.0;
+      }
+    } catch (e) {
+      debugPrint('❌ Error fetching total collected for collection $collectionId: $e');
+    }
+    return 0.0;
+  }
+
   /// Fetch all collection payment records from Supabase 'ro_collection_payments' table
   Future<List<CollectionPaymentModel>?> fetchAllCollectionPayments() async {
     try {
       final supaClient = client;
       if (supaClient != null) {
-        final response = await supaClient
-            .from('ro_collection_payments')
-            .select('*')
-            .order('created_at', ascending: false);
+        final List<CollectionPaymentModel> allPayments = [];
+        int from = 0;
+        const int pageSize = 1000;
+        while (true) {
+          final response = await supaClient
+              .from('ro_collection_payments')
+              .select('*')
+              .order('created_at', ascending: false)
+              .range(from, from + pageSize - 1);
 
-        if (response.isNotEmpty) {
-          return response
-              .map((item) => CollectionPaymentModel.fromJson(Map<String, dynamic>.from(item)))
-              .toList();
+          if (response.isEmpty) break;
+          allPayments.addAll(response
+              .map((item) => CollectionPaymentModel.fromJson(Map<String, dynamic>.from(item))));
+          if (response.length < pageSize) break;
+          from += pageSize;
         }
-        return [];
+        return allPayments;
       }
     } catch (e) {
       debugPrint('❌ Error fetching all collection payments: $e');

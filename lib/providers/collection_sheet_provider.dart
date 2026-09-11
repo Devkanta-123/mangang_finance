@@ -63,10 +63,44 @@ class CollectionSheetProvider extends ChangeNotifier {
     return list;
   }
 
-  /// Calculate total amount paid for a collection card ID from payment table
+  final Map<String, double> _dbTotalCollectedCache = {};
+
+  /// Calculate total amount paid for a collection card ID from payment table (with DB cache fallback)
   double getTotalPaidForCollection(String collectionId) {
     final cardPayments = getPaymentsForCollection(collectionId);
-    return cardPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
+    final inMemSum = cardPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
+    final dbSum = _dbTotalCollectedCache[collectionId];
+    if (dbSum != null && dbSum > inMemSum) {
+      return dbSum;
+    }
+    return inMemSum;
+  }
+
+  /// Directly fetch total collected from public.ro_collection_payments for a collection ID
+  /// Single source of truth from database
+  Future<double> fetchTotalCollectedForCollection(String collectionId) async {
+    final total = await SupabaseService.instance.fetchTotalCollectedForCollection(collectionId);
+    _dbTotalCollectedCache[collectionId] = total;
+    return total;
+  }
+
+  /// Add or update payments in memory cache from database
+  void mergePayments(List<CollectionPaymentModel> newPayments) {
+    if (newPayments.isEmpty) return;
+    bool updated = false;
+    for (final p in newPayments) {
+      final idx = _payments.indexWhere((existing) => existing.id == p.id);
+      if (idx >= 0) {
+        _payments[idx] = p;
+        updated = true;
+      } else {
+        _payments.add(p);
+        updated = true;
+      }
+    }
+    if (updated) {
+      notifyListeners();
+    }
   }
 
   /// Calculate total interest for a collection card ID from payment table

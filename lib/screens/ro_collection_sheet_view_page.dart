@@ -111,7 +111,8 @@ class _RoCollectionSheetViewPageState
 
   // SweetAlert style delete confirmation dialog
   Future<bool> _showSweetAlertDeleteConfirm(
-      BuildContext context, RoCollectionEntry entry) async {
+      BuildContext context, RoCollectionEntry entry,
+      {double? knownTotalCollected, double? knownRemainingBal}) async {
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
     final loaneeProvider =
@@ -121,8 +122,16 @@ class _RoCollectionSheetViewPageState
       mobileNo: entry.mobileNo,
       name: entry.loaneeName,
     );
-    final totalCollected =
+    double totalCollected = knownTotalCollected ??
         collectionProvider.getTotalPaidForCollection(entry.id);
+    if (knownTotalCollected == null && SupabaseService.instance.isInitialized) {
+      try {
+        final dbTotal = await SupabaseService.instance.fetchTotalCollectedForCollection(entry.id);
+        if (dbTotal > 0) {
+          totalCollected = dbTotal;
+        }
+      } catch (_) {}
+    }
     final totalInterest =
         collectionProvider.getTotalInterestForCollection(entry.id);
     final totalLoanAmount = (entry.loanAmount != null && entry.loanAmount! > 0)
@@ -130,7 +139,7 @@ class _RoCollectionSheetViewPageState
         : ((loanee != null && loanee.loanAmount > 0)
             ? loanee.loanAmount
             : entry.initialBalance);
-    final remainingBal =
+    final remainingBal = knownRemainingBal ??
         (totalLoanAmount + totalInterest - totalCollected).clamp(0.0, double.infinity);
 
     final result = await showDialog<bool>(
@@ -180,10 +189,10 @@ class _RoCollectionSheetViewPageState
               child: Column(
                 children: [
                   _buildSummaryRow('Collected Amount',
-                      '₹ ${totalCollected.toStringAsFixed(2)}'),
+                      '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(totalCollected)}'),
                   const SizedBox(height: 4),
                   _buildSummaryRow('Remaining Balance',
-                      '₹ ${remainingBal.toStringAsFixed(2)}'),
+                      '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(remainingBal)}'),
                   const SizedBox(height: 4),
                   _buildSummaryRow('Route', entry.route),
                   const SizedBox(height: 4),
@@ -320,554 +329,17 @@ class _RoCollectionSheetViewPageState
 
   // Popup Modal for View Details
   void _showViewDetailsModal(BuildContext context, RoCollectionEntry entry) {
-    final authProvider =
-        Provider.of<AuthProvider>(context, listen: false);
-    final isAdmin = authProvider.activeRole == UserType.admin;
-    final isManager = authProvider.activeRole == UserType.manager ||
-        authProvider.currentUser?.userType == UserType.manager;
-    final collectionProvider =
-        Provider.of<CollectionSheetProvider>(context, listen: false);
-    final loaneeProvider =
-        Provider.of<LoaneeProvider>(context, listen: false);
-    final loanee = loaneeProvider.getLoaneeForUser(
-      customerId: entry.customerId,
-      mobileNo: entry.mobileNo,
-      name: entry.loaneeName,
-    );
-    final totalCollected =
-        collectionProvider.getTotalPaidForCollection(entry.id);
-    final totalInterest =
-        collectionProvider.getTotalInterestForCollection(entry.id);
-    final totalLoanAmount = (entry.loanAmount != null && entry.loanAmount! > 0)
-        ? entry.loanAmount!
-        : ((loanee != null && loanee.loanAmount > 0)
-            ? loanee.loanAmount
-            : entry.initialBalance);
-    final remainingBal =
-        (totalLoanAmount + totalInterest - totalCollected).clamp(0.0, double.infinity);
-    final isCompleted =
-        collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider) || remainingBal <= 0.01;
-    final hasPaidToday = collectionProvider.hasPaymentForDate(entry.id);
-    final payments = collectionProvider.getPaymentsForCollection(entry.id);
-    final now = DateTime.now();
-    final todayPayments = payments.where((p) =>
-        p.createdAt.year == now.year &&
-        p.createdAt.month == now.month &&
-        p.createdAt.day == now.day).toList();
-    final todayPayment = todayPayments.isNotEmpty ? todayPayments.first : null;
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 20),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          entry.loaneeName,
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1E1E1E),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Cust ID: ${entry.customerId} • Acc: ${entry.accountNumber}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: isCompleted
-                          ? Colors.teal.shade50
-                          : (hasPaidToday
-                              ? Colors.green.shade50
-                              : Colors.orange.shade50),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: isCompleted
-                            ? Colors.teal.shade300
-                            : (hasPaidToday
-                                ? Colors.green.shade300
-                                : Colors.orange.shade300),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          isCompleted
-                              ? Icons.verified_rounded
-                              : (hasPaidToday
-                                  ? Icons.check_circle_rounded
-                                  : Icons.access_time_rounded),
-                          size: 13,
-                          color: isCompleted
-                              ? Colors.teal.shade700
-                              : (hasPaidToday
-                                  ? Colors.green.shade700
-                                  : Colors.orange.shade800),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          isCompleted
-                              ? 'Loan Completed'
-                              : (hasPaidToday ? 'Collected Today' : 'Pending Today'),
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: isCompleted
-                                ? Colors.teal.shade900
-                                : (hasPaidToday
-                                    ? Colors.green.shade900
-                                    : Colors.orange.shade900),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (isCompleted) ...[
-                const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.teal.shade50,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.teal.shade300),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.verified_rounded, size: 18, color: Colors.teal.shade700),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          'Payment Completed: All loan amounts have been fully paid & cleared (₹0.00 Remaining Balance).',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF004D40),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              const Divider(height: 28),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _buildRouteBadge(entry.route),
-                  _buildCollectionTypeBadge(entry.collectionType),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.grey.shade200),
-                ),
-                child: Column(
-                  children: [
-                    Builder(
-                      builder: (context) {
-                        final settings = Provider.of<SettingsProvider>(context, listen: false);
-                        final breakdown = entry.getLoanBreakdown(
-                          loaneeLoanAmount: loanee?.loanAmount,
-                          configuredInterestRate: settings.investmentInterestRate,
-                          configuredBasePrincipal: settings.investmentBaseAmount,
-                          configuredBaseDailyAmount: settings.baseDailyAmount,
-                          configuredWeeklyInstallment: settings.weeklyInstallmentAmount,
-                        );
-                        final latePayable = settings.getLatePayableBreakdownForEntry(
-                          entry: entry,
-                          payments: payments,
-                          loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : entry.loanAmount,
-                          loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
-                          maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
-                          sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
-                        );
-                        final postMaturity = latePayable.postMaturityBreakdown;
-
-                        return Column(
-                          children: [
-                            _buildDetailRow(
-                              'Loan Amount (incl. interest)',
-                              '₹ ${breakdown.loanAmount.toStringAsFixed(2)}',
-                              Icons.account_balance_wallet_outlined,
-                              isBold: true,
-                              valueColor: const Color(0xFF8B1A1A),
-                            ),
-                            const Divider(height: 16),
-                            _buildDetailRow(
-                              'Base Installment (${entry.frequencyLabel})',
-                              '₹ ${latePayable.baseInstallment.toStringAsFixed(2)} / ${entry.frequencyLabel}',
-                              Icons.schedule_rounded,
-                              isBold: true,
-                              valueColor: entry.isDaily ? Colors.blue.shade800 : Colors.purple.shade800,
-                            ),
-                            if (postMaturity != null && postMaturity.isPastMaturity) ...[
-                              const Divider(height: 16),
-                              _buildDetailRow(
-                                'Amount Due Till Last Month',
-                                '₹ ${postMaturity.remainingBalance.toStringAsFixed(2)}',
-                                Icons.account_balance_wallet_outlined,
-                                isBold: true,
-                                valueColor: const Color(0xFF8B1A1A),
-                              ),
-                              const Divider(height: 16),
-                              _buildDetailRow(
-                                'Overdue Period Past Due Date',
-                                '${postMaturity.overdueMonths} Month(s)',
-                                Icons.timer_off_outlined,
-                                isBold: true,
-                                valueColor: Colors.amber.shade900,
-                              ),
-                              const Divider(height: 16),
-                              _buildDetailRow(
-                                'Overdue Assessment',
-                                'Overdue Compounded Interest (Active)',
-                                Icons.warning_amber_rounded,
-                                isBold: true,
-                                valueColor: Colors.red.shade900,
-                              ),
-                              const Divider(height: 16),
-                              _buildDetailRow(
-                                'Accrued Overdue Interest',
-                                '+ ₹ ${postMaturity.postMaturityInterestAmount.toStringAsFixed(2)}',
-                                Icons.percent_rounded,
-                                isBold: true,
-                                valueColor: Colors.red.shade800,
-                              ),
-                            ],
-                            const Divider(height: 16),
-                            _buildDetailRow(
-                              'Total Payable Today (Auto)',
-                              '₹ ${latePayable.totalPayableAmount.toStringAsFixed(2)}',
-                              Icons.payment_rounded,
-                              isBold: true,
-                              valueColor: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade800 : Colors.green.shade800,
-                            ),
-                            if (latePayable.previousUnpaidLateFee > 0) ...[
-                              const Divider(height: 16),
-                              _buildDetailRow(
-                                'Previous Unpaid Late Fee',
-                                '+ ₹ ${latePayable.previousUnpaidLateFee.toStringAsFixed(2)}',
-                                Icons.history_toggle_off_rounded,
-                                isBold: true,
-                                valueColor: Colors.orange.shade900,
-                              ),
-                              const Divider(height: 16),
-                              _buildDetailRow(
-                                'Total Outstanding Due',
-                                '₹ ${latePayable.totalOutstandingDue.toStringAsFixed(2)}',
-                                Icons.account_balance_wallet_rounded,
-                                isBold: true,
-                                valueColor: const Color(0xFF8B1A1A),
-                              ),
-                            ],
-                            const Divider(height: 16),
-                            _buildDetailRow(
-                              'Late Payment Fee (Auto)',
-                              '₹ ${latePayable.calculatedLateFine.toStringAsFixed(2)}',
-                              Icons.timer_off_outlined,
-                              isBold: true,
-                              valueColor: latePayable.calculatedLateFine > 0 ? Colors.red.shade800 : Colors.grey.shade700,
-                            ),
-                            if (isManager) ...[
-                              const Divider(height: 16),
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(10),
-                                margin: const EdgeInsets.only(bottom: 8),
-                                decoration: BoxDecoration(
-                                  color: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.amber.shade50 : Colors.grey.shade100,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: latePayable.isOverdue ? Colors.amber.shade300 : Colors.grey.shade300,
-                                  ),
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(
-                                      Icons.info_outline_rounded,
-                                      size: 16,
-                                      color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            'Payable Amount Rationale',
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.bold,
-                                              color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.black87,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            latePayable.explanation,
-                                            style: TextStyle(
-                                              fontSize: 10.5,
-                                              color: latePayable.isOverdue ? Colors.amber.shade900 : Colors.grey.shade700,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                            const Divider(height: 16),
-                          ],
-                        );
-                      },
-                    ),
-                    _buildDetailRow(
-                      'Total Collected',
-                      '₹ ${totalCollected.toStringAsFixed(2)}',
-                      Icons.payments_rounded,
-                      isBold: true,
-                    ),
-                    const Divider(height: 16),
-                    Builder(
-                      builder: (context) {
-                        final settings = Provider.of<SettingsProvider>(context, listen: false);
-                        final latePayable = settings.getLatePayableBreakdownForEntry(
-                          entry: entry,
-                          payments: payments,
-                          loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : entry.loanAmount,
-                          loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
-                          maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
-                          sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
-                        );
-                        final displayBal = (latePayable.postMaturityBreakdown?.isPastMaturity == true)
-                            ? latePayable.totalPayableAmount
-                            : remainingBal;
-                        return _buildDetailRow(
-                          'Remaining Balance',
-                          '₹ ${displayBal.toStringAsFixed(2)}',
-                          Icons.account_balance_wallet_rounded,
-                          isBold: true,
-                          valueColor: Colors.orange.shade800,
-                        );
-                      },
-                    ),
-                    const Divider(height: 16),
-                    _buildDetailRow(
-                      'Mobile Number',
-                      entry.mobileNo,
-                      Icons.phone_android_rounded,
-                    ),
-                    const Divider(height: 16),
-                    _buildDetailRow(
-                      'Loanee Address',
-                      entry.loaneeAddress,
-                      Icons.location_on_rounded,
-                    ),
-                    const Divider(height: 16),
-                    _buildDetailRow(
-                      'Collection Type',
-                      entry.collectionType,
-                      Icons.calendar_month_rounded,
-                    ),
-                    const Divider(height: 16),
-                    _buildDetailRow(
-                      'Route Zone',
-                      entry.route,
-                      Icons.alt_route_rounded,
-                    ),
-                    const Divider(height: 16),
-                    _buildDetailRow(
-                      'Loan Sanction Date',
-                      loanee?.formattedSanctionDate ?? 'N/A',
-                      Icons.calendar_today_rounded,
-                    ),
-                    const Divider(height: 16),
-                    _buildDetailRow(
-                      'Loan Maturity Date (5m)',
-                      loanee?.formattedMaturityDate ?? 'N/A',
-                      Icons.event_available_rounded,
-                      isBold: true,
-                      valueColor: Colors.teal.shade800,
-                    ),
-                    if (todayPayment != null) ...[
-                      const Divider(height: 16),
-                      _buildDetailRow(
-                        'Collected  By',
-                        todayPayment.roName ?? 'Field Officer',
-                        Icons.person_pin_rounded,
-                        isBold: true,
-                        valueColor: const Color(0xFF8B1A1A),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF8B1A1A),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _showPaymentHistoryModal(context, entry);
-                  },
-                  icon: const Icon(Icons.history_rounded, size: 18),
-                  label: const Text('View Today\'s Payment Record',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-              if (isAdmin) ...[
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.amber.shade800,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          Future.delayed(const Duration(milliseconds: 100), () {
-                            if (context.mounted) {
-                              EditCollectionEntryDialog.show(context, entry);
-                            }
-                          });
-                        },
-                        icon: const Icon(Icons.edit_document, size: 15),
-                        label: const Text('Edit Card',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                    if (loanee != null) ...[
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF8B1A1A),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          onPressed: () {
-                            Navigator.pop(ctx);
-                            Future.delayed(const Duration(milliseconds: 100), () {
-                              if (context.mounted) {
-                                EditLoaneeDialog.show(context, loanee);
-                              }
-                            });
-                          },
-                          icon: const Icon(Icons.person_rounded, size: 15),
-                          label: const Text('Edit Loanee',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red.shade700,
-                      side: BorderSide(color: Colors.red.shade300),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      final confirmed =
-                          await _showSweetAlertDeleteConfirm(context, entry);
-                      if (confirmed && context.mounted) {
-                        Provider.of<CollectionSheetProvider>(context,
-                                listen: false)
-                            .deleteCollectionEntry(entry.id);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                                'Entry for ${entry.loaneeName} deleted.'),
-                            backgroundColor: Colors.red.shade700,
-                          ),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.delete_outline_rounded, size: 15),
-                    label: const Text('Delete Entry', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
+      builder: (ctx) => _RoCollectionDetailsModalSheet(
+        entry: entry,
+        onShowPaymentHistory: (e) => _showPaymentHistoryModal(context, e),
+        onDeleteConfirm: (e, totalCollected, remainingBal) =>
+            _showSweetAlertDeleteConfirm(context, e,
+                knownTotalCollected: totalCollected,
+                knownRemainingBal: remainingBal),
       ),
     );
   }
@@ -1401,34 +873,6 @@ class _RoCollectionSheetViewPageState
           ),
         );
       },
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value, IconData icon,
-      {bool isBold = false, Color? valueColor}) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: Colors.grey.shade600),
-        const SizedBox(width: 10),
-        Text(
-          label,
-          style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-        ),
-        const Spacer(),
-        Flexible(
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
-              color: valueColor ??
-                  (isBold ? Colors.black87 : Colors.grey.shade800),
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -3109,42 +2553,127 @@ class _RoCollectionSheetViewPageState
       },
     );
   }
+}
 
-  Widget _buildCollectionTypeBadge(String type) {
-    Color bg;
-    Color fg;
-    switch (type.toLowerCase()) {
-      case "daily":
-        bg = Colors.purple.shade50;
-        fg = Colors.purple.shade800;
-        break;
-      case "mon":
-      case "tue":
-      case "wed":
-        bg = Colors.blue.shade50;
-        fg = Colors.blue.shade800;
-        break;
-      default:
-        bg = Colors.teal.shade50;
-        fg = Colors.teal.shade800;
-        break;
+/// Loanee / Collection Details Modal Bottom Sheet
+class _RoCollectionDetailsModalSheet extends StatefulWidget {
+  final RoCollectionEntry entry;
+  final void Function(RoCollectionEntry entry) onShowPaymentHistory;
+  final Future<bool> Function(
+          RoCollectionEntry entry, double totalCollected, double remainingBal)
+      onDeleteConfirm;
+
+  const _RoCollectionDetailsModalSheet({
+    required this.entry,
+    required this.onShowPaymentHistory,
+    required this.onDeleteConfirm,
+  });
+
+  static String _formatCurrency(double amount) {
+    final isNegative = amount < 0;
+    final parts = amount.abs().toStringAsFixed(2).split('.');
+    final intFormatted = parts[0].replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (m) => '${m[1]},',
+    );
+    return isNegative ? '-$intFormatted.${parts[1]}' : '$intFormatted.${parts[1]}';
+  }
+
+  @override
+  State<_RoCollectionDetailsModalSheet> createState() =>
+      _RoCollectionDetailsModalSheetState();
+}
+
+class _RoCollectionDetailsModalSheetState
+    extends State<_RoCollectionDetailsModalSheet> {
+  bool _isLoading = true;
+  bool _isDbLoaded = false;
+  double _totalCollected = 0.0;
+  double _totalInterest = 0.0;
+  List<CollectionPaymentModel> _payments = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCollectionDetailsFromDb();
+  }
+
+  Future<void> _fetchCollectionDetailsFromDb() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final supaClient = SupabaseService.instance.client;
+      if (supaClient != null && widget.entry.id.isNotEmpty) {
+        // Calculate Total Collected directly from public.ro_collection_payments
+        // Equivalent to:
+        // SELECT COALESCE(SUM(payment_amount), 0)
+        // FROM public.ro_collection_payments
+        // WHERE collection_id = <widget.entry.id>;
+        final sumData = await supaClient
+            .from('ro_collection_payments')
+            .select('payment_amount')
+            .eq('collection_id', widget.entry.id) as List<dynamic>?;
+        final paymentsList = await SupabaseService.instance
+            .fetchPaymentsForCollection(widget.entry.id) ?? [];
+
+        double calculatedTotalCollected = 0.0;
+
+        if (sumData != null && sumData.isNotEmpty) {
+          for (final row in sumData) {
+            final amt = row['payment_amount'];
+            if (amt != null) {
+              if (amt is num) {
+                calculatedTotalCollected += amt.toDouble();
+              } else {
+                calculatedTotalCollected += double.tryParse(amt.toString()) ?? 0.0;
+              }
+            }
+          }
+        } else if (paymentsList.isNotEmpty) {
+          for (final p in paymentsList) {
+            calculatedTotalCollected += p.paymentAmount;
+          }
+        }
+
+        if (mounted) {
+          final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+          setState(() {
+            _totalCollected = calculatedTotalCollected;
+            _totalInterest = cp.getTotalInterestForCollection(widget.entry.id);
+            _payments = paymentsList;
+            _isLoading = false;
+            _isDbLoaded = true;
+          });
+
+          // Sync into CollectionSheetProvider so app-wide cache stays in sync
+          try {
+            final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+            if (paymentsList.isNotEmpty) {
+              cp.mergePayments(paymentsList);
+            }
+            cp.fetchTotalCollectedForCollection(widget.entry.id);
+          } catch (_) {}
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading direct DB payments for collection ${widget.entry.id}: $e');
     }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        type,
-        style: TextStyle(
-          color: fg,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
+    if (mounted) {
+      // Safe fallback if offline / error: handle safely and return 0.00 or provider data
+      final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+      setState(() {
+        _totalCollected = cp.getTotalPaidForCollection(widget.entry.id);
+        _totalInterest = cp.getTotalInterestForCollection(widget.entry.id);
+        _payments = cp.getPaymentsForCollection(widget.entry.id);
+        _isLoading = false;
+        _isDbLoaded = true;
+      });
+    }
   }
 
   Widget _buildRouteBadge(String route) {
@@ -3176,6 +2705,809 @@ class _RoCollectionSheetViewPageState
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCollectionTypeBadge(String type) {
+    final isDaily = type.toLowerCase() == 'daily';
+    final bg = isDaily ? Colors.blue.shade50 : Colors.purple.shade50;
+    final fg = isDaily ? Colors.blue.shade900 : Colors.purple.shade900;
+    final border = isDaily ? Colors.blue.shade300 : Colors.purple.shade300;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        type,
+        style: TextStyle(
+          color: fg,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactInfoItem(String label, String value, IconData icon) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: Colors.grey.shade600),
+        const SizedBox(width: 4),
+        Text(
+          '$label: ',
+          style: TextStyle(
+            fontSize: 11,
+            color: Colors.grey.shade600,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = widget.entry;
+    final authProvider =
+        Provider.of<AuthProvider>(context, listen: false);
+    final isAdmin = authProvider.activeRole == UserType.admin;
+    final isManager = authProvider.activeRole == UserType.manager ||
+        authProvider.currentUser?.userType == UserType.manager;
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context, listen: false);
+    final loaneeProvider =
+        Provider.of<LoaneeProvider>(context, listen: false);
+    final loanee = loaneeProvider.getLoaneeForUser(
+      customerId: entry.customerId,
+      mobileNo: entry.mobileNo,
+      name: entry.loaneeName,
+    );
+
+    // Use DB result as single source of truth; safe initial fallback if loading
+    final totalCollected = _isDbLoaded
+        ? _totalCollected
+        : collectionProvider.getTotalPaidForCollection(entry.id);
+    final totalInterest = _isDbLoaded
+        ? _totalInterest
+        : collectionProvider.getTotalInterestForCollection(entry.id);
+    final payments = _isDbLoaded
+        ? _payments
+        : collectionProvider.getPaymentsForCollection(entry.id);
+
+    final totalLoanAmount = (entry.loanAmount != null && entry.loanAmount! > 0)
+        ? entry.loanAmount!
+        : ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : entry.initialBalance);
+
+    // Remaining Balance depends directly on corrected totalCollected
+    final remainingBal =
+        (totalLoanAmount + totalInterest - totalCollected).clamp(0.0, double.infinity);
+    final isCompleted =
+        remainingBal <= 0.01 || collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider);
+    final now = DateTime.now();
+    final todayPayments = payments.where((p) =>
+        p.createdAt.year == now.year &&
+        p.createdAt.month == now.month &&
+        p.createdAt.day == now.day).toList();
+    final hasPaidToday = todayPayments.isNotEmpty || collectionProvider.hasPaymentForDate(entry.id);
+    final todayPayment = todayPayments.isNotEmpty ? todayPayments.first : null;
+
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    final breakdown = entry.getLoanBreakdown(
+      loaneeLoanAmount: loanee?.loanAmount,
+      configuredInterestRate: settings.investmentInterestRate,
+      configuredBasePrincipal: settings.investmentBaseAmount,
+      configuredBaseDailyAmount: settings.baseDailyAmount,
+      configuredWeeklyInstallment: settings.weeklyInstallmentAmount,
+    );
+    final latePayable = settings.getLatePayableBreakdownForEntry(
+      entry: entry,
+      payments: payments,
+      loaneeLoanAmount: (loanee != null && loanee.loanAmount > 0) ? loanee.loanAmount : entry.loanAmount,
+      loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
+      maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
+      sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
+      overrideTotalPaid: totalCollected,
+    );
+    final postMaturity = latePayable.postMaturityBreakdown;
+    final displayBal = (postMaturity?.isPastMaturity == true)
+        ? latePayable.totalPayableAmount
+        : remainingBal;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Drag Handle
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+
+            // Top Header: Icon + Title + Refresh + Close Button
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.receipt_long_rounded,
+                    color: Color(0xFF8B1A1A),
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Collection Details',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E1E1E),
+                        ),
+                      ),
+                      Text(
+                        'Cust ID: ${entry.customerId} • Acc: ${entry.accountNumber}',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh details from database',
+                  icon: _isLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFF8B1A1A),
+                          ),
+                        )
+                      : const Icon(Icons.refresh_rounded, size: 20, color: Colors.grey),
+                  onPressed: _isLoading ? null : _fetchCollectionDetailsFromDb,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 22),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // Loanee Profile Card
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 17,
+                        backgroundColor: Colors.amber.shade100,
+                        child: Text(
+                          entry.loaneeName.isNotEmpty
+                              ? entry.loaneeName[0].toUpperCase()
+                              : 'L',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.amber.shade900,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              entry.loaneeName,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1E1E1E),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '📞 ${entry.mobileNo}${entry.loaneeAddress.isNotEmpty ? ' • 📍 ${entry.loaneeAddress}' : ''}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      _buildRouteBadge(entry.route),
+                      _buildCollectionTypeBadge(entry.collectionType),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isCompleted
+                              ? Colors.teal.shade50
+                              : (hasPaidToday ? Colors.green.shade50 : Colors.orange.shade50),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isCompleted
+                                ? Colors.teal.shade300
+                                : (hasPaidToday ? Colors.green.shade300 : Colors.orange.shade300),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isCompleted
+                                  ? Icons.verified_rounded
+                                  : (hasPaidToday ? Icons.check_circle_rounded : Icons.access_time_rounded),
+                              size: 12,
+                              color: isCompleted
+                                  ? Colors.teal.shade700
+                                  : (hasPaidToday ? Colors.green.shade700 : Colors.orange.shade800),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              isCompleted
+                                  ? 'Loan Completed'
+                                  : (hasPaidToday ? 'Collected Today' : 'Pending Today'),
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: isCompleted
+                                    ? Colors.teal.shade900
+                                    : (hasPaidToday ? Colors.green.shade900 : Colors.orange.shade900),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (isCompleted) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.teal.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.teal.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.verified_rounded, size: 14, color: Colors.teal.shade700),
+                          const SizedBox(width: 6),
+                          const Expanded(
+                            child: Text(
+                              'Loan fully paid & cleared (₹0.00 Remaining Balance).',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF004D40),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // HERO METRIC CARDS (Total Collected & Remaining Balance)
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFA5D6A7)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.payments_rounded, size: 15, color: Colors.green.shade800),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Total Collected',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green.shade800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(totalCollected)}',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isCompleted ? Colors.teal.shade50 : const Color(0xFFFFF3E0),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isCompleted ? Colors.teal.shade300 : const Color(0xFFFFCC80),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.account_balance_wallet_rounded,
+                              size: 15,
+                              color: isCompleted ? Colors.teal.shade800 : Colors.orange.shade900,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Remaining Balance',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: isCompleted ? Colors.teal.shade800 : Colors.orange.shade900,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(displayBal)}',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isCompleted ? Colors.teal.shade900 : const Color(0xFF8B1A1A),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            // Secondary Metrics (Loan Amount & Base Installment)
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Loan Amount (incl. int.)',
+                          style: TextStyle(fontSize: 10.5, color: Colors.grey.shade700),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(breakdown.loanAmount)}',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E1E1E),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Base Installment (${entry.frequencyLabel})',
+                          style: TextStyle(fontSize: 10.5, color: Colors.grey.shade700),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.baseInstallment)}',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                            color: entry.isDaily ? Colors.blue.shade900 : Colors.purple.shade900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            // Today's Payable Row
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true))
+                    ? Colors.red.shade50
+                    : Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true))
+                      ? Colors.red.shade200
+                      : Colors.blue.shade200,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.payment_rounded,
+                        size: 15,
+                        color: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true))
+                            ? Colors.red.shade800
+                            : Colors.blue.shade800,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Total Payable Today:',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.bold,
+                          color: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true))
+                              ? Colors.red.shade900
+                              : Colors.blue.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.totalPayableAmount)}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: (latePayable.isOverdue || (postMaturity?.isPastMaturity == true))
+                          ? Colors.red.shade900
+                          : Colors.blue.shade900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            if (latePayable.calculatedLateFine > 0 || latePayable.previousUnpaidLateFee > 0) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  if (latePayable.calculatedLateFine > 0)
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.red.shade200),
+                        ),
+                        child: Text(
+                          'Late Fine: ₹${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.calculatedLateFine)}',
+                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.red.shade800),
+                        ),
+                      ),
+                    ),
+                  if (latePayable.calculatedLateFine > 0 && latePayable.previousUnpaidLateFee > 0)
+                    const SizedBox(width: 6),
+                  if (latePayable.previousUnpaidLateFee > 0)
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.orange.shade200),
+                        ),
+                        child: Text(
+                          'Unpaid Fine: ₹${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.previousUnpaidLateFee)}',
+                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+
+            if (postMaturity != null && postMaturity.isPastMaturity) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade300),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 14, color: Colors.red.shade800),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Past Due (${postMaturity.overdueMonths}m overdue): Overdue interest +₹${_RoCollectionDetailsModalSheet._formatCurrency(postMaturity.postMaturityInterestAmount)} applied on remaining balance ₹${_RoCollectionDetailsModalSheet._formatCurrency(postMaturity.remainingBalance)}.',
+                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.red.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            if (isManager) ...[
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 14, color: Colors.amber.shade900),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        latePayable.explanation,
+                        style: TextStyle(fontSize: 10, color: Colors.amber.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 8),
+
+            // Dates and Officers Summary
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildCompactInfoItem('Sanction Date', loanee?.formattedSanctionDate ?? 'N/A', Icons.calendar_today_rounded),
+                      _buildCompactInfoItem('Maturity (5m)', loanee?.formattedMaturityDate ?? 'N/A', Icons.event_available_rounded),
+                    ],
+                  ),
+                  if (todayPayment != null) ...[
+                    const Divider(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _buildCompactInfoItem('Collected By', todayPayment.roName ?? 'Field Officer', Icons.person_pin_rounded),
+                        _buildCompactInfoItem('Time', todayPayment.createdAt.toString().split('.')[0], Icons.schedule_rounded),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Action Buttons
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF8B1A1A),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.pop(context);
+                  widget.onShowPaymentHistory(entry);
+                },
+                icon: const Icon(Icons.history_rounded, size: 16),
+                label: const Text('View Payment Record',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+              ),
+            ),
+
+            if (isAdmin) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.amber.shade900,
+                        side: BorderSide(color: Colors.amber.shade400),
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        Future.delayed(const Duration(milliseconds: 100), () {
+                          if (context.mounted) {
+                            EditCollectionEntryDialog.show(context, entry);
+                          }
+                        });
+                      },
+                      icon: const Icon(Icons.edit_document, size: 13),
+                      label: const Text('Edit Card', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  if (loanee != null) ...[
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF8B1A1A),
+                          side: const BorderSide(color: Color(0xFF8B1A1A)),
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          Future.delayed(const Duration(milliseconds: 100), () {
+                            if (context.mounted) {
+                              EditLoaneeDialog.show(context, loanee);
+                            }
+                          });
+                        },
+                        icon: const Icon(Icons.person_rounded, size: 13),
+                        label: const Text('Edit Loanee', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red.shade700,
+                        side: BorderSide(color: Colors.red.shade300),
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        final confirmed =
+                            await widget.onDeleteConfirm(entry, totalCollected, displayBal);
+                        if (confirmed && context.mounted) {
+                          Provider.of<CollectionSheetProvider>(context,
+                                  listen: false)
+                              .deleteCollectionEntry(entry.id);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                  'Entry for ${entry.loaneeName} deleted.'),
+                              backgroundColor: Colors.red.shade700,
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.delete_outline_rounded, size: 13),
+                      label: const Text('Delete', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
