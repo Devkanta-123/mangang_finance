@@ -109,6 +109,30 @@ class CollectionSheetProvider extends ChangeNotifier {
     return cardPayments.fold(0.0, (sum, p) => sum + p.interest);
   }
 
+  /// Calculate total daily/weekly late payment fees for a collection card ID from payment table
+  double getTotalLatePaymentFeesForCollection(String collectionId) {
+    final cardPayments = getPaymentsForCollection(collectionId);
+    return cardPayments.fold(0.0, (sum, p) {
+      if (p.lateFine > 0) return sum + p.lateFine;
+      if (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false)) {
+        return sum + p.interest;
+      }
+      return sum;
+    });
+  }
+
+  /// Calculate total post-maturity interest/fine for a collection card ID from payment table
+  double getTotalPostMaturityInterestForCollection(String collectionId) {
+    final cardPayments = getPaymentsForCollection(collectionId);
+    return cardPayments.fold(0.0, (sum, p) {
+      if (p.postMaturityInterest > 0) return sum + p.postMaturityInterest;
+      if (p.remarks?.toLowerCase().contains('post maturity') ?? false) {
+        return sum + p.interest;
+      }
+      return sum;
+    });
+  }
+
   /// Calculate today's amount paid for a collection card ID strictly from payment table
   double getTodayPaidForCollection(String collectionId, [DateTime? targetDate]) {
     final date = targetDate ?? DateTime.now();

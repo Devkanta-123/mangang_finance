@@ -104,6 +104,28 @@ class _HistoricalPaymentImportDialogState
                   color: Colors.green.shade800,
                 ),
               ),
+              if (result.totalLateFeesImported > 0) ...[
+                const SizedBox(height: 4),
+                Text(
+                  "Daily/Weekly Late Fees: ₹${result.totalLateFeesImported.toStringAsFixed(2)}",
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.orange.shade900,
+                  ),
+                ),
+              ],
+              if (result.totalPostMatImported > 0) ...[
+                const SizedBox(height: 4),
+                Text(
+                  "Post Maturity Fine: ₹${result.totalPostMatImported.toStringAsFixed(2)}",
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.purple.shade900,
+                  ),
+                ),
+              ],
               if (result.totalInterestImported > 0) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -321,6 +343,24 @@ class _HistoricalPaymentImportDialogState
                     color: Colors.green.shade900,
                     bgColor: Colors.green.shade50,
                   ),
+                  if (preview.totalLateFeesToImport > 0) ...[
+                    const SizedBox(width: 8),
+                    _buildStatChip(
+                      title: "Late Payment Fees",
+                      value: "₹${preview.totalLateFeesToImport.toStringAsFixed(2)}",
+                      color: Colors.orange.shade900,
+                      bgColor: Colors.orange.shade50,
+                    ),
+                  ],
+                  if (preview.totalPostMatToImport > 0) ...[
+                    const SizedBox(width: 8),
+                    _buildStatChip(
+                      title: "Post Maturity Fine",
+                      value: "₹${preview.totalPostMatToImport.toStringAsFixed(2)}",
+                      color: Colors.purple.shade900,
+                      bgColor: Colors.purple.shade50,
+                    ),
+                  ],
                   if (preview.totalInterestToImport > 0) ...[
                     const SizedBox(width: 8),
                     _buildStatChip(
@@ -664,7 +704,16 @@ class _HistoricalPaymentImportDialogState
                   }
 
                   final dupLabel = isDup ? " (Dup)" : "";
-                  final interestLabel = p.interest > 0 ? " (+₹${p.interest.toStringAsFixed(0)} int)" : "";
+                  String interestLabel = "";
+                  if (p.latePaymentFee > 0 && p.postMaturityInterest > 0) {
+                    interestLabel = " (+₹${p.latePaymentFee.toStringAsFixed(0)} late, +₹${p.postMaturityInterest.toStringAsFixed(0)} post-mat)";
+                  } else if (p.postMaturityInterest > 0) {
+                    interestLabel = " (+₹${p.postMaturityInterest.toStringAsFixed(0)} post-mat)";
+                  } else if (p.latePaymentFee > 0) {
+                    interestLabel = " (+₹${p.latePaymentFee.toStringAsFixed(0)} late fee)";
+                  } else if (p.interest > 0) {
+                    interestLabel = " (+₹${p.interest.toStringAsFixed(0)} int)";
+                  }
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(

@@ -1698,7 +1698,9 @@ class SupabaseService {
     cleaned.remove('interest');
     cleaned.remove('interest_amount');
     cleaned.remove('interestAmount');
-    cleaned.remove('ro_route');
+    cleaned.remove('postMaturityInterest');
+    cleaned.remove('late_payment_fee');
+    cleaned.remove('latePaymentFee');
     return cleaned;
   }
 
@@ -1715,7 +1717,9 @@ class SupabaseService {
               .select();
         } catch (colErr) {
           debugPrint('⚠️ Upsert ro_collection_payments fallback note: $colErr');
-          final safePayload = Map<String, dynamic>.from(payload)..remove('ro_route');
+          final safePayload = Map<String, dynamic>.from(payload)
+            ..remove('ro_route')
+            ..remove('post_maturity_interest');
           await supaClient
               .from('ro_collection_payments')
               .upsert(safePayload, onConflict: 'id')
@@ -1750,6 +1754,7 @@ class SupabaseService {
             final safeChunk = chunk.map((m) {
               final copy = Map<String, dynamic>.from(m);
               copy.remove('ro_route');
+              copy.remove('post_maturity_interest');
               return copy;
             }).toList();
             await supaClient

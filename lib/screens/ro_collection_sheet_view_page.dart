@@ -574,54 +574,132 @@ class _RoCollectionSheetViewPageState
                                             color: Colors.blue.shade900),
                                       ),
                                     ),
-                                    if (p.interest > 0) ...[
-                                      const SizedBox(width: 6),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.deepOrange.shade50,
-                                          borderRadius: BorderRadius.circular(6),
-                                          border: Border.all(color: Colors.deepOrange.shade200),
-                                        ),
-                                        child: Text(
-                                          'Int: +₹${p.interest.toStringAsFixed(0)}',
-                                          style: TextStyle(
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.deepOrange.shade900),
-                                        ),
-                                      ),
-                                    ],
+                                    Builder(
+                                      builder: (context) {
+                                        final lateFeeVal = p.lateFine > 0
+                                            ? p.lateFine
+                                            : (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false) ? p.interest : 0.0);
+                                        final postMatVal = p.postMaturityInterest > 0
+                                            ? p.postMaturityInterest
+                                            : ((p.remarks?.toLowerCase().contains('post maturity') ?? false) ? p.interest : 0.0);
+                                        final totalIntVal = p.interest > 0 ? p.interest : (lateFeeVal + postMatVal);
+
+                                        return Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (lateFeeVal > 0) ...[
+                                              const SizedBox(width: 5),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.orange.shade50,
+                                                  borderRadius: BorderRadius.circular(5),
+                                                  border: Border.all(color: Colors.orange.shade300),
+                                                ),
+                                                child: Text(
+                                                  'Late: +₹${lateFeeVal.toStringAsFixed(0)}',
+                                                  style: TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.orange.shade900,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                            if (postMatVal > 0) ...[
+                                              const SizedBox(width: 5),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.purple.shade50,
+                                                  borderRadius: BorderRadius.circular(5),
+                                                  border: Border.all(color: Colors.purple.shade300),
+                                                ),
+                                                child: Text(
+                                                  'Post-Mat: +₹${postMatVal.toStringAsFixed(0)}',
+                                                  style: TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.purple.shade900,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                            if (totalIntVal > 0 && lateFeeVal == 0 && postMatVal == 0) ...[
+                                              const SizedBox(width: 5),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.deepOrange.shade50,
+                                                  borderRadius: BorderRadius.circular(5),
+                                                  border: Border.all(color: Colors.deepOrange.shade200),
+                                                ),
+                                                child: Text(
+                                                  'Int: +₹${totalIntVal.toStringAsFixed(0)}',
+                                                  style: TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.deepOrange.shade900,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        );
+                                      },
+                                    ),
                                   ],
                                 ),
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          'Bal: ₹${p.remainingBalance.toStringAsFixed(0)}',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.orange.shade900,
-                                          ),
-                                        ),
-                                        if (p.lateFine > 0)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 2),
-                                            child: Text(
-                                              'Fine: ₹${p.lateFine.toStringAsFixed(0)}',
+                                    Builder(
+                                      builder: (context) {
+                                        final lateFeeVal = p.lateFine > 0
+                                            ? p.lateFine
+                                            : (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false) ? p.interest : 0.0);
+                                        final postMatVal = p.postMaturityInterest > 0
+                                            ? p.postMaturityInterest
+                                            : ((p.remarks?.toLowerCase().contains('post maturity') ?? false) ? p.interest : 0.0);
+
+                                        return Column(
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          children: [
+                                            Text(
+                                              'Bal: ₹${p.remainingBalance.toStringAsFixed(0)}',
                                               style: TextStyle(
-                                                fontSize: 10,
+                                                fontSize: 11,
                                                 fontWeight: FontWeight.bold,
-                                                color: Colors.red.shade700,
+                                                color: Colors.orange.shade900,
                                               ),
                                             ),
-                                          ),
-                                      ],
+                                            if (lateFeeVal > 0)
+                                              Padding(
+                                                padding: const EdgeInsets.only(top: 2),
+                                                child: Text(
+                                                  'Late: ₹${lateFeeVal.toStringAsFixed(0)}',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.orange.shade900,
+                                                  ),
+                                                ),
+                                              ),
+                                            if (postMatVal > 0)
+                                              Padding(
+                                                padding: const EdgeInsets.only(top: 2),
+                                                child: Text(
+                                                  'Post-Mat: ₹${postMatVal.toStringAsFixed(0)}',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.purple.shade800,
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
+                                        );
+                                      },
                                     ),
                                     const SizedBox(width: 8),
                                     IconButton(
@@ -2591,6 +2669,8 @@ class _RoCollectionDetailsModalSheetState
   bool _isDbLoaded = false;
   double _totalCollected = 0.0;
   double _totalInterest = 0.0;
+  double _totalLateFees = 0.0;
+  double _totalPostMaturityInterest = 0.0;
   List<CollectionPaymentModel> _payments = [];
 
   @override
@@ -2639,11 +2719,42 @@ class _RoCollectionDetailsModalSheetState
           }
         }
 
+        double calculatedInterest = 0.0;
+        double calculatedLateFees = 0.0;
+        double calculatedPostMat = 0.0;
+
+        for (final p in paymentsList) {
+          calculatedInterest += p.interest;
+          final lateFeeVal = p.lateFine > 0
+              ? p.lateFine
+              : (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false) ? p.interest : 0.0);
+          final postMatVal = p.postMaturityInterest > 0
+              ? p.postMaturityInterest
+              : ((p.remarks?.toLowerCase().contains('post maturity') ?? false) ? p.interest : 0.0);
+          calculatedLateFees += lateFeeVal;
+          calculatedPostMat += postMatVal;
+        }
+
         if (mounted) {
           final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+          if (calculatedInterest == 0.0) {
+            calculatedInterest = cp.getTotalInterestForCollection(widget.entry.id);
+          }
+          if (calculatedLateFees == 0.0) {
+            calculatedLateFees = cp.getTotalLatePaymentFeesForCollection(widget.entry.id);
+          }
+          if (calculatedPostMat == 0.0) {
+            calculatedPostMat = cp.getTotalPostMaturityInterestForCollection(widget.entry.id);
+          }
+          if (calculatedInterest == 0.0 && (calculatedLateFees > 0 || calculatedPostMat > 0)) {
+            calculatedInterest = calculatedLateFees + calculatedPostMat;
+          }
+
           setState(() {
             _totalCollected = calculatedTotalCollected;
-            _totalInterest = cp.getTotalInterestForCollection(widget.entry.id);
+            _totalInterest = calculatedInterest;
+            _totalLateFees = calculatedLateFees;
+            _totalPostMaturityInterest = calculatedPostMat;
             _payments = paymentsList;
             _isLoading = false;
             _isDbLoaded = true;
@@ -2651,7 +2762,6 @@ class _RoCollectionDetailsModalSheetState
 
           // Sync into CollectionSheetProvider so app-wide cache stays in sync
           try {
-            final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
             if (paymentsList.isNotEmpty) {
               cp.mergePayments(paymentsList);
             }
@@ -2670,6 +2780,8 @@ class _RoCollectionDetailsModalSheetState
       setState(() {
         _totalCollected = cp.getTotalPaidForCollection(widget.entry.id);
         _totalInterest = cp.getTotalInterestForCollection(widget.entry.id);
+        _totalLateFees = cp.getTotalLatePaymentFeesForCollection(widget.entry.id);
+        _totalPostMaturityInterest = cp.getTotalPostMaturityInterestForCollection(widget.entry.id);
         _payments = cp.getPaymentsForCollection(widget.entry.id);
         _isLoading = false;
         _isDbLoaded = true;
@@ -2730,6 +2842,15 @@ class _RoCollectionDetailsModalSheetState
     final totalInterest = _isDbLoaded
         ? _totalInterest
         : collectionProvider.getTotalInterestForCollection(entry.id);
+    final totalLateFees = _isDbLoaded
+        ? _totalLateFees
+        : collectionProvider.getTotalLatePaymentFeesForCollection(entry.id);
+    final totalPostMaturityInterest = _isDbLoaded
+        ? _totalPostMaturityInterest
+        : collectionProvider.getTotalPostMaturityInterestForCollection(entry.id);
+    final effectiveTotalInterest = totalInterest > 0
+        ? totalInterest
+        : (totalLateFees + totalPostMaturityInterest);
     final payments = _isDbLoaded
         ? _payments
         : collectionProvider.getPaymentsForCollection(entry.id);
@@ -2740,9 +2861,11 @@ class _RoCollectionDetailsModalSheetState
             ? loanee.loanAmount
             : entry.initialBalance);
 
-    // Remaining Balance depends directly on corrected totalCollected
+    // Remaining Balance depends directly on corrected totalCollected and total interest
     final remainingBal =
-        (totalLoanAmount + totalInterest - totalCollected).clamp(0.0, double.infinity);
+        (totalLoanAmount + effectiveTotalInterest - totalCollected).clamp(0.0, double.infinity);
+    final remainingBeforeInterest =
+        (totalLoanAmount - totalCollected).clamp(0.0, double.infinity);
     final isCompleted =
         remainingBal <= 0.01 || collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider);
     final now = DateTime.now();
@@ -3041,6 +3164,46 @@ class _RoCollectionDetailsModalSheetState
                       Text('₹ ${_RoCollectionDetailsModalSheet._formatCurrency(totalCollected)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.green.shade800)),
                     ],
                   ),
+                  if (effectiveTotalInterest > 0 || totalLateFees > 0 || totalPostMaturityInterest > 0) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Balance (before overdue/interest):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                        Text('₹ ${_RoCollectionDetailsModalSheet._formatCurrency(remainingBeforeInterest)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade800)),
+                      ],
+                    ),
+                  ],
+                  if (totalLateFees > 0) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Daily/Weekly Late Payment Fees:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900)),
+                        Text('+ ₹ ${_RoCollectionDetailsModalSheet._formatCurrency(totalLateFees)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade900)),
+                      ],
+                    ),
+                  ],
+                  if (totalPostMaturityInterest > 0) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Post Maturity Fine Payment:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.purple.shade900)),
+                        Text('+ ₹ ${_RoCollectionDetailsModalSheet._formatCurrency(totalPostMaturityInterest)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.purple.shade900)),
+                      ],
+                    ),
+                  ],
+                  if (effectiveTotalInterest > 0 && (totalLateFees > 0 && totalPostMaturityInterest > 0)) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Total Overdue / Additional Interest:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.red.shade900)),
+                        Text('+ ₹ ${_RoCollectionDetailsModalSheet._formatCurrency(effectiveTotalInterest)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.red.shade900)),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 6),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -3345,25 +3508,48 @@ class _RoCollectionDetailsModalSheetState
             const SizedBox(height: 12),
 
             // Action Buttons
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF8B1A1A),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF8B1A1A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      widget.onShowPaymentHistory(entry);
+                    },
+                    icon: const Icon(Icons.history_rounded, size: 16),
+                    label: const Text('Today\'s Records',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                 ),
-                onPressed: () {
-                  Navigator.pop(context);
-                  widget.onShowPaymentHistory(entry);
-                },
-                icon: const Icon(Icons.history_rounded, size: 16),
-                label: const Text('View Payment Record',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E1E1E),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _LoanPaymentHistoryDialog.show(context, entry);
+                    },
+                    icon: const Icon(Icons.table_chart_outlined, size: 16),
+                    label: const Text('Full History Table',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
             ),
 
             if (isAdmin) ...[
@@ -3873,7 +4059,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
+        constraints: const BoxConstraints(maxWidth: 900),
         child: Padding(
           padding: const EdgeInsets.all(20.0),
           child: Column(
@@ -3966,6 +4152,64 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                 ),
               ),
 
+              const SizedBox(height: 8),
+
+              // Payment History & Interest Breakdown Banner
+              Builder(
+                builder: (context) {
+                  final cp = widget.collectionProvider;
+                  final totalPaid = cp.getTotalPaidForCollection(entry.id);
+                  final totalLateFees = cp.getTotalLatePaymentFeesForCollection(entry.id);
+                  final totalPostMat = cp.getTotalPostMaturityInterestForCollection(entry.id);
+                  final totalInt = cp.getTotalInterestForCollection(entry.id);
+                  final effectiveInt = totalInt > 0 ? totalInt : (totalLateFees + totalPostMat);
+                  final loanAmt = loanee?.loanAmount ?? entry.loanAmount ?? entry.initialBalance;
+                  final remaining = (loanAmt + effectiveInt - totalPaid).clamp(0.0, double.infinity);
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B1A1A).withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.15)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _buildMetricItem(
+                          label: "Total Collected",
+                          value: "₹${totalPaid.toStringAsFixed(2)}",
+                          valueColor: Colors.green.shade800,
+                        ),
+                        if (totalLateFees > 0)
+                          _buildMetricItem(
+                            label: "Daily/Wkly Late Fees",
+                            value: "₹${totalLateFees.toStringAsFixed(2)}",
+                            valueColor: Colors.orange.shade900,
+                          ),
+                        if (totalPostMat > 0)
+                          _buildMetricItem(
+                            label: "Post Maturity Fine",
+                            value: "₹${totalPostMat.toStringAsFixed(2)}",
+                            valueColor: Colors.purple.shade900,
+                          ),
+                        if (effectiveInt > 0)
+                          _buildMetricItem(
+                            label: "Total Overdue Interest",
+                            value: "₹${effectiveInt.toStringAsFixed(2)}",
+                            valueColor: Colors.deepOrange.shade900,
+                          ),
+                        _buildMetricItem(
+                          label: "Remaining Balance",
+                          value: "₹${remaining.toStringAsFixed(2)}",
+                          valueColor: remaining > 0 ? Colors.red.shade900 : Colors.green.shade800,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
               const SizedBox(height: 16),
 
               // Payments Table
@@ -4000,7 +4244,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 640),
+                    constraints: const BoxConstraints(minWidth: 900),
                     child: DataTable(
                       sortColumnIndex: 0,
                       sortAscending: _ascending,
@@ -4012,7 +4256,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                       ),
                       dataRowMaxHeight: 48,
                       dataRowMinHeight: 40,
-                      columnSpacing: 16,
+                      columnSpacing: 14,
                       horizontalMargin: 12,
                       columns: [
                         DataColumn(
@@ -4038,9 +4282,10 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                           },
                         ),
                         const DataColumn(label: Text("Amount")),
+                        const DataColumn(label: Text("Daily/Wkly Late Fee")),
+                        const DataColumn(label: Text("Post Maturity Fine")),
                         const DataColumn(label: Text("Interest")),
                         const DataColumn(label: Text("Remaining Outstanding")),
-                        const DataColumn(label: Text("Late Fine")),
                         const DataColumn(label: Text("Mode")),
                         const DataColumn(label: Text("Collected By")),
                         const DataColumn(label: Text("Status")),
@@ -4051,6 +4296,14 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                         final formattedDate =
                             "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
                         final roName = (p.roName?.isNotEmpty == true) ? p.roName! : "RO Officer";
+
+                        final lateFeeVal = p.lateFine > 0
+                            ? p.lateFine
+                            : (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false) ? p.interest : 0.0);
+                        final postMatVal = p.postMaturityInterest > 0
+                            ? p.postMaturityInterest
+                            : ((p.remarks?.toLowerCase().contains('post maturity') ?? false) ? p.interest : 0.0);
+                        final totalIntVal = p.interest > 0 ? p.interest : (lateFeeVal + postMatVal);
 
                         return DataRow(
                           cells: [
@@ -4079,11 +4332,31 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                             ),
                             DataCell(
                               Text(
-                                "₹ ${p.interest.toStringAsFixed(2)}",
+                                lateFeeVal > 0 ? "₹ ${lateFeeVal.toStringAsFixed(2)}" : "-",
                                 style: TextStyle(
                                   fontSize: 11,
-                                  fontWeight: p.interest > 0 ? FontWeight.bold : FontWeight.normal,
-                                  color: p.interest > 0 ? Colors.deepOrange.shade800 : Colors.grey.shade700,
+                                  color: lateFeeVal > 0 ? Colors.orange.shade900 : Colors.grey.shade500,
+                                  fontWeight: lateFeeVal > 0 ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                postMatVal > 0 ? "₹ ${postMatVal.toStringAsFixed(2)}" : "-",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: postMatVal > 0 ? Colors.purple.shade900 : Colors.grey.shade500,
+                                  fontWeight: postMatVal > 0 ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                totalIntVal > 0 ? "₹ ${totalIntVal.toStringAsFixed(2)}" : "-",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: totalIntVal > 0 ? FontWeight.bold : FontWeight.normal,
+                                  color: totalIntVal > 0 ? Colors.deepOrange.shade800 : Colors.grey.shade500,
                                 ),
                               ),
                             ),
@@ -4094,16 +4367,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
                                   color: Color(0xFF1E1E1E),
-                                ),
-                              ),
-                            ),
-                            DataCell(
-                              Text(
-                                "₹ ${p.lateFine.toStringAsFixed(2)}",
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: p.lateFine > 0 ? Colors.red.shade700 : Colors.grey.shade700,
-                                  fontWeight: p.lateFine > 0 ? FontWeight.bold : FontWeight.normal,
                                 ),
                               ),
                             ),
@@ -5030,6 +5293,81 @@ class __AddPaymentEntryModalContentState
                                 Text('Base Installment (${widget.entry.frequencyLabel}):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
                                 Text('₹ ${breakdown.baseInstallment.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF1E1E1E))),
                               ],
+                            ),
+                            Builder(
+                              builder: (context) {
+                                final totalPaidEntry = collectionProvider.getTotalPaidForCollection(widget.entry.id);
+                                final totalLateFeesEntry = collectionProvider.getTotalLatePaymentFeesForCollection(widget.entry.id);
+                                final totalPostMatEntry = collectionProvider.getTotalPostMaturityInterestForCollection(widget.entry.id);
+                                final totalIntEntry = collectionProvider.getTotalInterestForCollection(widget.entry.id);
+                                final effectiveIntEntry = totalIntEntry > 0 ? totalIntEntry : (totalLateFeesEntry + totalPostMatEntry);
+                                final remainingBeforeIntEntry = (loanBreakdown.loanAmount - totalPaidEntry).clamp(0.0, double.infinity);
+
+                                return Column(
+                                  children: [
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text('Total Collected:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                        Text('₹ ${totalPaidEntry.toStringAsFixed(2)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.green.shade800)),
+                                      ],
+                                    ),
+                                    if (effectiveIntEntry > 0 || totalLateFeesEntry > 0 || totalPostMatEntry > 0) ...[
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text('Balance (before overdue/interest):', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                          Text(
+                                            '₹ ${remainingBeforeIntEntry.toStringAsFixed(2)}',
+                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade800),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                    if (totalLateFeesEntry > 0) ...[
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text('Daily/Weekly Late Payment Fees:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900)),
+                                          Text(
+                                            '+ ₹ ${totalLateFeesEntry.toStringAsFixed(2)}',
+                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                    if (totalPostMatEntry > 0) ...[
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text('Post Maturity Fine Payment:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.purple.shade900)),
+                                          Text(
+                                            '+ ₹ ${totalPostMatEntry.toStringAsFixed(2)}',
+                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.purple.shade900),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                    if (effectiveIntEntry > 0 && (totalLateFeesEntry > 0 && totalPostMatEntry > 0)) ...[
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text('Total Overdue / Additional Interest:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.red.shade900)),
+                                          Text(
+                                            '+ ₹ ${effectiveIntEntry.toStringAsFixed(2)}',
+                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.red.shade900),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
                             ),
                             const SizedBox(height: 6),
                             Row(
