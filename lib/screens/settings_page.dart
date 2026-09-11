@@ -37,13 +37,9 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _isSavingPolicy = false;
   bool _initialized = false;
 
-  double _previewDailyFine = 3.0;
-  double _previewWeeklyFine = 25.0;
   double _previewWeeklyInstallment = 650.0;
   double _previewWeeklyTenure = 17.5;
 
-  double _previewInvestmentBase = 10000.0;
-  double _previewInvestmentInterest = 1500.0;
   double _previewInvestmentRate = 15.0;
   double _simulatedAmount = 10000.0;
 
@@ -65,24 +61,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
     _normalInterestRateController = TextEditingController();
     _postMaturityInterestRateController = TextEditingController();
-
-    _dailyFineController.addListener(() {
-      final val = double.tryParse(_dailyFineController.text.trim()) ?? 0.0;
-      if (val >= 0 && mounted) {
-        setState(() {
-          _previewDailyFine = val;
-        });
-      }
-    });
-
-    _weeklyFineController.addListener(() {
-      final val = double.tryParse(_weeklyFineController.text.trim()) ?? 0.0;
-      if (val >= 0 && mounted) {
-        setState(() {
-          _previewWeeklyFine = val;
-        });
-      }
-    });
 
     _weeklyInstallmentController.addListener(() {
       final val = double.tryParse(_weeklyInstallmentController.text.trim()) ?? 0.0;
@@ -121,13 +99,9 @@ class _SettingsPageState extends State<SettingsPage> {
     });
 
     _investmentBaseAmountController.addListener(() {
-      final base = double.tryParse(_investmentBaseAmountController.text.trim()) ?? 10000.0;
       final rate = double.tryParse(_investmentInterestRateController.text.trim()) ?? 15.0;
-      final interest = base * (rate / 100.0);
       if (mounted) {
         setState(() {
-          _previewInvestmentBase = base;
-          _previewInvestmentInterest = interest;
           _previewInvestmentRate = rate;
         });
       }
@@ -135,12 +109,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
     _investmentInterestRateController.addListener(() {
       final rate = double.tryParse(_investmentInterestRateController.text.trim()) ?? 15.0;
-      final base = double.tryParse(_investmentBaseAmountController.text.trim()) ?? 10000.0;
-      final interest = base * (rate / 100.0);
       if (mounted) {
         setState(() {
           _previewInvestmentRate = rate;
-          _previewInvestmentInterest = interest;
         });
       }
     });
@@ -172,13 +143,9 @@ class _SettingsPageState extends State<SettingsPage> {
       _normalInterestRateController.text = settings.normalInterestRate.toStringAsFixed(1);
       _postMaturityInterestRateController.text = settings.postMaturityInterestRate.toStringAsFixed(1);
 
-      _previewDailyFine = settings.dailyLateFine;
-      _previewWeeklyFine = settings.weeklyLateFine;
       _previewWeeklyInstallment = settings.weeklyInstallmentAmount;
       _previewWeeklyTenure = settings.weeklyTenureWeeks;
 
-      _previewInvestmentBase = settings.investmentBaseAmount;
-      _previewInvestmentInterest = settings.investmentInterestAmount;
       _previewInvestmentRate = settings.investmentInterestRate;
 
       _previewNormalRate = settings.normalInterestRate;
@@ -527,8 +494,6 @@ class _SettingsPageState extends State<SettingsPage> {
         _weeklyInstallmentController.text = settings.weeklyInstallmentAmount.toStringAsFixed(2);
         _weeklyTenureController.text = settings.weeklyTenureWeeks.toStringAsFixed(1);
 
-        _previewDailyFine = settings.dailyLateFine;
-        _previewWeeklyFine = settings.weeklyLateFine;
         _previewWeeklyInstallment = settings.weeklyInstallmentAmount;
         _previewWeeklyTenure = settings.weeklyTenureWeeks;
       });
@@ -1067,16 +1032,16 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           const Divider(height: 24),
 
-                          // FIELD 1: DAILY LATE FINE
+                          // FIELD 1: DAILY & WEEKLY LATE FINE PERCENTAGE
                           _buildFieldHeader(
-                            title: '1. Daily Late Fine (Loan-Based Slabs)',
-                            badgeText: 'Slabs: ₹3 / ₹6 / ₹9 per day',
+                            title: '1. Late Fine Policy (Base Installment %)',
+                            badgeText: '3% of Base Installment',
                             badgeColor: Colors.blue.shade100,
                             badgeTextColor: Colors.blue.shade900,
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Daily late fees are automatically determined by the loan amount:\n• Loan amount ≤ ₹10,000 → ₹3 / day\n• Loan amount > ₹10,000 and < ₹30,000 → ₹6 / day (e.g., ₹23,000 loan)\n• Loan amount ≥ ₹30,000 → ₹9 / day\nBase rate below sets the standard Tier-1 rate.',
+                            'Late payment penalties are assessed at 3% of the base installment for both daily and weekly schedules (strictly when late). Unpaid fees carry forward across payments until cleared.',
                             style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.35),
                           ),
                           const SizedBox(height: 8),
@@ -1147,7 +1112,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
-                                    'Dynamic Slabs: ≤₹10k (₹3/d) • >₹10k & <₹30k (₹6/d) • ≥₹30k (₹9/d)\n• Example: ₹23,000 loan late by 2 days = 2 × ₹6 = ₹12.00\n• Unpaid late fees carry forward across payments until explicitly cleared.',
+                                    '3% Base Installment Policy (Both Daily & Weekly):\n• Daily Example: ₹200/day installment late by 1 day = ₹6.00 late fee\n• Weekly Example: ₹650/week installment late by 1 week = ₹19.50 late fee\n• Penalty is applied strictly when payment is late\n• Unpaid late fees carry forward across payments until explicitly cleared.',
                                     style: TextStyle(
                                       fontSize: 10.5,
                                       fontWeight: FontWeight.w600,
@@ -1163,14 +1128,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
                           // FIELD 2: WEEKLY LATE FINE & WEEKLY COLLECTION SCHEME
                           _buildFieldHeader(
-                            title: '2. Weekly Late Fine & Scheme Engine',
+                            title: '2. Weekly Collection Scheme Engine',
                             badgeText: '₹650/wk • 17.5 wks',
                             badgeColor: Colors.amber.shade100,
                             badgeTextColor: Colors.amber.shade900,
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Weekly collection scheme (Mon, Tue, Wed, Thur, Fri, Sat) calculates overdue weeks based on ₹650/week installments over 17.5 weeks tenure.',
+                            'Weekly collection scheme calculates overdue weeks based on expected installments over the tenure. Late fine is assessed at 3% of the weekly installment amount when overdue.',
                             style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                           ),
                           const SizedBox(height: 8),
@@ -1309,7 +1274,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '• Overdue Weeks = Expected Instalments (Elapsed Wks) − Paid Instalments (Total Paid ÷ ₹${_previewWeeklyInstallment.toStringAsFixed(0)})\n• Late Fine = Overdue Weeks × ₹${_previewWeeklyFine.toStringAsFixed(2)}\n• Example: 1 week late = ₹${(1 * _previewWeeklyFine).toStringAsFixed(2)} | 2 weeks late = ₹${(2 * _previewWeeklyFine).toStringAsFixed(2)}',
+                                  '• Overdue Weeks = Expected Instalments (Elapsed Wks) − Paid Instalments (Total Paid ÷ ₹${_previewWeeklyInstallment.toStringAsFixed(0)})\n• Late Fine = 3% of weekly installment × Overdue Weeks\n• Example: 1 week late on ₹${_previewWeeklyInstallment.toStringAsFixed(0)} = ₹${(1 * _previewWeeklyInstallment * 0.03).toStringAsFixed(2)} | 2 weeks late = ₹${(2 * _previewWeeklyInstallment * 0.03).toStringAsFixed(2)}',
                                   style: TextStyle(
                                     fontSize: 10.5,
                                     fontWeight: FontWeight.w500,

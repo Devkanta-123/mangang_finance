@@ -1,8 +1,6 @@
 // lib/screens/late_fines_page.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../models/collection_payment_model.dart';
-import '../models/ro_collection_entry_model.dart';
 import '../providers/collection_sheet_provider.dart';
 import '../providers/loanee_provider.dart';
 import '../providers/settings_provider.dart';
@@ -82,10 +80,10 @@ class _LateFinesPageState extends State<LateFinesPage> {
                   end: Alignment.bottomRight,
                 ),
               ),
-              child: Column(
+              child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Late Fines & Overdue Tracking',
                     style: TextStyle(
                       fontSize: 18,
@@ -93,17 +91,17 @@ class _LateFinesPageState extends State<LateFinesPage> {
                       color: Colors.white,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: 4),
                   Wrap(
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      const Text(
+                      Text(
                         'Live calculation from Admin Settings: ',
                         style: TextStyle(fontSize: 12, color: Colors.white70),
                       ),
                       Text(
-                        'Daily Slabs: ≤₹10k (₹3/d) • >₹10k-₹30k (₹6/d) • ≥₹30k (₹9/d) • Weekly ₹${settingsProvider.weeklyLateFine.toStringAsFixed(0)}/wk',
-                        style: const TextStyle(
+                        'Overdue Penalty Policy: Base installment late fine applied when overdue • Unpaid fees carried forward',
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                           color: Colors.amber,

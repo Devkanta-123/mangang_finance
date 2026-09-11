@@ -3305,6 +3305,22 @@ class _RoCollectionDetailsModalSheetState
                     ),
                 ],
               ),
+              const SizedBox(height: 4),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Text(
+                  latePayable.previousUnpaidLateFee > 0
+                      ? '₹${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.previousUnpaidLateFee)} unpaid late fee carried forward from previous missed collection.'
+                      : 'Late payment penalty assessed for missed collection.',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
+                ),
+              ),
             ],
 
             if (postMaturity != null && postMaturity.isPastMaturity) ...[
@@ -4702,7 +4718,7 @@ class __AddPaymentEntryModalContentState
         ? (totalAssessedFee - lateFine)
         : 0.0;
     final String lateFeeNote = unpaidCarried > 0
-        ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
+        ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed for missed collection, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
         : (lateFine > 0 ? ' | Late Fee: ₹${lateFine.toStringAsFixed(2)} cleared' : '');
     final String? finalRemarks = remarks != null ? '$remarks$lateFeeNote' : (lateFeeNote.isNotEmpty ? lateFeeNote.replaceFirst(' | ', '') : null);
 
@@ -5056,7 +5072,7 @@ class __AddPaymentEntryModalContentState
                                     const SizedBox(width: 6),
                                     Expanded(
                                       child: Text(
-                                        'Carry Forward: ₹${breakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid late fee from previous payment.',
+                                        'Carry Forward: ₹${breakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid late fee from previous missed collection.',
                                         style: TextStyle(
                                           fontSize: 10.5,
                                           fontWeight: FontWeight.bold,
@@ -5113,7 +5129,7 @@ class __AddPaymentEntryModalContentState
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
-                                    'Late Payment Fee (${breakdown.lateUnits} ${breakdown.isDaily ? (breakdown.lateUnits == 1 ? "day" : "days") : (breakdown.lateUnits == 1 ? "wk" : "wks")}):',
+                                    'Late Payment Fee (${breakdown.lateUnits} missed ${breakdown.isDaily ? (breakdown.lateUnits == 1 ? "day" : "days") : (breakdown.lateUnits == 1 ? "wk" : "wks")}):',
                                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
                                   ),
                                   Text(
@@ -5422,6 +5438,17 @@ class __AddPaymentEntryModalContentState
                                   ),
                                 ),
                               ),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _payableBreakdown!.previousUnpaidLateFee > 0
+                                ? 'Includes ₹${_payableBreakdown!.previousUnpaidLateFee.toStringAsFixed(2)} unpaid fee carried forward from missed collection'
+                                : 'Assessed penalty for missed collection',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey.shade600,
+                              fontStyle: FontStyle.italic,
                             ),
                           ),
                         ],

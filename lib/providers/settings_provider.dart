@@ -188,6 +188,7 @@ class LoaneeLateFineStatus {
 class SettingsProvider extends ChangeNotifier {
   double _dailyLateFine = 3.0;
   double _weeklyLateFine = 25.0;
+  double _lateFinePercentage = 3.0; // 3% of base installment for both daily and weekly schedules
   double _weeklyInstallmentAmount = 650.0;
   double _weeklyTenureWeeks = 17.5;
   double _normalInterestRate = 3.0; // 3% normal rate during 5-month maturity
@@ -207,6 +208,7 @@ class SettingsProvider extends ChangeNotifier {
   // SharedPreferences keys for late payment UI cache
   static const String _keyDailyLateFine = 'mangang_daily_late_fine';
   static const String _keyWeeklyLateFine = 'mangang_weekly_late_fine';
+  static const String _keyLateFinePercentage = 'mangang_late_fine_percentage';
   static const String _keyWeeklyInstallment = 'mangang_weekly_installment_amt';
   static const String _keyWeeklyTenure = 'mangang_weekly_tenure_wks';
   static const String _keyNormalInterestRate = 'mangang_normal_interest_rate';
@@ -219,6 +221,7 @@ class SettingsProvider extends ChangeNotifier {
 
   double get dailyLateFine => _dailyLateFine;
   double get weeklyLateFine => _weeklyLateFine;
+  double get lateFinePercentage => _lateFinePercentage;
   double get weeklyInstallmentAmount => _weeklyInstallmentAmount;
   double get weeklyTenureWeeks => _weeklyTenureWeeks;
   double get totalWeeklyTenureAmount => _weeklyInstallmentAmount * _weeklyTenureWeeks; // 650 * 17.5 = 11,375
@@ -275,6 +278,9 @@ class SettingsProvider extends ChangeNotifier {
         if (map.containsKey('weekly_late_fine')) {
           _weeklyLateFine = double.tryParse(map['weekly_late_fine']!) ?? _weeklyLateFine;
         }
+        if (map.containsKey('late_fine_percentage')) {
+          _lateFinePercentage = double.tryParse(map['late_fine_percentage']!) ?? _lateFinePercentage;
+        }
         if (map.containsKey('weekly_installment_amount')) {
           _weeklyInstallmentAmount = double.tryParse(map['weekly_installment_amount']!) ?? _weeklyInstallmentAmount;
         }
@@ -303,6 +309,9 @@ class SettingsProvider extends ChangeNotifier {
       }
       if (prefs.containsKey(_keyWeeklyLateFine) && _weeklyLateFine == 25.0) {
         _weeklyLateFine = prefs.getDouble(_keyWeeklyLateFine) ?? 25.0;
+      }
+      if (prefs.containsKey(_keyLateFinePercentage) && _lateFinePercentage == 3.0) {
+        _lateFinePercentage = prefs.getDouble(_keyLateFinePercentage) ?? 3.0;
       }
       if (prefs.containsKey(_keyWeeklyInstallment) && _weeklyInstallmentAmount == 650.0) {
         _weeklyInstallmentAmount = prefs.getDouble(_keyWeeklyInstallment) ?? 650.0;
@@ -400,13 +409,15 @@ class SettingsProvider extends ChangeNotifier {
     required double weeklyFine,
     double? weeklyInstallment,
     double? weeklyTenure,
+    double? lateFinePercentage,
   }) async {
-    if (dailyFine < 0 || weeklyFine < 0) {
+    if (dailyFine < 0 || weeklyFine < 0 || (lateFinePercentage != null && lateFinePercentage < 0)) {
       throw ArgumentError('Fine amounts cannot be negative.');
     }
 
     final installment = weeklyInstallment ?? _weeklyInstallmentAmount;
     final tenure = weeklyTenure ?? _weeklyTenureWeeks;
+    final finePct = lateFinePercentage ?? _lateFinePercentage;
 
     if (installment < 0 || tenure < 0) {
       throw ArgumentError('Installment and tenure cannot be negative.');
@@ -417,6 +428,7 @@ class SettingsProvider extends ChangeNotifier {
 
       _dailyLateFine = dailyFine;
       _weeklyLateFine = weeklyFine;
+      _lateFinePercentage = finePct;
       _weeklyInstallmentAmount = installment;
       _weeklyTenureWeeks = tenure;
       _lastUpdated = now;
@@ -430,9 +442,14 @@ class SettingsProvider extends ChangeNotifier {
       );
 
       try {
+        await SupabaseService.instance.setSystemSetting('late_fine_percentage', finePct);
+      } catch (_) {}
+
+      try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setDouble(_keyDailyLateFine, dailyFine);
         await prefs.setDouble(_keyWeeklyLateFine, weeklyFine);
+        await prefs.setDouble(_keyLateFinePercentage, finePct);
         await prefs.setDouble(_keyWeeklyInstallment, installment);
         await prefs.setDouble(_keyWeeklyTenure, tenure);
         await prefs.setString(_keyLastUpdated, now.toIso8601String());
@@ -451,14 +468,26 @@ class SettingsProvider extends ChangeNotifier {
     required RoCollectionEntry entry,
     required List<CollectionPaymentModel> payments,
     DateTime? asOfDate,
+    double? loaneeLoanAmount,
   }) {
     final now = asOfDate ?? DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final entryDate = DateTime(entry.createdAt.year, entry.createdAt.month, entry.createdAt.day);
 
+    final double effectiveWeeklyInstallment = entry.getCalculatedPayableAmount(
+      loaneeLoanAmount: loaneeLoanAmount,
+      configuredInterestRate: investmentInterestRate,
+      configuredBasePrincipal: investmentBaseAmount,
+      configuredBaseDailyAmount: baseDailyAmount,
+      configuredWeeklyInstallment: weeklyInstallmentAmount,
+    );
+    final double weeklyInstallmentToUse = effectiveWeeklyInstallment > 0
+        ? effectiveWeeklyInstallment
+        : _weeklyInstallmentAmount;
+
     final double totalPaid = payments.fold(0.0, (sum, p) => sum + p.paymentAmount);
-    final int weeksPaid = (_weeklyInstallmentAmount > 0)
-        ? (totalPaid / _weeklyInstallmentAmount).floor()
+    final int weeksPaid = (weeklyInstallmentToUse > 0)
+        ? (totalPaid / weeklyInstallmentToUse).floor()
         : 0;
 
     final int daysSinceStart = today.difference(entryDate).inDays;
@@ -467,17 +496,18 @@ class SettingsProvider extends ChangeNotifier {
     final int expectedWeeks = weeksElapsed.clamp(0, maxTenureWeeks);
 
     final int lateWeeks = (expectedWeeks - weeksPaid).clamp(0, maxTenureWeeks);
-    final double calculatedFine = lateWeeks * _weeklyLateFine;
+    final double weeklyRate = weeklyInstallmentToUse * (_lateFinePercentage / 100.0);
+    final double calculatedFine = lateWeeks > 0 ? (lateWeeks * weeklyRate) : 0.0;
 
     return WeeklyBreakdown(
-      weeklyInstallment: _weeklyInstallmentAmount,
+      weeklyInstallment: weeklyInstallmentToUse,
       tenureWeeks: _weeklyTenureWeeks,
-      totalTenureAmount: _weeklyInstallmentAmount * _weeklyTenureWeeks,
+      totalTenureAmount: weeklyInstallmentToUse * _weeklyTenureWeeks,
       totalPaid: totalPaid,
       weeksPaid: weeksPaid,
       expectedWeeks: expectedWeeks,
       lateWeeks: lateWeeks,
-      lateFineRate: _weeklyLateFine,
+      lateFineRate: weeklyRate,
       totalCalculatedFine: calculatedFine,
     );
   }
@@ -634,7 +664,12 @@ class SettingsProvider extends ChangeNotifier {
     }
   }
 
-  /// Calculate the recommended late fine amount for an entry (dynamic slab rate + carried forward unpaid fees)
+  /// Percentage-based Late Fee Rate: 3% of base installment for both Daily & Weekly schemes (only when late)
+  double getLateFeeRateForBaseInstallment(double baseInstallment) {
+    return baseInstallment * (_lateFinePercentage / 100.0);
+  }
+
+  /// Calculate the recommended late fine amount for an entry (3% of base installment when late + carried forward unpaid fees)
   double calculateLateFineForEntry({
     required RoCollectionEntry entry,
     required List<CollectionPaymentModel> payments,
@@ -644,7 +679,13 @@ class SettingsProvider extends ChangeNotifier {
   }) {
     final type = entry.collectionType.toLowerCase().trim();
     final isDaily = type == 'daily';
-    final double effectiveLoan = entry.getCalculatedLoanAmount(loaneeLoanAmount: loaneeLoanAmount);
+    final double baseInstallment = entry.getCalculatedPayableAmount(
+      loaneeLoanAmount: loaneeLoanAmount,
+      configuredInterestRate: investmentInterestRate,
+      configuredBasePrincipal: investmentBaseAmount,
+      configuredBaseDailyAmount: baseDailyAmount,
+      configuredWeeklyInstallment: weeklyInstallmentAmount,
+    );
 
     if (isDaily) {
       final int lateDays = calculateLateUnits(
@@ -652,8 +693,8 @@ class SettingsProvider extends ChangeNotifier {
         payments: payments,
         asOfDate: asOfDate,
       );
-      final double rate = getLateFeeRateForLoanAmount(effectiveLoan, baseDailyFine: _dailyLateFine);
-      final double currentIntervalFee = lateDays * rate;
+      final double rate = baseInstallment * (_lateFinePercentage / 100.0);
+      final double currentIntervalFee = lateDays > 0 ? (lateDays * rate) : 0.0;
       final double previousUnpaid = calculatePreviousUnpaidLateFee(
         entry: entry,
         payments: payments,
@@ -666,6 +707,7 @@ class SettingsProvider extends ChangeNotifier {
         entry: entry,
         payments: payments,
         asOfDate: asOfDate,
+        loaneeLoanAmount: loaneeLoanAmount,
       );
       final double previousUnpaid = calculatePreviousUnpaidLateFee(
         entry: entry,
@@ -995,8 +1037,8 @@ class SettingsProvider extends ChangeNotifier {
       asOfDate: asOfDate,
     );
 
-    final double fineRate = isDaily ? getLateFeeRateForLoanAmount(effectiveLoanAmount, baseDailyFine: _dailyLateFine) : _weeklyLateFine;
-    final double currentIntervalFine = lateUnits * fineRate;
+    final double fineRate = baseInstallment * (_lateFinePercentage / 100.0);
+    final double currentIntervalFine = lateUnits > 0 ? (lateUnits * fineRate) : 0.0;
 
     // Compute previous unpaid late fee carried forward from earlier payments
     final double previousUnpaidFee = calculatePreviousUnpaidLateFee(
@@ -1032,21 +1074,19 @@ class SettingsProvider extends ChangeNotifier {
     final String explanation;
     final String shortSummary;
     final String carriedForwardExplanation = previousUnpaidFee > 0
-        ? '₹${previousUnpaidFee.toStringAsFixed(2)} previous late payment fee carried forward because it was not cleared in the previous payment.'
+        ? '₹${previousUnpaidFee.toStringAsFixed(2)} unpaid late fee carried forward from previous missed collection.'
         : '';
 
     if (postMaturity.isPastMaturity) {
-      explanation = '⚠️ PAST MATURITY: ${postMaturity.explanation}${calculatedFine > 0 ? " Late Payment Fee: $lateUnits $unitName × ₹${fineRate.toStringAsFixed(2)} = ₹${calculatedFine.toStringAsFixed(2)} penalty." : ""}';
+      explanation = '⚠️ PAST MATURITY: ${postMaturity.explanation}${calculatedFine > 0 ? " Late Payment Fee: ₹${calculatedFine.toStringAsFixed(2)} penalty assessed for missed collection." : ""}';
       shortSummary = '₹${totalPayable.toStringAsFixed(0)} (Matured${postMaturity.overdueMonths > 0 ? " ${postMaturity.overdueMonths}M" : ""})';
     } else if (lateUnits > 0) {
-      final feeBreakdownNote = isDaily
-          ? 'System Late Payment Fee: $lateUnits $unitName × ₹${fineRate.toStringAsFixed(2)}/day (₹${effectiveLoanAmount.toStringAsFixed(0)} loan slab) = ₹${currentIntervalFine.toStringAsFixed(2)} penalty.'
-          : 'System Late Payment Fee: $lateUnits $unitName × ₹${fineRate.toStringAsFixed(2)}/wk = ₹${currentIntervalFine.toStringAsFixed(2)} penalty.';
-      final carriedNote = previousUnpaidFee > 0 ? ' Previous Unpaid Late Fee: ₹${previousUnpaidFee.toStringAsFixed(2)} carried forward (Total fee: ₹${calculatedFine.toStringAsFixed(2)}).' : '';
+      final feeBreakdownNote = 'Late payment fee assessed for $lateUnits missed $unitName: ₹${currentIntervalFine.toStringAsFixed(2)} penalty.';
+      final carriedNote = previousUnpaidFee > 0 ? ' Previous unpaid late fee: ₹${previousUnpaidFee.toStringAsFixed(2)} carried forward from missed collection (Total fee: ₹${calculatedFine.toStringAsFixed(2)}).' : '';
       explanation = '$lateUnits $unitName late: $lateUnits missed ${isDaily ? "days" : "weeks"} (₹${overdueMissedAmount.toStringAsFixed(2)}) + ${isDaily ? "Today's" : "This week's"} installment (₹${currentInstallment.toStringAsFixed(2)}) = ₹${totalPayable.toStringAsFixed(2)} Total Due Today. $feeBreakdownNote$carriedNote';
       shortSummary = '₹${totalPayable.toStringAsFixed(0)} ($lateUnits $unitName late + today)';
     } else if (previousUnpaidFee > 0) {
-      explanation = 'On Time: Scheduled ${isDaily ? "daily" : "weekly"} installment = ₹${currentInstallment.toStringAsFixed(2)}. ₹${previousUnpaidFee.toStringAsFixed(2)} previous late payment fee carried forward because it was not cleared in the previous payment.';
+      explanation = 'On Time: Scheduled ${isDaily ? "daily" : "weekly"} installment = ₹${currentInstallment.toStringAsFixed(2)}. ₹${previousUnpaidFee.toStringAsFixed(2)} unpaid late fee carried forward from previous missed collection.';
       shortSummary = '₹${currentInstallment.toStringAsFixed(0)} / $freq (+₹${previousUnpaidFee.toStringAsFixed(0)} fee)';
     } else {
       explanation = 'On Time: Scheduled ${isDaily ? "daily" : "weekly"} installment = ₹${currentInstallment.toStringAsFixed(2)} (Standard rate). Late Payment Fee: ₹0.00.';
@@ -1113,8 +1153,8 @@ class SettingsProvider extends ChangeNotifier {
       final lateFine = payableBreakdown.calculatedLateFine;
       final fineRate = payableBreakdown.lateFineRate;
       final String explanation = hasPayments
-          ? 'Payment data found in ro_collection_payments (${payments.length} payments, last on ${formatDate(lastPaymentDate!)}). $overdueDays overdue days: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Today\'s ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee: $overdueDays days × ₹${fineRate.toStringAsFixed(2)}/day = ₹${lateFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} carried forward)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}'
-          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. $overdueDays overdue days: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Today\'s ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee: $overdueDays days × ₹${fineRate.toStringAsFixed(2)}/day = ₹${lateFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} carried forward)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}';
+          ? 'Payment data found in ro_collection_payments (${payments.length} payments, last on ${formatDate(lastPaymentDate!)}). $overdueDays overdue days: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Today\'s ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${payableBreakdown.currentIntervalLateFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid fee carried forward from previous missed collection)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}'
+          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. $overdueDays overdue days: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Today\'s ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${payableBreakdown.currentIntervalLateFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid fee carried forward from previous missed collection)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}';
 
       return LoaneeLateFineStatus(
         collectionId: entry.id,
@@ -1150,8 +1190,8 @@ class SettingsProvider extends ChangeNotifier {
       final totalOverdue = overdueEmi + breakdown.totalCalculatedFine;
 
       final String explanation = hasPayments
-          ? 'Payment data found in ro_collection_payments (₹${breakdown.totalPaid.toStringAsFixed(2)} paid across ${payments.length} transactions, covering ${breakdown.weeksPaid}/${breakdown.expectedWeeks} expected weeks). ${breakdown.lateWeeks} overdue weeks: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Current ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee: ${breakdown.lateWeeks} wks × ₹${breakdown.lateFineRate.toStringAsFixed(2)}/wk = ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}'
-          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. ${breakdown.lateWeeks} overdue weeks: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Current ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee: ${breakdown.lateWeeks} wks × ₹${breakdown.lateFineRate.toStringAsFixed(2)}/wk = ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}';
+          ? 'Payment data found in ro_collection_payments (₹${breakdown.totalPaid.toStringAsFixed(2)} paid across ${payments.length} transactions, covering ${breakdown.weeksPaid}/${breakdown.expectedWeeks} expected weeks). ${breakdown.lateWeeks} overdue weeks: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Current ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid fee carried forward from previous missed collection)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}'
+          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. ${breakdown.lateWeeks} overdue weeks: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Current ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid fee carried forward from previous missed collection)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}';
 
       return LoaneeLateFineStatus(
         collectionId: entry.id,
@@ -1201,10 +1241,9 @@ class SettingsProvider extends ChangeNotifier {
         asOfDate: today,
         hasPreviousPayment: false,
       );
-      final effectiveLoan = fallbackLoanAmount > 0 ? fallbackLoanAmount : (fallbackDueAmount > 0 ? fallbackDueAmount : 10000.0);
-      final slabRate = getLateFeeRateForLoanAmount(effectiveLoan, baseDailyFine: _dailyLateFine);
-      final fine = daysDiff * slabRate;
       final baseAmt = baseDailyAmount;
+      final fineRate = baseAmt * (_lateFinePercentage / 100.0);
+      final fine = daysDiff > 0 ? (daysDiff * fineRate) : 0.0;
       final overdueMissed = daysDiff * baseAmt;
       final totalPayable = overdueMissed + baseAmt;
 
@@ -1225,12 +1264,12 @@ class SettingsProvider extends ChangeNotifier {
         overdueMissedAmount: overdueMissed,
         currentInstallment: baseAmt,
         totalPayableAmount: totalPayable,
-        lateFineRate: slabRate,
+        lateFineRate: fineRate,
         calculatedLateFine: fine,
         grandTotalWithPenalty: totalPayable + fine,
-        explanation: 'Calculated from registration date ${formatDate(startDate)}: $daysDiff days late × ₹${baseAmt.toStringAsFixed(2)} = ₹${overdueMissed.toStringAsFixed(2)} missed + Today ₹${baseAmt.toStringAsFixed(2)} = ₹${totalPayable.toStringAsFixed(2)} payable. Late fine: $daysDiff days × ₹${slabRate.toStringAsFixed(2)} = ₹${fine.toStringAsFixed(2)}.',
+        explanation: 'Calculated from registration date ${formatDate(startDate)}: $daysDiff days late missed amount ₹${overdueMissed.toStringAsFixed(2)} + Today ₹${baseAmt.toStringAsFixed(2)} = ₹${totalPayable.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${fine.toStringAsFixed(2)}.',
         shortSummary: '₹${totalPayable.toStringAsFixed(0)} ($daysDiff days late + today)',
-        effectiveLoanAmount: effectiveLoan,
+        effectiveLoanAmount: fallbackLoanAmount > 0 ? fallbackLoanAmount : (fallbackDueAmount > 0 ? fallbackDueAmount : 10000.0),
         currentIntervalLateFine: fine,
         postMaturityBreakdown: postMaturity,
       );
@@ -1248,7 +1287,7 @@ class SettingsProvider extends ChangeNotifier {
         lastPaymentDate: null,
         loanStartDate: startDate,
         overdueUnits: daysDiff,
-        lateFineRate: slabRate,
+        lateFineRate: fineRate,
         calculatedLateFine: fine,
         overdueEmiAmount: overdueMissed,
         totalOverdueAmount: totalPayable + fine,
@@ -1327,8 +1366,8 @@ class SettingsProvider extends ChangeNotifier {
       loanStartDate: primaryEntry.createdAt,
       overdueUnits: totalOverdueUnits,
       lateFineRate: types.first.toLowerCase().trim() == 'daily'
-          ? getLateFeeRateForLoanAmount(primaryEntry.getCalculatedLoanAmount(loaneeLoanAmount: fallbackLoanAmount), baseDailyFine: _dailyLateFine)
-          : _weeklyLateFine,
+          ? (primaryEntry.getCalculatedPayableAmount(loaneeLoanAmount: fallbackLoanAmount, configuredBaseDailyAmount: baseDailyAmount, configuredInterestRate: investmentInterestRate, configuredBasePrincipal: investmentBaseAmount) * (_lateFinePercentage / 100.0))
+          : (weeklyInstallmentAmount * (_lateFinePercentage / 100.0)),
       calculatedLateFine: totalFine,
       overdueEmiAmount: totalOverdueEmi,
       totalOverdueAmount: totalOverdueEmi + totalFine,

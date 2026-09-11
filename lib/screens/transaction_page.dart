@@ -138,7 +138,7 @@ class _TransactionPageState extends State<TransactionPage> {
     final double totalAssessedFee = _selectedBreakdown?.calculatedLateFine ?? 0.0;
     final double unpaidCarried = (totalAssessedFee > lateFine) ? (totalAssessedFee - lateFine) : 0.0;
     final String lateFeeNote = unpaidCarried > 0
-        ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
+        ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed for missed collection, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
         : (lateFine > 0 ? ' | Late Fee: ₹${lateFine.toStringAsFixed(2)} cleared' : '');
     final finalRemarks = remarks != null ? '$remarks$lateFeeNote' : (lateFeeNote.isNotEmpty ? lateFeeNote.replaceFirst(' | ', '') : null);
 
@@ -561,7 +561,7 @@ class _TransactionPageState extends State<TransactionPage> {
                                             const SizedBox(width: 6),
                                             Expanded(
                                               child: Text(
-                                                'Carry Forward: ₹${_selectedBreakdown!.previousUnpaidLateFee.toStringAsFixed(2)} unpaid late fee from previous payment.',
+                                                'Carry Forward: ₹${_selectedBreakdown!.previousUnpaidLateFee.toStringAsFixed(2)} unpaid late fee from previous missed collection.',
                                                 style: TextStyle(
                                                   fontSize: 10.5,
                                                   fontWeight: FontWeight.bold,
@@ -586,7 +586,7 @@ class _TransactionPageState extends State<TransactionPage> {
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [
                                           Text(
-                                            'Late Payment Fee (${_selectedBreakdown!.lateUnits} ${_selectedBreakdown!.isDaily ? (_selectedBreakdown!.lateUnits == 1 ? "day" : "days") : (_selectedBreakdown!.lateUnits == 1 ? "wk" : "wks")}):',
+                                            'Late Payment Fee (${_selectedBreakdown!.lateUnits} missed ${_selectedBreakdown!.isDaily ? (_selectedBreakdown!.lateUnits == 1 ? "day" : "days") : (_selectedBreakdown!.lateUnits == 1 ? "wk" : "wks")}):',
                                             style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
                                           ),
                                           Text(
