@@ -807,6 +807,7 @@ class SettingsProvider extends ChangeNotifier {
     double currentPayable;
     double lastPeriodInterest = 0.0;
     double currentPeriodStartingBalance = 0.0;
+    bool hasRecordedInterestInCurrentPeriod = false;
 
     if (payments != null && payments.isNotEmpty && initialLoanAmount != null && initialLoanAmount > 0) {
       final sortedPayments = List<CollectionPaymentModel>.from(payments)
@@ -817,7 +818,12 @@ class SettingsProvider extends ChangeNotifier {
         return !pDate.isAfter(cleanMaturity);
       }).fold(0.0, (sum, p) => sum + p.paymentAmount);
 
-      final balanceAtMaturity = (initialLoanAmount - preMaturityPaid).clamp(0.0, double.infinity);
+      final preMaturityInterest = sortedPayments.where((p) {
+        final pDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
+        return !pDate.isAfter(cleanMaturity);
+      }).fold(0.0, (sum, p) => sum + p.interest);
+
+      final balanceAtMaturity = (initialLoanAmount + preMaturityInterest - preMaturityPaid).clamp(0.0, double.infinity);
 
       if (balanceAtMaturity <= 0) {
         return PostMaturityInterestBreakdown(
@@ -853,8 +859,31 @@ class SettingsProvider extends ChangeNotifier {
         final periodEnd = addMonths(cleanMaturity, p);
 
         currentPeriodStartingBalance = currentPayable;
-        final double rawInterest = currentPayable * monthlyRateDecimal;
-        final double currentInterest = double.parse(rawInterest.toStringAsFixed(2));
+
+        // Apply payments made during this period p
+        final periodPayments = sortedPayments.where((pm) {
+          final pmDate = DateTime(pm.createdAt.year, pm.createdAt.month, pm.createdAt.day);
+          final inPeriod = pmDate.isAfter(periodStart) &&
+              (p == overduePeriods ? !pmDate.isAfter(today) : !pmDate.isAfter(periodEnd));
+          return inPeriod;
+        }).toList();
+
+        final double periodRecordedInterest = periodPayments.fold(0.0, (sum, pm) => sum + pm.interest);
+        final double periodPaid = periodPayments.fold(0.0, (sum, pm) => sum + pm.paymentAmount);
+
+        final double currentInterest;
+        if (periodRecordedInterest > 0) {
+          // Interest for this overdue period was already assessed and recorded in payment history (e.g. imported ledger)
+          currentInterest = double.parse(periodRecordedInterest.toStringAsFixed(2));
+          if (p == overduePeriods) {
+            hasRecordedInterestInCurrentPeriod = true;
+          }
+        } else {
+          // Standard calculation: 7% per overdue month on current payable
+          final double rawInterest = currentPayable * monthlyRateDecimal;
+          currentInterest = double.parse(rawInterest.toStringAsFixed(2));
+        }
+
         final double payableWithInterest = double.parse((currentPayable + currentInterest).toStringAsFixed(2));
 
         steps.add(PostMaturityMonthlyStep(
@@ -866,20 +895,8 @@ class SettingsProvider extends ChangeNotifier {
         ));
 
         lastPeriodInterest = currentInterest;
-        currentPayable = payableWithInterest;
-
-        // Apply payments made during this period p
-        final periodPayments = sortedPayments.where((pm) {
-          final pmDate = DateTime(pm.createdAt.year, pm.createdAt.month, pm.createdAt.day);
-          final inPeriod = pmDate.isAfter(periodStart) &&
-              (p == overduePeriods ? !pmDate.isAfter(today) : !pmDate.isAfter(periodEnd));
-          return inPeriod;
-        });
-
-        for (final pm in periodPayments) {
-          currentPayable = (currentPayable - pm.paymentAmount).clamp(0.0, double.infinity);
-          currentPayable = double.parse(currentPayable.toStringAsFixed(2));
-        }
+        currentPayable = (payableWithInterest - periodPaid).clamp(0.0, double.infinity);
+        currentPayable = double.parse(currentPayable.toStringAsFixed(2));
       }
     } else {
       if (remainingBalance <= 0) {
@@ -932,6 +949,23 @@ class SettingsProvider extends ChangeNotifier {
     final double cumulativeInterest = steps.fold(0.0, (sum, s) => sum + s.interestAmount);
     final double finalPayable = currentPayable;
     final double normalInterest = (currentPeriodStartingBalance * normalRate / 100.0);
+    final double reportedRemainingBalance = hasRecordedInterestInCurrentPeriod
+        ? currentPayable
+        : currentPeriodStartingBalance;
+
+    // Debug logging for overdue calculation pipeline
+    final StringBuffer logBuf = StringBuffer();
+    logBuf.writeln('=== [POST-MATURITY OVERDUE CALCULATION PIPELINE] ===');
+    logBuf.writeln('Original loan amount: ₹${initialLoanAmount?.toStringAsFixed(2) ?? "N/A"}');
+    logBuf.writeln('Sanction Date: ${formatDate(sanctionDate)} | Maturity Date: ${formatDate(cleanMaturity)} | As Of Date: ${formatDate(today)}');
+    logBuf.writeln('Overdue Periods: $overduePeriods');
+    for (final step in steps) {
+      logBuf.writeln('  Period ${step.monthNumber}: Starting Balance=₹${step.startingBalance.toStringAsFixed(2)}, Additional Interest=₹${step.interestAmount.toStringAsFixed(2)}, Ending Balance=₹${step.endingBalance.toStringAsFixed(2)}');
+    }
+    logBuf.writeln('Cumulative additional interest: ₹${cumulativeInterest.toStringAsFixed(2)}');
+    logBuf.writeln('Final remaining balance: ₹${finalPayable.toStringAsFixed(2)}');
+    logBuf.writeln('====================================================');
+    debugPrint(logBuf.toString());
 
     // Build plain-English explanation without day references
     final StringBuffer exp = StringBuffer();
@@ -947,7 +981,7 @@ class SettingsProvider extends ChangeNotifier {
       isPastMaturity: true,
       maturityDate: calculatedMaturity,
       sanctionDate: sanctionDate,
-      remainingBalance: currentPeriodStartingBalance,
+      remainingBalance: reportedRemainingBalance,
       normalInterestRate: normalRate,
       postMaturityInterestRate: postRate,
       overdueMonths: overduePeriods,
@@ -1038,7 +1072,7 @@ class SettingsProvider extends ChangeNotifier {
     );
 
     final double fineRate = baseInstallment * (_lateFinePercentage / 100.0);
-    final double currentIntervalFine = lateUnits > 0 ? (lateUnits * fineRate) : 0.0;
+    final double currentIntervalFine = (lateUnits > 0 && !postMaturity.isPastMaturity) ? (lateUnits * fineRate) : 0.0;
 
     // Compute previous unpaid late fee carried forward from earlier payments
     final double previousUnpaidFee = calculatePreviousUnpaidLateFee(

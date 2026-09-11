@@ -1571,6 +1571,8 @@ class HistoricalPaymentImportService {
           }
         }
 
+        final Map<String, LoaneeAccount> affectedLoanees = {};
+
         // 2. Gather all valid, non-duplicate payments and record them
         for (final row in previewResult.rowRecords) {
           if (!row.isValid) continue;
@@ -1578,26 +1580,37 @@ class HistoricalPaymentImportService {
           final targetEntryId = row.resolvedCollectionEntry?.id ?? row.newCollectionEntry?.id;
           if (targetEntryId == null) continue;
 
-          // Initial loan balance directly from DB records
-          final initialBal = (row.resolvedCollectionEntry?.initialBalance != null && row.resolvedCollectionEntry!.initialBalance > 0)
-              ? row.resolvedCollectionEntry!.initialBalance
-              : ((row.newCollectionEntry?.initialBalance != null && row.newCollectionEntry!.initialBalance > 0)
-                  ? row.newCollectionEntry!.initialBalance
-                  : ((row.resolvedLoanee?.loanAmount != null && row.resolvedLoanee!.loanAmount > 0)
-                      ? row.resolvedLoanee!.loanAmount
+          // Initial loan balance directly from DB records (prefer authoritative loanee loan amount if available)
+          final initialBal = (row.resolvedLoanee?.loanAmount != null && row.resolvedLoanee!.loanAmount > 0)
+              ? row.resolvedLoanee!.loanAmount
+              : ((row.resolvedCollectionEntry?.initialBalance != null && row.resolvedCollectionEntry!.initialBalance > 0)
+                  ? row.resolvedCollectionEntry!.initialBalance
+                  : ((row.newCollectionEntry?.initialBalance != null && row.newCollectionEntry!.initialBalance > 0)
+                      ? row.newCollectionEntry!.initialBalance
                       : (row.resolvedLoanee?.dueAmount ?? 0.0)));
 
           // Prior payments recorded in collectionProvider
           final priorPaid = collectionProvider.getTotalPaidForCollection(targetEntryId);
           final priorInterest = collectionProvider.getTotalInterestForCollection(targetEntryId);
 
-          // Running remaining balance
+          // Running remaining balance and tracking totals
           double runningBalance = initialBal + priorInterest - priorPaid;
+          double runningTotalCollected = priorPaid;
+          double runningCumulativeInterest = priorInterest;
+
+          debugPrint('======================================================================');
+          debugPrint('=== [HISTORICAL PAYMENT IMPORT CALCULATION PIPELINE] ===');
+          debugPrint('Loanee: ${row.rawLoaneeName} | Customer ID: ${row.rawCustomerId} | Account: ${row.rawAccountNumber}');
+          debugPrint('Original loan amount: ₹${initialBal.toStringAsFixed(2)}');
+          debugPrint('Prior collected: ₹${priorPaid.toStringAsFixed(2)} | Prior interest: ₹${priorInterest.toStringAsFixed(2)}');
+          debugPrint('Starting remaining balance: ₹${runningBalance.toStringAsFixed(2)}');
+          debugPrint('----------------------------------------------------------------------');
 
           // Ensure payments are processed chronologically in ascending order
           final sortedPayments = List<HistoricalPaymentItem>.from(row.payments)
             ..sort((a, b) => a.paymentDate.compareTo(b.paymentDate));
 
+          int paymentIdx = 1;
           for (final p in sortedPayments) {
             if (p.isDuplicate) {
               duplicateSkipped++;
@@ -1608,8 +1621,13 @@ class HistoricalPaymentImportService {
             }
 
             // Correct formula: Interest increases remaining amount, payment decreases it
+            runningTotalCollected += p.amount;
+            runningCumulativeInterest += p.interest;
             runningBalance = (runningBalance + p.interest - p.amount).clamp(0.0, double.infinity);
             final newRemaining = runningBalance;
+
+            debugPrint('  Payment #$paymentIdx: Date=${p.formattedDate} | Payment Amount=₹${p.amount.toStringAsFixed(2)} | Additional Interest=₹${p.interest.toStringAsFixed(2)} | Running Total Collected=₹${runningTotalCollected.toStringAsFixed(2)} | Running Remaining Balance=₹${newRemaining.toStringAsFixed(2)}');
+            paymentIdx++;
 
             final paymentToSave = CollectionPaymentModel(
               id: p.paymentModel?.id.isNotEmpty == true
@@ -1650,6 +1668,15 @@ class HistoricalPaymentImportService {
                   paymentAmount: p.amount,
                   newRemainingBalance: newRemaining,
                 );
+                final updatedLoanee = loaneeProvider.loanees.cast<LoaneeAccount?>().firstWhere(
+                  (l) => l != null &&
+                      ((custId.isNotEmpty && l.customerId.trim().toLowerCase() == custId.trim().toLowerCase()) ||
+                       (accNo.isNotEmpty && l.accountNumber.trim().toLowerCase() == accNo.trim().toLowerCase())),
+                  orElse: () => null,
+                );
+                if (updatedLoanee != null) {
+                  affectedLoanees[updatedLoanee.customerId] = updatedLoanee;
+                }
               }
             } else {
               failures.add(p.interest > 0 && p.amount == 0
@@ -1657,6 +1684,13 @@ class HistoricalPaymentImportService {
                   : "Failed to save payment of ₹${p.amount} on ${p.formattedDate} for ${row.rawLoaneeName}");
             }
           }
+
+          debugPrint('----------------------------------------------------------------------');
+          debugPrint('Total collected from all imported payment records: ₹${runningTotalCollected.toStringAsFixed(2)}');
+          debugPrint('Remaining before overdue/additional interest: ₹${(initialBal - runningTotalCollected).toStringAsFixed(2)}');
+          debugPrint('Accumulated overdue/additional interest: ₹${runningCumulativeInterest.toStringAsFixed(2)}');
+          debugPrint('Final remaining balance: ₹${runningBalance.toStringAsFixed(2)}');
+          debugPrint('======================================================================');
         }
 
         // Batch persist to Supabase if connected
@@ -1666,6 +1700,9 @@ class HistoricalPaymentImportService {
           }
           if (supa.isInitialized && insertedPayments.isNotEmpty) {
             await supa.saveCollectionPaymentsBatch(insertedPayments);
+          }
+          if (supa.isInitialized && affectedLoanees.isNotEmpty) {
+            await supa.saveLoaneeAccountsBatch(affectedLoanees.values.toList());
           }
         } catch (dbErr) {
           debugPrint("⚠️ Supabase background sync note: $dbErr");
