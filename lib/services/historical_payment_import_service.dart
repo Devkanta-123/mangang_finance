@@ -1561,7 +1561,10 @@ class HistoricalPaymentImportService {
             // Check if already in provider
             final existing = collectionProvider.getCollectionEntryById(newEntry.id);
             if (existing == null) {
-              final saved = await collectionProvider.addCollectionEntry(newEntry);
+              final saved = await collectionProvider.addCollectionEntry(
+                newEntry,
+                saveToRemote: false,
+              );
               if (saved) {
                 createdEntries.add(newEntry);
               } else {
@@ -1610,6 +1613,7 @@ class HistoricalPaymentImportService {
           final sortedPayments = List<HistoricalPaymentItem>.from(row.payments)
             ..sort((a, b) => a.paymentDate.compareTo(b.paymentDate));
 
+          double rowAmountImported = 0.0;
           int paymentIdx = 1;
           for (final p in sortedPayments) {
             if (p.isDuplicate) {
@@ -1648,40 +1652,42 @@ class HistoricalPaymentImportService {
                   : "Historical Excel Import",
             );
 
-            // Pass suppressNotification: true to ensure zero notifications during bulk import
+            // Pass saveToRemote: false to avoid sequential network calls (batch saved below)
             final saved = await collectionProvider.addCollectionPayment(
               paymentToSave,
               suppressNotification: true,
+              saveToRemote: false,
             );
             if (saved) {
               insertedPayments.add(paymentToSave);
               totalImported += p.amount;
               totalInterestImported += p.interest;
-
-              // Also update Loanee record in memory & provider
-              final custId = row.resolvedLoanee?.customerId ?? row.rawCustomerId;
-              final accNo = row.resolvedLoanee?.accountNumber ?? row.rawAccountNumber;
-              if (custId.isNotEmpty || accNo.isNotEmpty) {
-                loaneeProvider.recordPaymentForLoanee(
-                  customerId: custId,
-                  accountNumber: accNo,
-                  paymentAmount: p.amount,
-                  newRemainingBalance: newRemaining,
-                );
-                final updatedLoanee = loaneeProvider.loanees.cast<LoaneeAccount?>().firstWhere(
-                  (l) => l != null &&
-                      ((custId.isNotEmpty && l.customerId.trim().toLowerCase() == custId.trim().toLowerCase()) ||
-                       (accNo.isNotEmpty && l.accountNumber.trim().toLowerCase() == accNo.trim().toLowerCase())),
-                  orElse: () => null,
-                );
-                if (updatedLoanee != null) {
-                  affectedLoanees[updatedLoanee.customerId] = updatedLoanee;
-                }
-              }
+              rowAmountImported += p.amount;
             } else {
               failures.add(p.interest > 0 && p.amount == 0
                   ? "Failed to save interest of ₹${p.interest.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}"
                   : "Failed to save payment of ₹${p.amount} on ${p.formattedDate} for ${row.rawLoaneeName}");
+            }
+          }
+
+          // Update Loanee record in memory & provider once per loanee row
+          final custId = row.resolvedLoanee?.customerId ?? row.rawCustomerId;
+          final accNo = row.resolvedLoanee?.accountNumber ?? row.rawAccountNumber;
+          if (custId.isNotEmpty || accNo.isNotEmpty) {
+            loaneeProvider.recordPaymentForLoanee(
+              customerId: custId,
+              accountNumber: accNo,
+              paymentAmount: rowAmountImported,
+              newRemainingBalance: runningBalance,
+            );
+            final updatedLoanee = loaneeProvider.loanees.cast<LoaneeAccount?>().firstWhere(
+              (l) => l != null &&
+                  ((custId.isNotEmpty && l.customerId.trim().toLowerCase() == custId.trim().toLowerCase()) ||
+                   (accNo.isNotEmpty && l.accountNumber.trim().toLowerCase() == accNo.trim().toLowerCase())),
+              orElse: () => null,
+            );
+            if (updatedLoanee != null) {
+              affectedLoanees[updatedLoanee.customerId] = updatedLoanee;
             }
           }
 
@@ -1692,6 +1698,9 @@ class HistoricalPaymentImportService {
           debugPrint('Final remaining balance: ₹${runningBalance.toStringAsFixed(2)}');
           debugPrint('======================================================================');
         }
+
+        // Notify collection provider once for all newly added payments and entries
+        collectionProvider.notifyChanges();
 
         // Batch persist to Supabase if connected
         try {

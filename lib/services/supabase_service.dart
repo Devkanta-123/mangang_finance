@@ -1698,6 +1698,7 @@ class SupabaseService {
     cleaned.remove('interest');
     cleaned.remove('interest_amount');
     cleaned.remove('interestAmount');
+    cleaned.remove('ro_route');
     return cleaned;
   }
 
@@ -1729,16 +1730,34 @@ class SupabaseService {
     return false;
   }
 
-  /// Batch save collection payment records to Supabase
+  /// Batch save collection payment records to Supabase in chunks
   Future<bool> saveCollectionPaymentsBatch(List<CollectionPaymentModel> payments) async {
     try {
       final supaClient = client;
       if (supaClient != null && payments.isNotEmpty) {
         final payloads = payments.map((p) => _cleanPaymentPayload(p.toJson())).toList();
-        await supaClient
-            .from('ro_collection_payments')
-            .upsert(payloads, onConflict: 'id')
-            .select();
+        const chunkSize = 100;
+        for (int i = 0; i < payloads.length; i += chunkSize) {
+          final end = (i + chunkSize < payloads.length) ? i + chunkSize : payloads.length;
+          final chunk = payloads.sublist(i, end);
+          try {
+            await supaClient
+                .from('ro_collection_payments')
+                .upsert(chunk, onConflict: 'id')
+                .select();
+          } catch (colErr) {
+            debugPrint('⚠️ Batch upsert ro_collection_payments fallback note: $colErr');
+            final safeChunk = chunk.map((m) {
+              final copy = Map<String, dynamic>.from(m);
+              copy.remove('ro_route');
+              return copy;
+            }).toList();
+            await supaClient
+                .from('ro_collection_payments')
+                .upsert(safeChunk, onConflict: 'id')
+                .select();
+          }
+        }
         debugPrint('✅ Successfully batch saved ${payments.length} collection payments to Supabase.');
         return true;
       }

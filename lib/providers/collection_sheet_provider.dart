@@ -351,8 +351,10 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
   // COLLECTION SHEET CARD MASTER ENTRY METHODS
-  /// Add master collection card entry to 'ro_collection_entries' table ONLY (no default payment inserted)
-  Future<bool> addCollectionEntry(RoCollectionEntry entry) async {
+  Future<bool> addCollectionEntry(
+    RoCollectionEntry entry, {
+    bool saveToRemote = true,
+  }) async {
     final cleanCust = entry.customerId.trim().toLowerCase();
     final cleanAcc = entry.accountNumber.trim().toLowerCase();
 
@@ -367,7 +369,10 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
 
     _collectionEntries.insert(0, entry);
-    final saved = await SupabaseService.instance.saveCollectionEntry(entry);
+    bool saved = true;
+    if (saveToRemote) {
+      saved = await SupabaseService.instance.saveCollectionEntry(entry);
+    }
     notifyListeners();
     return saved;
   }
@@ -376,6 +381,7 @@ class CollectionSheetProvider extends ChangeNotifier {
   Future<bool> addCollectionPayment(
     CollectionPaymentModel payment, {
     bool suppressNotification = false,
+    bool saveToRemote = true,
   }) async {
     // Strictly prevent duplicate payment entry for the same collection card on the same date
     if (hasPaymentForDate(payment.collectionId, payment.createdAt)) {
@@ -385,21 +391,29 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
 
     _payments.insert(0, payment);
-    notifyListeners();
 
-    // Save payment to Supabase table ro_collection_payments
-    final success = await SupabaseService.instance.saveCollectionPayment(payment);
-    if (success && !suppressNotification && !SupabaseService.instance.arePaymentNotificationsSuppressed) {
-      final parentCard = getCollectionEntryById(payment.collectionId);
-      if (parentCard != null) {
-        // Trigger notification creation fallback
-        SupabaseService.instance.createCollectionPaymentNotifications(
-          payment: payment,
-          card: parentCard,
-        );
+    if (saveToRemote) {
+      notifyListeners();
+
+      // Save payment to Supabase table ro_collection_payments
+      final success = await SupabaseService.instance.saveCollectionPayment(payment);
+      if (success && !suppressNotification && !SupabaseService.instance.arePaymentNotificationsSuppressed) {
+        final parentCard = getCollectionEntryById(payment.collectionId);
+        if (parentCard != null) {
+          // Trigger notification creation fallback
+          SupabaseService.instance.createCollectionPaymentNotifications(
+            payment: payment,
+            card: parentCard,
+          );
+        }
       }
     }
     return true;
+  }
+
+  /// Notify listeners after batch operations
+  void notifyChanges() {
+    notifyListeners();
   }
 
   /// Delete collection payment by ID
