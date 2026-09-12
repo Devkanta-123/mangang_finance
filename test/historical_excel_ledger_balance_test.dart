@@ -72,6 +72,8 @@ void main() {
     expect(totalInterest, equals(765.0), reason: 'Accumulated overdue/additional interest: ₹765.00');
     expect(loanee.loanAmount - totalCollected, equals(7386.0), reason: 'Remaining before overdue/additional interest: ₹7,386.00');
     expect(remainingBal, equals(8151.0), reason: 'FINAL REMAINING BALANCE: ₹8,151.00');
+    expect(collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider), isFalse,
+        reason: 'Loan has remaining balance of ₹8,151.00; it cannot be completed even though maturity date has passed');
 
     // 2. Assertions across dates 9 September through 14 September
     for (int day = 9; day <= 14; day++) {

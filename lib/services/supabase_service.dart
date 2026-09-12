@@ -1695,7 +1695,6 @@ class SupabaseService {
   /// Helper to ensure payment payloads strictly conform to ro_collection_payments table schema
   Map<String, dynamic> _cleanPaymentPayload(Map<String, dynamic> raw) {
     final cleaned = Map<String, dynamic>.from(raw);
-    cleaned.remove('interest');
     cleaned.remove('interest_amount');
     cleaned.remove('interestAmount');
     cleaned.remove('postMaturityInterest');
@@ -1719,7 +1718,8 @@ class SupabaseService {
           debugPrint('⚠️ Upsert ro_collection_payments fallback note: $colErr');
           final safePayload = Map<String, dynamic>.from(payload)
             ..remove('ro_route')
-            ..remove('post_maturity_interest');
+            ..remove('post_maturity_interest')
+            ..remove('interest');
           await supaClient
               .from('ro_collection_payments')
               .upsert(safePayload, onConflict: 'id')
@@ -1755,6 +1755,7 @@ class SupabaseService {
               final copy = Map<String, dynamic>.from(m);
               copy.remove('ro_route');
               copy.remove('post_maturity_interest');
+              copy.remove('interest');
               return copy;
             }).toList();
             await supaClient

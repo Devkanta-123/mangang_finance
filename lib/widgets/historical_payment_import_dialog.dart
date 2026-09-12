@@ -107,7 +107,7 @@ class _HistoricalPaymentImportDialogState
               if (result.totalLateFeesImported > 0) ...[
                 const SizedBox(height: 4),
                 Text(
-                  "Daily/Weekly Late Fees: ₹${result.totalLateFeesImported.toStringAsFixed(2)}",
+                  "Total Late Payment Interest: ₹${result.totalLateFeesImported.toStringAsFixed(2)}",
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
@@ -118,7 +118,7 @@ class _HistoricalPaymentImportDialogState
               if (result.totalPostMatImported > 0) ...[
                 const SizedBox(height: 4),
                 Text(
-                  "Post Maturity Fine: ₹${result.totalPostMatImported.toStringAsFixed(2)}",
+                  "Total Post Maturity Interest: ₹${result.totalPostMatImported.toStringAsFixed(2)}",
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
@@ -126,14 +126,14 @@ class _HistoricalPaymentImportDialogState
                   ),
                 ),
               ],
-              if (result.totalInterestImported > 0) ...[
+              if (result.totalLateFeesImported > 0 && result.totalPostMatImported > 0) ...[
                 const SizedBox(height: 4),
                 Text(
-                  "Total Interest Added: ₹${result.totalInterestImported.toStringAsFixed(2)}",
+                  "Total Overdue / Additional Interest: ₹${(result.totalLateFeesImported + result.totalPostMatImported).toStringAsFixed(2)}",
                   style: TextStyle(
                     fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.deepOrange.shade800,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red.shade900,
                   ),
                 ),
               ],
@@ -346,7 +346,7 @@ class _HistoricalPaymentImportDialogState
                   if (preview.totalLateFeesToImport > 0) ...[
                     const SizedBox(width: 8),
                     _buildStatChip(
-                      title: "Late Payment Fees",
+                      title: "Late Payment Interest",
                       value: "₹${preview.totalLateFeesToImport.toStringAsFixed(2)}",
                       color: Colors.orange.shade900,
                       bgColor: Colors.orange.shade50,
@@ -355,19 +355,10 @@ class _HistoricalPaymentImportDialogState
                   if (preview.totalPostMatToImport > 0) ...[
                     const SizedBox(width: 8),
                     _buildStatChip(
-                      title: "Post Maturity Fine",
+                      title: "Post Maturity Interest",
                       value: "₹${preview.totalPostMatToImport.toStringAsFixed(2)}",
                       color: Colors.purple.shade900,
                       bgColor: Colors.purple.shade50,
-                    ),
-                  ],
-                  if (preview.totalInterestToImport > 0) ...[
-                    const SizedBox(width: 8),
-                    _buildStatChip(
-                      title: "Interest Added",
-                      value: "₹${preview.totalInterestToImport.toStringAsFixed(2)}",
-                      color: Colors.deepOrange.shade900,
-                      bgColor: Colors.deepOrange.shade50,
                     ),
                   ],
                   if (preview.duplicatePaymentsCount > 0) ...[
@@ -705,14 +696,13 @@ class _HistoricalPaymentImportDialogState
 
                   final dupLabel = isDup ? " (Dup)" : "";
                   String interestLabel = "";
-                  if (p.latePaymentFee > 0 && p.postMaturityInterest > 0) {
-                    interestLabel = " (+₹${p.latePaymentFee.toStringAsFixed(0)} late, +₹${p.postMaturityInterest.toStringAsFixed(0)} post-mat)";
+                  final lateFeeVal = p.latePaymentFee > 0 ? p.latePaymentFee : p.interest;
+                  if (lateFeeVal > 0 && p.postMaturityInterest > 0) {
+                    interestLabel = " (+₹${lateFeeVal.toStringAsFixed(0)} late, +₹${p.postMaturityInterest.toStringAsFixed(0)} post-mat)";
                   } else if (p.postMaturityInterest > 0) {
                     interestLabel = " (+₹${p.postMaturityInterest.toStringAsFixed(0)} post-mat)";
-                  } else if (p.latePaymentFee > 0) {
-                    interestLabel = " (+₹${p.latePaymentFee.toStringAsFixed(0)} late fee)";
-                  } else if (p.interest > 0) {
-                    interestLabel = " (+₹${p.interest.toStringAsFixed(0)} int)";
+                  } else if (lateFeeVal > 0) {
+                    interestLabel = " (+₹${lateFeeVal.toStringAsFixed(0)} late)";
                   }
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

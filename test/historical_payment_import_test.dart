@@ -200,8 +200,10 @@ void main() {
       expect(firstRow.rawRoute, equals("Angom"));
       expect(firstRow.rawCollectedBy, equals("Dev"));
       expect(firstRow.resolvedCollectionEntry?.id, equals("COL-26LA000001"));
-      expect(firstRow.validPaymentsCount, equals(5));
-      expect(preview.totalAmountToImport, equals(900.0));
+      expect(preview.totalAmountToImport, equals(329.0));
+      expect(preview.totalLateFeesToImport, equals(4.0));
+      expect(preview.totalPostMatToImport, equals(577.0));
+      expect(preview.totalInterestToImport, equals(581.0));
     });
 
     // Test 2: Multiple valid rows
@@ -1145,7 +1147,10 @@ void main() {
       expect(preview.totalRows, equals(1));
       expect(preview.validRowsCount, equals(1));
       expect(preview.validPaymentsCount, equals(5));
-      expect(preview.totalAmountToImport, equals(900.0));
+      expect(preview.totalAmountToImport, equals(329.0));
+      expect(preview.totalLateFeesToImport, equals(4.0));
+      expect(preview.totalPostMatToImport, equals(577.0));
+      expect(preview.totalInterestToImport, equals(581.0));
 
       final record = preview.rowRecords.first;
       expect(record.rawCustomerId, equals("26LA000001"));
@@ -1179,17 +1184,19 @@ void main() {
 
       expect(result.success, isTrue);
       expect(result.paymentsInsertedCount, equals(5));
-      expect(result.totalAmountImported, equals(900.0));
+      expect(result.totalAmountImported, equals(329.0));
+      expect(result.totalLateFeesImported, equals(4.0));
+      expect(result.totalPostMatImported, equals(577.0));
+      expect(result.totalInterestImported, equals(581.0));
 
-      // Verify exact dates were preserved (2026-07-01 to 2026-07-05)
+      // Verify exact dates were preserved (2026-03-24, 2026-03-25, 2026-03-26, 2026-06-09, 2026-08-24)
       final importedPayments = collectionProvider.payments;
       expect(importedPayments.length, equals(5));
-      expect(importedPayments.every((p) => p.createdAt.year == 2026 && p.createdAt.month == 7), isTrue);
-      expect(importedPayments.any((p) => p.createdAt.day == 1), isTrue);
-      expect(importedPayments.any((p) => p.createdAt.day == 2), isTrue);
-      expect(importedPayments.any((p) => p.createdAt.day == 3), isTrue);
-      expect(importedPayments.any((p) => p.createdAt.day == 4), isTrue);
-      expect(importedPayments.any((p) => p.createdAt.day == 5), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.year == 2026 && p.createdAt.month == 3 && p.createdAt.day == 24), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.year == 2026 && p.createdAt.month == 3 && p.createdAt.day == 25), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.year == 2026 && p.createdAt.month == 3 && p.createdAt.day == 26), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.year == 2026 && p.createdAt.month == 6 && p.createdAt.day == 9), isTrue);
+      expect(importedPayments.any((p) => p.createdAt.year == 2026 && p.createdAt.month == 8 && p.createdAt.day == 24), isTrue);
     });
 
     test("22. Old payment history import parses Interest column and calculates remaining balance as Initial + Interest - Paid", () async {
@@ -1239,8 +1246,10 @@ void main() {
       );
 
       expect(preview.canImport, isTrue);
-      expect(preview.totalAmountToImport, equals(900.0));
-      expect(preview.totalInterestToImport, equals(301.0)); // 150 + 20 + 30 + 45 + 56
+      expect(preview.totalAmountToImport, equals(329.0));
+      expect(preview.totalLateFeesToImport, equals(4.0));
+      expect(preview.totalPostMatToImport, equals(577.0));
+      expect(preview.totalInterestToImport, equals(581.0));
 
       final result = await HistoricalPaymentImportService.executeTransactionalImport(
         previewResult: preview,
@@ -1250,16 +1259,18 @@ void main() {
 
       expect(result.success, isTrue);
       expect(result.paymentsInsertedCount, equals(5));
-      expect(result.totalAmountImported, equals(900.0));
-      expect(result.totalInterestImported, equals(301.0));
+      expect(result.totalAmountImported, equals(329.0));
+      expect(result.totalLateFeesImported, equals(4.0));
+      expect(result.totalPostMatImported, equals(577.0));
+      expect(result.totalInterestImported, equals(581.0));
 
-      // Final remaining balance should be: 11500 + 301 - 900 = 10901.0
+      // Final remaining balance should be: 11500 + 581 - 329 = 11752.0
       final updatedLoanee = loaneeProvider.loanees.firstWhere((l) => l.customerId == "26LA000001");
-      expect(updatedLoanee.paidamount, equals(900.0));
-      expect(updatedLoanee.dueamount, equals(10901.0));
+      expect(updatedLoanee.paidamount, equals(329.0));
+      expect(updatedLoanee.dueamount, equals(11752.0));
 
       final latestBal = collectionProvider.getLatestRemainingBalance("COL-26LA000001");
-      expect(latestBal, equals(10901.0));
+      expect(latestBal, equals(11752.0));
     });
 
     test("23. Deletion of payment immediately reflects in provider and updates loanee balance without manual refresh", () async {
@@ -1409,8 +1420,9 @@ void main() {
       await tester.tap(find.text("View History"));
       await tester.pumpAndSettle();
 
-      // Verify Interest column is present in DataTable
-      expect(find.text("Interest"), findsOneWidget);
+      // Verify Late Fee and Post Maturity columns are present in DataTable
+      expect(find.text("Daily/Wkly Late Fee"), findsOneWidget);
+      expect(find.text("Post Maturity Fine"), findsOneWidget);
       expect(find.text("₹ 150.00"), findsOneWidget);
       expect(find.text("₹ 200.00"), findsOneWidget);
       expect(find.text("₹ 11450.00"), findsOneWidget);

@@ -103,34 +103,24 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
   }
 
-  /// Calculate total interest for a collection card ID from payment table
+  /// Calculate total interest and overdue fees for a collection card ID from payment table
+  /// (Includes daily/weekly late fees in interest column and post maturity interest)
   double getTotalInterestForCollection(String collectionId) {
     final cardPayments = getPaymentsForCollection(collectionId);
-    return cardPayments.fold(0.0, (sum, p) => sum + p.interest);
+    return cardPayments.fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
   }
 
   /// Calculate total daily/weekly late payment fees for a collection card ID from payment table
+  /// (Reads from table column interest for imported records, or lateFine for manual entries)
   double getTotalLatePaymentFeesForCollection(String collectionId) {
     final cardPayments = getPaymentsForCollection(collectionId);
-    return cardPayments.fold(0.0, (sum, p) {
-      if (p.lateFine > 0) return sum + p.lateFine;
-      if (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false)) {
-        return sum + p.interest;
-      }
-      return sum;
-    });
+    return cardPayments.fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine));
   }
 
   /// Calculate total post-maturity interest/fine for a collection card ID from payment table
   double getTotalPostMaturityInterestForCollection(String collectionId) {
     final cardPayments = getPaymentsForCollection(collectionId);
-    return cardPayments.fold(0.0, (sum, p) {
-      if (p.postMaturityInterest > 0) return sum + p.postMaturityInterest;
-      if (p.remarks?.toLowerCase().contains('post maturity') ?? false) {
-        return sum + p.interest;
-      }
-      return sum;
-    });
+    return cardPayments.fold(0.0, (sum, p) => sum + p.postMaturityInterest);
   }
 
   /// Calculate today's amount paid for a collection card ID strictly from payment table
@@ -206,19 +196,14 @@ class CollectionSheetProvider extends ChangeNotifier {
     });
   }
 
-  /// Checks whether a collection entry's loan amount has been fully paid / cleared (remaining balance <= 0).
-  /// Accounts for:
-  /// - Explicit closed/completed status in RoCollectionEntry or LoaneeAccount
-  /// - Sum of all payments in ro_collection_payments reaching or exceeding initial balance + interest
-  /// - LoaneeAccount dueAmount reaching <= 0 with positive paidAmount
+  /// Checks whether a collection entry's loan amount and all accrued interest have been fully cleared (remaining balance <= 0).
+  /// A loan is ONLY completed when:
+  /// - Total collected from payment records strictly clears initial loan amount + all interest (remaining <= 0.01)
+  /// - Total payable amount is 0.00
+  /// - Under NO circumstances is a loan completed if there is an outstanding payable balance or unpaid interest,
+  ///   even if the maturity date has passed, even if tenure elapsed, and even if paidAmount >= loanAmount.
   bool isEntryCompleted(RoCollectionEntry entry, {LoaneeProvider? loaneeProvider}) {
-    // 1. Check if entry is explicitly marked closed or completed
-    final entryStatus = entry.status.trim().toLowerCase();
-    if (entryStatus == 'closed' || entryStatus == 'completed') {
-      return true;
-    }
-
-    // 2. Check LoaneeAccount if available
+    // 1. Resolve LoaneeAccount if available
     LoaneeAccount? loanee;
     if (loaneeProvider != null) {
       loanee = loaneeProvider.getLoaneeForUser(
@@ -228,31 +213,58 @@ class CollectionSheetProvider extends ChangeNotifier {
       );
     }
 
-    if (loanee != null) {
-      final loaneeStatus = loanee.status.trim().toLowerCase();
-      if (loaneeStatus == 'closed' || loaneeStatus == 'completed') {
-        return true;
-      }
-      if (loanee.loanAmount > 0 && loanee.dueAmount <= 0.01 && loanee.paidAmount > 0) {
-        return true;
-      }
-      if (loanee.loanAmount > 0 && loanee.paidAmount >= loanee.loanAmount) {
-        return true;
-      }
-    }
-
-    // 3. Dynamic payment calculation from ro_collection_payments records
-    final totalCollected = getTotalPaidForCollection(entry.id);
-    final totalInterest = getTotalInterestForCollection(entry.id);
+    // 2. Authoritative loan amount
     final totalLoanAmount = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
         : ((loanee != null && loanee.loanAmount > 0)
             ? loanee.loanAmount
             : entry.initialBalance);
 
-    if (totalLoanAmount > 0 && totalCollected > 0) {
+    // 3. Dynamic payment calculation from ro_collection_payments records
+    final totalCollected = getTotalPaidForCollection(entry.id);
+    final totalInterest = getTotalInterestForCollection(entry.id);
+
+    // If there is a loan amount defined
+    if (totalLoanAmount > 0) {
       final remaining = (totalLoanAmount + totalInterest - totalCollected);
-      if (remaining <= 0.01) {
+      // If remaining balance is greater than 0.01, loan is NOT completed under any circumstances!
+      if (remaining > 0.01) {
+        return false;
+      }
+      // If total collected clears the loan + all interest, then it is completed
+      if (totalCollected > 0 && remaining <= 0.01) {
+        return true;
+      }
+    }
+
+    // 4. Check latest payment in ro_collection_payments
+    final cardPayments = getPaymentsForCollection(entry.id);
+    if (cardPayments.isNotEmpty) {
+      final sorted = List<CollectionPaymentModel>.from(cardPayments)
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      if (sorted.first.remainingBalance > 0.01) {
+        return false;
+      }
+      if (sorted.first.remainingBalance <= 0.01 && totalCollected > 0) {
+        return true;
+      }
+    }
+
+    // 5. Check loanee dueAmount
+    if (loanee != null) {
+      if (loanee.dueAmount > 0.01) {
+        return false;
+      }
+      if (loanee.loanAmount > 0 && loanee.dueAmount <= 0.01 && loanee.paidAmount > 0) {
+        return true;
+      }
+    }
+
+    // 6. Explicit closed/completed status ONLY if no outstanding due remains
+    final entryStatus = entry.status.trim().toLowerCase();
+    final loaneeStatus = loanee?.status.trim().toLowerCase() ?? '';
+    if (entryStatus == 'closed' || entryStatus == 'completed' || loaneeStatus == 'closed' || loaneeStatus == 'completed') {
+      if (totalCollected > 0) {
         return true;
       }
     }

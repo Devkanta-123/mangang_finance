@@ -21,9 +21,9 @@ import "../services/supabase_service.dart";
 class HistoricalPaymentItem {
   final DateTime paymentDate;
   final double amount;
-  final double interest; // Total Interest amount added
-  final double latePaymentFee; // Daily/Weekly Late Payment Fees
-  final double postMaturityInterest; // Post Maturity Fine Payment
+  final double interest; // Daily/Weekly Late Payment Fees (inserted to table column interest)
+  final double latePaymentFee; // Daily/Weekly Late Payment Fees (alias)
+  final double postMaturityInterest; // Post Maturity Fine Payment (inserted to table column post_maturity_interest)
   final String roName;
   final bool isDuplicate;
   final String? errorMessage;
@@ -33,13 +33,13 @@ class HistoricalPaymentItem {
     required this.paymentDate,
     required this.amount,
     this.interest = 0.0,
-    this.latePaymentFee = 0.0,
+    double latePaymentFee = 0.0,
     this.postMaturityInterest = 0.0,
     required this.roName,
     this.isDuplicate = false,
     this.errorMessage,
     this.paymentModel,
-  });
+  }) : latePaymentFee = latePaymentFee > 0 ? latePaymentFee : interest;
 
   String get formattedDate {
     return "${paymentDate.day.toString().padLeft(2, "0")}/${paymentDate.month.toString().padLeft(2, "0")}/${paymentDate.year}";
@@ -93,7 +93,7 @@ class HistoricalImportRowRecord {
       .where((p) =>
           !p.isDuplicate &&
           p.errorMessage == null &&
-          (p.amount > 0 || p.interest > 0))
+          (p.amount > 0 || p.interest > 0 || p.postMaturityInterest > 0))
       .length;
 
   /// Count of duplicate payments in this row
@@ -104,20 +104,18 @@ class HistoricalImportRowRecord {
       .where((p) => !p.isDuplicate && p.errorMessage == null && p.amount > 0)
       .fold(0.0, (sum, p) => sum + p.amount);
 
-  /// Sum of valid non-duplicate interest amounts in this row
-  double get totalRowInterest => payments
-      .where((p) => !p.isDuplicate && p.errorMessage == null && p.interest > 0)
-      .fold(0.0, (sum, p) => sum + p.interest);
-
-  /// Sum of valid non-duplicate daily/weekly late payment fees in this row
+  /// Sum of valid non-duplicate daily/weekly late payment fees in this row (stored in interest column)
   double get totalRowLateFees => payments
-      .where((p) => !p.isDuplicate && p.errorMessage == null && p.latePaymentFee > 0)
-      .fold(0.0, (sum, p) => sum + p.latePaymentFee);
+      .where((p) => !p.isDuplicate && p.errorMessage == null && (p.latePaymentFee > 0 || p.interest > 0))
+      .fold(0.0, (sum, p) => sum + (p.latePaymentFee > 0 ? p.latePaymentFee : p.interest));
 
   /// Sum of valid non-duplicate post maturity interest in this row
   double get totalRowPostMat => payments
       .where((p) => !p.isDuplicate && p.errorMessage == null && p.postMaturityInterest > 0)
       .fold(0.0, (sum, p) => sum + p.postMaturityInterest);
+
+  /// Sum of all overdue / additional interest in this row
+  double get totalRowInterest => totalRowLateFees + totalRowPostMat;
 }
 
 /// Full aggregate preview result before committing to DB
@@ -130,9 +128,9 @@ class HistoricalImportPreviewResult {
   final int validPaymentsCount;
   final int duplicatePaymentsCount;
   final double totalAmountToImport;
-  final double totalInterestToImport;
   final double totalLateFeesToImport;
   final double totalPostMatToImport;
+  final double totalInterestToImport;
   final List<HistoricalImportRowRecord> rowRecords;
   final List<String> fileValidationErrors;
 
@@ -145,12 +143,14 @@ class HistoricalImportPreviewResult {
     required this.validPaymentsCount,
     required this.duplicatePaymentsCount,
     required this.totalAmountToImport,
-    this.totalInterestToImport = 0.0,
     this.totalLateFeesToImport = 0.0,
     this.totalPostMatToImport = 0.0,
+    double totalInterestToImport = 0.0,
     required this.rowRecords,
     this.fileValidationErrors = const [],
-  });
+  }) : totalInterestToImport = totalInterestToImport > 0
+            ? totalInterestToImport
+            : (totalLateFeesToImport + totalPostMatToImport);
 
   bool get hasFileErrors => fileValidationErrors.isNotEmpty;
   bool get canImport => validPaymentsCount > 0 && !hasFileErrors;
@@ -162,9 +162,9 @@ class HistoricalImportExecutionResult {
   final int collectionEntriesCreatedCount;
   final int paymentsInsertedCount;
   final double totalAmountImported;
-  final double totalInterestImported;
   final double totalLateFeesImported;
   final double totalPostMatImported;
+  final double totalInterestImported;
   final int duplicatePaymentsSkippedCount;
   final String? errorMessage;
   final List<String> failureDetails;
@@ -174,13 +174,15 @@ class HistoricalImportExecutionResult {
     this.collectionEntriesCreatedCount = 0,
     this.paymentsInsertedCount = 0,
     this.totalAmountImported = 0.0,
-    this.totalInterestImported = 0.0,
     this.totalLateFeesImported = 0.0,
     this.totalPostMatImported = 0.0,
+    double totalInterestImported = 0.0,
     this.duplicatePaymentsSkippedCount = 0,
     this.errorMessage,
     this.failureDetails = const [],
-  });
+  }) : totalInterestImported = totalInterestImported > 0
+            ? totalInterestImported
+            : (totalLateFeesImported + totalPostMatImported);
 }
 
 class HistoricalPaymentImportService {
@@ -444,22 +446,25 @@ class HistoricalPaymentImportService {
     sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: 6)).value =
         TextCellValue("Payment Amount");
     sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: 6)).value =
-        TextCellValue("Interest");
+        TextCellValue("Late Payment Interest");
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: 6)).value =
+        TextCellValue("Post Maturity Interest");
 
     // Sample Payments
     final samplePayments = [
-      [DateTime(2026, 7, 1), 200.0, 150.0],
-      [DateTime(2026, 7, 2), 100.0, 20.0],
-      [DateTime(2026, 7, 3), 300.0, 30.0],
-      [DateTime(2026, 7, 4), 100.0, 45.0],
-      [DateTime(2026, 7, 5), 200.0, 56.0],
+      [DateTime(2026, 3, 24), 29.0, 0.0, 0.0],
+      [DateTime(2026, 3, 25), 120.0, 0.0, 0.0],
+      [DateTime(2026, 3, 26), 0.0, 3.0, 0.0],
+      [DateTime(2026, 6, 9), 60.0, 1.0, 0.0],
+      [DateTime(2026, 8, 24), 120.0, 0.0, 577.0],
     ];
 
     for (int i = 0; i < samplePayments.length; i++) {
       final r = 7 + i;
       final dt = samplePayments[i][0] as DateTime;
       final amt = samplePayments[i][1] as double;
-      final interest = samplePayments[i][2] as double;
+      final lateFee = samplePayments[i][2] as double;
+      final postMat = samplePayments[i][3] as double;
 
       final dateCell =
           sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r));
@@ -470,9 +475,13 @@ class HistoricalPaymentImportService {
           sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r));
       amtCell.value = DoubleCellValue(amt);
 
-      final interestCell =
+      final lateCell =
           sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r));
-      interestCell.value = DoubleCellValue(interest);
+      lateCell.value = DoubleCellValue(lateFee);
+
+      final postMatCell =
+          sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: r));
+      postMatCell.value = DoubleCellValue(postMat);
     }
 
     return excel.save() ?? [];
@@ -872,7 +881,8 @@ class HistoricalPaymentImportService {
               ? (parseNumericAmount(rawGenericIntCell) ?? 0.0)
               : 0.0;
 
-          final double parsedInterest = parsedLateFee + parsedPostMat + parsedGenericInt;
+          // Late Payment data (daily/weekly late fee) from Excel is stored in interest column
+          final double parsedInterest = parsedLateFee + parsedGenericInt;
 
           final amtStr = (amountColIdx != -1 && row.length > amountColIdx) ? getCellString(row[amountColIdx]) : "";
           final bool isAmountBlank = rawAmountCell == null || amtStr.trim().isEmpty || amtStr.trim() == "-" || amtStr.trim() == "0";
@@ -885,7 +895,7 @@ class HistoricalPaymentImportService {
                   paymentDate: parsedDate,
                   amount: parsedAmount,
                   interest: parsedInterest,
-                  latePaymentFee: parsedLateFee,
+                  latePaymentFee: parsedInterest,
                   postMaturityInterest: parsedPostMat,
                   roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
                   errorMessage: "Payment amount cannot be negative (₹$parsedAmount) at row ${r + 1}",
@@ -894,7 +904,7 @@ class HistoricalPaymentImportService {
               continue;
             }
             effectiveAmount = parsedAmount;
-          } else if (isAmountBlank) {
+          } else if (isAmountBlank || parsedInterest > 0 || parsedPostMat > 0) {
             effectiveAmount = 0.0;
           } else {
             rowPayments.add(
@@ -902,7 +912,7 @@ class HistoricalPaymentImportService {
                 paymentDate: parsedDate,
                 amount: 0.0,
                 interest: parsedInterest,
-                latePaymentFee: parsedLateFee,
+                latePaymentFee: parsedInterest,
                 postMaturityInterest: parsedPostMat,
                 roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
                 errorMessage: "Invalid payment amount at row ${r + 1}: \"$amtStr\"",
@@ -917,7 +927,7 @@ class HistoricalPaymentImportService {
                 paymentDate: parsedDate,
                 amount: effectiveAmount,
                 interest: parsedInterest,
-                latePaymentFee: parsedLateFee,
+                latePaymentFee: parsedInterest,
                 postMaturityInterest: parsedPostMat,
                 roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
                 errorMessage: "Interest amount cannot be negative (₹$parsedInterest) at row ${r + 1}",
@@ -926,8 +936,23 @@ class HistoricalPaymentImportService {
             continue;
           }
 
-          // If both payment amount and interest are 0, there is no transaction on this date to record
-          if (effectiveAmount == 0 && parsedInterest == 0) {
+          if (parsedPostMat < 0) {
+            rowPayments.add(
+              HistoricalPaymentItem(
+                paymentDate: parsedDate,
+                amount: effectiveAmount,
+                interest: parsedInterest,
+                latePaymentFee: parsedInterest,
+                postMaturityInterest: parsedPostMat,
+                roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
+                errorMessage: "Post maturity interest cannot be negative (₹$parsedPostMat) at row ${r + 1}",
+              ),
+            );
+            continue;
+          }
+
+          // If payment amount, interest, and post maturity interest are all 0, there is no transaction on this date to record
+          if (effectiveAmount == 0 && parsedInterest == 0 && parsedPostMat == 0) {
             continue;
           }
 
@@ -937,7 +962,7 @@ class HistoricalPaymentImportService {
                 paymentDate: parsedDate,
                 amount: effectiveAmount,
                 interest: parsedInterest,
-                latePaymentFee: parsedLateFee,
+                latePaymentFee: parsedInterest,
                 postMaturityInterest: parsedPostMat,
                 roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
                 errorMessage: "Payment skipped: Loanee does not exist in loanee_accounts database.",
@@ -964,7 +989,7 @@ class HistoricalPaymentImportService {
                 paymentDate: parsedDate,
                 amount: effectiveAmount,
                 interest: parsedInterest,
-                latePaymentFee: parsedLateFee,
+                latePaymentFee: parsedInterest,
                 postMaturityInterest: parsedPostMat,
                 roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
                 isDuplicate: true,
@@ -976,19 +1001,16 @@ class HistoricalPaymentImportService {
             filePaymentKeys.add(fileAccountKey);
             validPaymentsCount++;
             totalAmountToImport += effectiveAmount;
-            totalInterestToImport += parsedInterest;
-            totalLateFeesToImport += parsedLateFee;
+            totalLateFeesToImport += parsedInterest;
             totalPostMatToImport += parsedPostMat;
 
             String remarksText;
-            if (parsedLateFee > 0 && parsedPostMat > 0) {
-              remarksText = "Historical Excel Import (Late Fee: ₹${parsedLateFee.toStringAsFixed(2)}, Post Maturity: ₹${parsedPostMat.toStringAsFixed(2)}, Interest: ₹${parsedInterest.toStringAsFixed(2)})";
+            if (parsedPostMat > 0 && parsedInterest > 0) {
+              remarksText = "Historical Excel Import (Daily/Weekly Late Fee: ₹${parsedInterest.toStringAsFixed(2)}, Post Maturity: ₹${parsedPostMat.toStringAsFixed(2)})";
             } else if (parsedPostMat > 0) {
-              remarksText = "Historical Excel Import (Post Maturity: ₹${parsedPostMat.toStringAsFixed(2)}, Interest: ₹${parsedInterest.toStringAsFixed(2)})";
-            } else if (parsedLateFee > 0) {
-              remarksText = "Historical Excel Import (Late Fee: ₹${parsedLateFee.toStringAsFixed(2)}, Interest: ₹${parsedInterest.toStringAsFixed(2)})";
+              remarksText = "Historical Excel Import (Post Maturity: ₹${parsedPostMat.toStringAsFixed(2)})";
             } else if (parsedInterest > 0) {
-              remarksText = "Historical Excel Import (Interest: ₹${parsedInterest.toStringAsFixed(2)})";
+              remarksText = "Historical Excel Import (Daily/Weekly Late Fee: ₹${parsedInterest.toStringAsFixed(2)})";
             } else {
               remarksText = "Historical Excel Import";
             }
@@ -998,7 +1020,7 @@ class HistoricalPaymentImportService {
               collectionId: targetCollectionId,
               paymentAmount: effectiveAmount,
               interest: parsedInterest,
-              lateFine: parsedLateFee,
+              lateFine: 0.0,
               postMaturityInterest: parsedPostMat,
               remainingBalance: 0.0,
               paymentType: "Cash",
@@ -1014,7 +1036,7 @@ class HistoricalPaymentImportService {
                 paymentDate: parsedDate,
                 amount: effectiveAmount,
                 interest: parsedInterest,
-                latePaymentFee: parsedLateFee,
+                latePaymentFee: parsedInterest,
                 postMaturityInterest: parsedPostMat,
                 roName: rawCollectedBy.isNotEmpty ? rawCollectedBy : "RO Officer",
                 paymentModel: paymentModel,
@@ -1704,28 +1726,26 @@ class HistoricalPaymentImportService {
               duplicateSkipped++;
               continue;
             }
-            if (p.errorMessage != null || (p.amount <= 0 && p.interest <= 0)) {
+            if (p.errorMessage != null || (p.amount <= 0 && p.interest <= 0 && p.postMaturityInterest <= 0)) {
               continue;
             }
 
             // Correct formula: Interest increases remaining amount, payment decreases it
             runningTotalCollected += p.amount;
-            runningCumulativeInterest += p.interest;
-            runningBalance = (runningBalance + p.interest - p.amount).clamp(0.0, double.infinity);
+            runningCumulativeInterest += (p.interest + p.postMaturityInterest);
+            runningBalance = (runningBalance + p.interest + p.postMaturityInterest - p.amount).clamp(0.0, double.infinity);
             final newRemaining = runningBalance;
 
-            debugPrint('  Payment #$paymentIdx: Date=${p.formattedDate} | Payment Amount=₹${p.amount.toStringAsFixed(2)} | Additional Interest=₹${p.interest.toStringAsFixed(2)} | Running Total Collected=₹${runningTotalCollected.toStringAsFixed(2)} | Running Remaining Balance=₹${newRemaining.toStringAsFixed(2)}');
+            debugPrint('  Payment #$paymentIdx: Date=${p.formattedDate} | Payment Amount=₹${p.amount.toStringAsFixed(2)} | Interest=₹${p.interest.toStringAsFixed(2)} | Post Maturity=₹${p.postMaturityInterest.toStringAsFixed(2)} | Running Total Collected=₹${runningTotalCollected.toStringAsFixed(2)} | Running Remaining Balance=₹${newRemaining.toStringAsFixed(2)}');
             paymentIdx++;
 
             String paymentRemarks;
-            if (p.latePaymentFee > 0 && p.postMaturityInterest > 0) {
-              paymentRemarks = "Historical Excel Import (Late Fee: ₹${p.latePaymentFee.toStringAsFixed(2)}, Post Maturity: ₹${p.postMaturityInterest.toStringAsFixed(2)}, Interest: ₹${p.interest.toStringAsFixed(2)})";
+            if (p.postMaturityInterest > 0 && p.interest > 0) {
+              paymentRemarks = "Historical Excel Import (Daily/Weekly Late Fee: ₹${p.interest.toStringAsFixed(2)}, Post Maturity: ₹${p.postMaturityInterest.toStringAsFixed(2)})";
             } else if (p.postMaturityInterest > 0) {
-              paymentRemarks = "Historical Excel Import (Post Maturity: ₹${p.postMaturityInterest.toStringAsFixed(2)}, Interest: ₹${p.interest.toStringAsFixed(2)})";
-            } else if (p.latePaymentFee > 0) {
-              paymentRemarks = "Historical Excel Import (Late Fee: ₹${p.latePaymentFee.toStringAsFixed(2)}, Interest: ₹${p.interest.toStringAsFixed(2)})";
+              paymentRemarks = "Historical Excel Import (Post Maturity: ₹${p.postMaturityInterest.toStringAsFixed(2)})";
             } else if (p.interest > 0) {
-              paymentRemarks = "Historical Excel Import (Interest: ₹${p.interest.toStringAsFixed(2)})";
+              paymentRemarks = "Historical Excel Import (Daily/Weekly Late Fee: ₹${p.interest.toStringAsFixed(2)})";
             } else {
               paymentRemarks = "Historical Excel Import";
             }
@@ -1736,8 +1756,8 @@ class HistoricalPaymentImportService {
                   : "PAY-HIST-${targetEntryId}_${p.paymentDate.millisecondsSinceEpoch}",
               collectionId: targetEntryId,
               paymentAmount: p.amount,
-              interest: p.interest,
-              lateFine: p.latePaymentFee > 0 ? p.latePaymentFee : (p.paymentModel?.lateFine ?? 0.0),
+              interest: p.interest > 0 ? p.interest : (p.paymentModel?.interest ?? 0.0),
+              lateFine: 0.0,
               postMaturityInterest: p.postMaturityInterest > 0 ? p.postMaturityInterest : (p.paymentModel?.postMaturityInterest ?? 0.0),
               remainingBalance: newRemaining,
               paymentType: "Cash",
@@ -1745,7 +1765,9 @@ class HistoricalPaymentImportService {
               roRoute: row.rawRoute.isNotEmpty ? row.rawRoute : "Office",
               createdAt: p.paymentDate,
               status: "Success",
-              remarks: p.paymentModel?.remarks ?? paymentRemarks,
+              remarks: (p.paymentModel?.remarks?.isNotEmpty == true)
+                  ? p.paymentModel!.remarks
+                  : paymentRemarks,
             );
 
             // Pass saveToRemote: false to avoid sequential network calls (batch saved below)
@@ -1757,14 +1779,16 @@ class HistoricalPaymentImportService {
             if (saved) {
               insertedPayments.add(paymentToSave);
               totalImported += p.amount;
-              totalInterestImported += p.interest;
-              totalLateFeesImported += p.latePaymentFee;
+              totalLateFeesImported += p.interest;
               totalPostMatImported += p.postMaturityInterest;
+              totalInterestImported += (p.interest + p.postMaturityInterest);
               rowAmountImported += p.amount;
             } else {
               failures.add(p.interest > 0 && p.amount == 0
-                  ? "Failed to save interest of ₹${p.interest.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}"
-                  : "Failed to save payment of ₹${p.amount} on ${p.formattedDate} for ${row.rawLoaneeName}");
+                  ? "Failed to save daily/weekly late fee of ₹${p.interest.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}"
+                  : p.postMaturityInterest > 0 && p.amount == 0
+                      ? "Failed to save post maturity interest of ₹${p.postMaturityInterest.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}"
+                      : "Failed to save payment of ₹${p.amount.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}");
             }
           }
 

@@ -28,11 +28,12 @@ class LoaneeProvider extends ChangeNotifier {
   double get totalDueAmount =>
       _loanees.fold(0, (sum, item) => sum + item.dueAmount);
 
-  int get completedLoaneesCount => _loanees.where((l) =>
-      l.status.toLowerCase() == 'closed' ||
-      l.status.toLowerCase() == 'completed' ||
-      (l.loanAmount > 0 && l.dueAmount <= 0.01 && l.paidAmount > 0) ||
-      (l.loanAmount > 0 && l.paidAmount >= l.loanAmount)).length;
+  int get completedLoaneesCount => _loanees.where((l) {
+    if (l.dueAmount > 0.01) return false;
+    return l.status.toLowerCase() == 'closed' ||
+        l.status.toLowerCase() == 'completed' ||
+        (l.loanAmount > 0 && l.dueAmount <= 0.01 && l.paidAmount > 0);
+  }).length;
 
   int get ongoingLoaneesCount => (_loanees.length - completedLoaneesCount).clamp(0, _loanees.length);
 

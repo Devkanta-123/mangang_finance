@@ -321,7 +321,7 @@ class FakeCollectionSheetProviderForTest extends Fake implements CollectionSheet
   final List<RoCollectionEntry> collectionEntries = [];
 
   @override
-  Future<bool> addCollectionEntry(RoCollectionEntry entry) async {
+  Future<bool> addCollectionEntry(RoCollectionEntry entry, {bool saveToRemote = true}) async {
     return true;
   }
 }

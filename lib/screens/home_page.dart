@@ -2479,8 +2479,8 @@ class _LoaneeRepaymentHistorySectionState
 
     final double totalFilteredPaid =
         filteredPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
-    final double totalFilteredFine =
-        filteredPayments.fold(0.0, (sum, p) => sum + p.lateFine);
+    final double totalFilteredFine = filteredPayments.fold(
+        0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2696,7 +2696,7 @@ class _LoaneeRepaymentHistorySectionState
                       ? 'Recorded by Admin ($officerName) • Mode: ${p.paymentType}'
                       : 'Collected By: $officerName • Mode: ${p.paymentType}',
                   routeName: routeName,
-                  lateFine: p.lateFine,
+                  lateFine: (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest,
                   isAdminEntry: p.isAdminOrOfficeEntry,
                   isSuccess: true,
                 );
@@ -3090,6 +3090,10 @@ class _AdminAllCollectionsLedgerSectionState
               _buildReceiptRow('Transaction ID', payment.id, Icons.tag_rounded),
               _buildReceiptRow('Payment Amount', '₹ ${payment.paymentAmount.toStringAsFixed(2)}', Icons.currency_rupee_rounded, valueColor: Colors.green.shade800),
               _buildReceiptRow('Remaining Due Balance', '₹ ${payment.remainingBalance.toStringAsFixed(2)}', Icons.money_off_rounded, valueColor: Colors.orange.shade900),
+              if (payment.interest > 0)
+                _buildReceiptRow('Late Payment Interest', '₹ ${payment.interest.toStringAsFixed(2)}', Icons.timer_off_outlined, valueColor: Colors.orange.shade900),
+              if (payment.postMaturityInterest > 0)
+                _buildReceiptRow('Post Maturity Interest', '₹ ${payment.postMaturityInterest.toStringAsFixed(2)}', Icons.hourglass_bottom_rounded, valueColor: Colors.purple.shade900),
               if (payment.lateFine > 0)
                 _buildReceiptRow('Late Fine Paid', '₹ ${payment.lateFine.toStringAsFixed(2)}', Icons.timer_off_outlined, valueColor: Colors.red.shade700),
               _buildReceiptRow('Payment Mode', payment.paymentType, Icons.payment_rounded),
@@ -3263,8 +3267,8 @@ class _AdminAllCollectionsLedgerSectionState
 
     final double totalFilteredAmount =
         filteredPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
-    final double totalFilteredLateFine =
-        filteredPayments.fold(0.0, (sum, p) => sum + p.lateFine);
+    final double totalFilteredLateFine = filteredPayments.fold(
+        0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -3616,9 +3620,13 @@ class _AdminAllCollectionsLedgerSectionState
                                           color: Colors.green.shade800,
                                         ),
                                       ),
-                                      if (payment.lateFine > 0)
+                                      if ((payment.interest > 0 ? payment.interest : payment.lateFine) + payment.postMaturityInterest > 0)
                                         Text(
-                                          'Fine: ₹${payment.lateFine.toStringAsFixed(2)}',
+                                          payment.interest > 0
+                                              ? 'Late Int: ₹${payment.interest.toStringAsFixed(2)}'
+                                              : (payment.postMaturityInterest > 0
+                                                  ? 'Post Mat: ₹${payment.postMaturityInterest.toStringAsFixed(2)}'
+                                                  : 'Fine: ₹${payment.lateFine.toStringAsFixed(2)}'),
                                           style: TextStyle(
                                             fontSize: 9.5,
                                             fontWeight: FontWeight.bold,

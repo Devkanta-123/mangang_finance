@@ -576,13 +576,8 @@ class _RoCollectionSheetViewPageState
                                     ),
                                     Builder(
                                       builder: (context) {
-                                        final lateFeeVal = p.lateFine > 0
-                                            ? p.lateFine
-                                            : (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false) ? p.interest : 0.0);
-                                        final postMatVal = p.postMaturityInterest > 0
-                                            ? p.postMaturityInterest
-                                            : ((p.remarks?.toLowerCase().contains('post maturity') ?? false) ? p.interest : 0.0);
-                                        final totalIntVal = p.interest > 0 ? p.interest : (lateFeeVal + postMatVal);
+                                        final lateFeeVal = p.interest > 0 ? p.interest : p.lateFine;
+                                        final postMatVal = p.postMaturityInterest;
 
                                         return Row(
                                           mainAxisSize: MainAxisSize.min,
@@ -621,25 +616,6 @@ class _RoCollectionSheetViewPageState
                                                     fontSize: 9.5,
                                                     fontWeight: FontWeight.bold,
                                                     color: Colors.purple.shade900,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                            if (totalIntVal > 0 && lateFeeVal == 0 && postMatVal == 0) ...[
-                                              const SizedBox(width: 5),
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.deepOrange.shade50,
-                                                  borderRadius: BorderRadius.circular(5),
-                                                  border: Border.all(color: Colors.deepOrange.shade200),
-                                                ),
-                                                child: Text(
-                                                  'Int: +₹${totalIntVal.toStringAsFixed(0)}',
-                                                  style: TextStyle(
-                                                    fontSize: 9.5,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.deepOrange.shade900,
                                                   ),
                                                 ),
                                               ),
@@ -2695,12 +2671,15 @@ class _RoCollectionDetailsModalSheetState
         // WHERE collection_id = <widget.entry.id>;
         final sumData = await supaClient
             .from('ro_collection_payments')
-            .select('payment_amount')
+            .select('payment_amount, interest, late_fine, post_maturity_interest')
             .eq('collection_id', widget.entry.id) as List<dynamic>?;
         final paymentsList = await SupabaseService.instance
             .fetchPaymentsForCollection(widget.entry.id) ?? [];
 
         double calculatedTotalCollected = 0.0;
+        double calculatedInterest = 0.0;
+        double calculatedLateFees = 0.0;
+        double calculatedPostMat = 0.0;
 
         if (sumData != null && sumData.isNotEmpty) {
           for (final row in sumData) {
@@ -2712,41 +2691,47 @@ class _RoCollectionDetailsModalSheetState
                 calculatedTotalCollected += double.tryParse(amt.toString()) ?? 0.0;
               }
             }
+            final rawInt = row['interest'];
+            final rawLate = row['late_fine'];
+            final rawPost = row['post_maturity_interest'];
+            double rowInt = 0.0;
+            if (rawInt != null) {
+              rowInt = (rawInt is num) ? rawInt.toDouble() : (double.tryParse(rawInt.toString()) ?? 0.0);
+            }
+            double rowLate = 0.0;
+            if (rawLate != null) {
+              rowLate = (rawLate is num) ? rawLate.toDouble() : (double.tryParse(rawLate.toString()) ?? 0.0);
+            }
+            double rowPost = 0.0;
+            if (rawPost != null) {
+              rowPost = (rawPost is num) ? rawPost.toDouble() : (double.tryParse(rawPost.toString()) ?? 0.0);
+            }
+            if (rowInt == 0.0 && rowLate > 0.0) {
+              rowInt = rowLate;
+            }
+            calculatedLateFees += (rowInt > 0.0 ? rowInt : rowLate);
+            calculatedPostMat += rowPost;
           }
+          calculatedInterest = calculatedLateFees + calculatedPostMat;
         } else if (paymentsList.isNotEmpty) {
           for (final p in paymentsList) {
             calculatedTotalCollected += p.paymentAmount;
+            final lateFeeVal = p.interest > 0 ? p.interest : p.lateFine;
+            calculatedLateFees += lateFeeVal;
+            calculatedPostMat += p.postMaturityInterest;
           }
-        }
-
-        double calculatedInterest = 0.0;
-        double calculatedLateFees = 0.0;
-        double calculatedPostMat = 0.0;
-
-        for (final p in paymentsList) {
-          calculatedInterest += p.interest;
-          final lateFeeVal = p.lateFine > 0
-              ? p.lateFine
-              : (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false) ? p.interest : 0.0);
-          final postMatVal = p.postMaturityInterest > 0
-              ? p.postMaturityInterest
-              : ((p.remarks?.toLowerCase().contains('post maturity') ?? false) ? p.interest : 0.0);
-          calculatedLateFees += lateFeeVal;
-          calculatedPostMat += postMatVal;
+          calculatedInterest = calculatedLateFees + calculatedPostMat;
         }
 
         if (mounted) {
           final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
-          if (calculatedInterest == 0.0) {
-            calculatedInterest = cp.getTotalInterestForCollection(widget.entry.id);
-          }
           if (calculatedLateFees == 0.0) {
             calculatedLateFees = cp.getTotalLatePaymentFeesForCollection(widget.entry.id);
           }
           if (calculatedPostMat == 0.0) {
             calculatedPostMat = cp.getTotalPostMaturityInterestForCollection(widget.entry.id);
           }
-          if (calculatedInterest == 0.0 && (calculatedLateFees > 0 || calculatedPostMat > 0)) {
+          if (calculatedInterest == 0.0) {
             calculatedInterest = calculatedLateFees + calculatedPostMat;
           }
 
@@ -2867,7 +2852,7 @@ class _RoCollectionDetailsModalSheetState
     final remainingBeforeInterest =
         (totalLoanAmount - totalCollected).clamp(0.0, double.infinity);
     final isCompleted =
-        remainingBal <= 0.01 || collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider);
+        remainingBal <= 0.01 && collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider);
     final now = DateTime.now();
     final todayPayments = payments.where((p) =>
         p.createdAt.year == now.year &&
@@ -3179,7 +3164,7 @@ class _RoCollectionDetailsModalSheetState
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Daily/Weekly Late Payment Fees:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900)),
+                        Text('Total Late Payment Interest:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900)),
                         Text('+ ₹ ${_RoCollectionDetailsModalSheet._formatCurrency(totalLateFees)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade900)),
                       ],
                     ),
@@ -3189,7 +3174,7 @@ class _RoCollectionDetailsModalSheetState
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Post Maturity Fine Payment:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.purple.shade900)),
+                        Text('Total Post Maturity Interest:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.purple.shade900)),
                         Text('+ ₹ ${_RoCollectionDetailsModalSheet._formatCurrency(totalPostMaturityInterest)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.purple.shade900)),
                       ],
                     ),
@@ -3258,7 +3243,7 @@ class _RoCollectionDetailsModalSheetState
                       ],
                     ),
                   ],
-                  if (postMaturity != null && postMaturity.isPastMaturity) ...[
+                  if (postMaturity != null && postMaturity.isPastMaturity && postMaturity.postMaturityPayableAmount > postMaturity.remainingBalance) ...[
                     const SizedBox(height: 6),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -4284,7 +4269,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                         const DataColumn(label: Text("Amount")),
                         const DataColumn(label: Text("Daily/Wkly Late Fee")),
                         const DataColumn(label: Text("Post Maturity Fine")),
-                        const DataColumn(label: Text("Interest")),
                         const DataColumn(label: Text("Remaining Outstanding")),
                         const DataColumn(label: Text("Mode")),
                         const DataColumn(label: Text("Collected By")),
@@ -4297,13 +4281,8 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                             "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
                         final roName = (p.roName?.isNotEmpty == true) ? p.roName! : "RO Officer";
 
-                        final lateFeeVal = p.lateFine > 0
-                            ? p.lateFine
-                            : (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false) ? p.interest : 0.0);
-                        final postMatVal = p.postMaturityInterest > 0
-                            ? p.postMaturityInterest
-                            : ((p.remarks?.toLowerCase().contains('post maturity') ?? false) ? p.interest : 0.0);
-                        final totalIntVal = p.interest > 0 ? p.interest : (lateFeeVal + postMatVal);
+                        final lateFeeVal = p.interest > 0 ? p.interest : p.lateFine;
+                        final postMatVal = p.postMaturityInterest;
 
                         return DataRow(
                           cells: [
@@ -4347,16 +4326,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                   fontSize: 11,
                                   color: postMatVal > 0 ? Colors.purple.shade900 : Colors.grey.shade500,
                                   fontWeight: postMatVal > 0 ? FontWeight.bold : FontWeight.normal,
-                                ),
-                              ),
-                            ),
-                            DataCell(
-                              Text(
-                                totalIntVal > 0 ? "₹ ${totalIntVal.toStringAsFixed(2)}" : "-",
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: totalIntVal > 0 ? FontWeight.bold : FontWeight.normal,
-                                  color: totalIntVal > 0 ? Colors.deepOrange.shade800 : Colors.grey.shade500,
                                 ),
                               ),
                             ),
@@ -5331,7 +5300,7 @@ class __AddPaymentEntryModalContentState
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [
-                                          Text('Daily/Weekly Late Payment Fees:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900)),
+                                          Text('Total Late Payment Interest:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900)),
                                           Text(
                                             '+ ₹ ${totalLateFeesEntry.toStringAsFixed(2)}',
                                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
@@ -5344,7 +5313,7 @@ class __AddPaymentEntryModalContentState
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [
-                                          Text('Post Maturity Fine Payment:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.purple.shade900)),
+                                          Text('Total Post Maturity Interest:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.purple.shade900)),
                                           Text(
                                             '+ ₹ ${totalPostMatEntry.toStringAsFixed(2)}',
                                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.purple.shade900),
@@ -5423,7 +5392,7 @@ class __AddPaymentEntryModalContentState
                                 ],
                               ),
                             ],
-                            if (postMaturity != null && postMaturity.isPastMaturity) ...[
+                            if (postMaturity != null && postMaturity.isPastMaturity && postMaturity.postMaturityPayableAmount > postMaturity.remainingBalance) ...[
                               const SizedBox(height: 6),
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,

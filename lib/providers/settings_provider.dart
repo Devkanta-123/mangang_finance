@@ -821,7 +821,7 @@ class SettingsProvider extends ChangeNotifier {
       final preMaturityInterest = sortedPayments.where((p) {
         final pDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
         return !pDate.isAfter(cleanMaturity);
-      }).fold(0.0, (sum, p) => sum + p.interest);
+      }).fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
 
       final balanceAtMaturity = (initialLoanAmount + preMaturityInterest - preMaturityPaid).clamp(0.0, double.infinity);
 
@@ -868,13 +868,14 @@ class SettingsProvider extends ChangeNotifier {
           return inPeriod;
         }).toList();
 
-        final double periodRecordedInterest = periodPayments.fold(0.0, (sum, pm) => sum + pm.interest);
+        final double periodRecordedPostMaturity = periodPayments.fold(0.0, (sum, pm) => sum + pm.postMaturityInterest);
+        final double periodRecordedLateFees = periodPayments.fold(0.0, (sum, pm) => sum + (pm.interest > 0 ? pm.interest : pm.lateFine));
         final double periodPaid = periodPayments.fold(0.0, (sum, pm) => sum + pm.paymentAmount);
 
         final double currentInterest;
-        if (periodRecordedInterest > 0) {
-          // Interest for this overdue period was already assessed and recorded in payment history (e.g. imported ledger)
-          currentInterest = double.parse(periodRecordedInterest.toStringAsFixed(2));
+        if (periodRecordedPostMaturity > 0) {
+          // Post-maturity interest for this overdue period was already assessed and recorded in payment history (e.g. imported ledger)
+          currentInterest = double.parse(periodRecordedPostMaturity.toStringAsFixed(2));
           if (p == overduePeriods) {
             hasRecordedInterestInCurrentPeriod = true;
           }
@@ -884,7 +885,7 @@ class SettingsProvider extends ChangeNotifier {
           currentInterest = double.parse(rawInterest.toStringAsFixed(2));
         }
 
-        final double payableWithInterest = double.parse((currentPayable + currentInterest).toStringAsFixed(2));
+        final double payableWithInterest = double.parse((currentPayable + currentInterest + periodRecordedLateFees).toStringAsFixed(2));
 
         steps.add(PostMaturityMonthlyStep(
           monthNumber: p,
@@ -1028,7 +1029,7 @@ class SettingsProvider extends ChangeNotifier {
     final double totalPaid = (overrideTotalPaid != null && overrideTotalPaid > inMemPaid)
         ? overrideTotalPaid
         : inMemPaid;
-    final double totalInterest = payments.fold(0.0, (sum, p) => sum + p.interest);
+    final double totalInterest = payments.fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
         : ((loaneeLoanAmount != null && loaneeLoanAmount > 0)

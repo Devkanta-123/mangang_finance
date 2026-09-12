@@ -77,12 +77,13 @@ class CollectionPaymentModel {
       'payment_amount': paymentAmount,
       'remaining_balance': remainingBalance,
       'late_fine': lateFine,
+      'interest': interest,
+      'post_maturity_interest': postMaturityInterest,
       'payment_type': paymentType,
       'ro_passcode': roPasscode,
-      if (roName != null) 'ro_name': roName,
-      if (roId != null) 'ro_id': roId,
-      if (roRoute != null) 'ro_route': roRoute,
-      if (postMaturityInterest > 0) 'post_maturity_interest': postMaturityInterest,
+      'ro_name': roName,
+      'ro_id': roId,
+      'ro_route': roRoute,
       'created_at': createdAt.toIso8601String(),
       'status': status,
       'remarks': remarks,
@@ -102,23 +103,37 @@ class CollectionPaymentModel {
           parsedPostMat = double.tryParse(pmMatch.group(1) ?? '') ?? 0.0;
         }
       }
-      if (parsedLateFine == 0.0) {
-        final lfMatch = RegExp(r'Late\s*(?:Payment\s*)?(?:Fee|Fine|Interest):\s*₹?\s*([0-9.]+)').firstMatch(rem);
+      if (parsedInterest == 0.0) {
+        final lfMatch = RegExp(r'(?:Daily/Weekly\s*)?Late\s*(?:Payment\s*)?(?:Fee|Fine|Interest):\s*₹?\s*([0-9.]+)').firstMatch(rem);
+        if (lfMatch != null) {
+          parsedInterest = double.tryParse(lfMatch.group(1) ?? '') ?? 0.0;
+        } else {
+          final match = RegExp(r'(?:^|[(,\s])(?:Total\s*)?Interest:\s*₹?\s*([0-9.]+)').firstMatch(rem);
+          if (match != null) {
+            final val = double.tryParse(match.group(1) ?? '') ?? 0.0;
+            final isDuplicatedBug = parsedPostMat > 0 &&
+                val == parsedPostMat &&
+                rem.contains('Post Maturity: ₹${parsedPostMat.toStringAsFixed(2)}, Interest: ₹${parsedPostMat.toStringAsFixed(2)}');
+            if (!isDuplicatedBug) {
+              parsedInterest = val;
+            }
+          }
+        }
+      }
+      if (parsedLateFine == 0.0 && parsedInterest == 0.0) {
+        final lfMatch = RegExp(r'Late\s*(?:Payment\s*)?(?:Fee|Fine):\s*₹?\s*([0-9.]+)').firstMatch(rem);
         if (lfMatch != null) {
           parsedLateFine = double.tryParse(lfMatch.group(1) ?? '') ?? 0.0;
         }
       }
-      if (parsedInterest == 0.0) {
-        final match = RegExp(r'(?:Total\s*)?Interest:\s*₹?\s*([0-9.]+)').firstMatch(rem);
-        if (match != null) {
-          parsedInterest = double.tryParse(match.group(1) ?? '') ?? 0.0;
-        } else if (parsedLateFine > 0 || parsedPostMat > 0) {
-          parsedInterest = parsedLateFine + parsedPostMat;
-        }
-      }
     }
-    if (parsedInterest == 0.0 && (parsedLateFine > 0 || parsedPostMat > 0)) {
-      parsedInterest = parsedLateFine + parsedPostMat;
+
+    final pId = json['id']?.toString() ?? '';
+    final remStr = json['remarks']?.toString() ?? '';
+    final isHistorical = pId.startsWith('PAY-HIST') || remStr.contains('Historical');
+    if (isHistorical && parsedInterest == 0.0 && parsedLateFine > 0.0) {
+      parsedInterest = parsedLateFine;
+      parsedLateFine = 0.0;
     }
 
     return CollectionPaymentModel(
