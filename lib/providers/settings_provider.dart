@@ -552,7 +552,7 @@ class SettingsProvider extends ChangeNotifier {
     int lateDays = 0;
     DateTime current = firstCheckDate;
 
-    while (!current.isAfter(cleanToday)) {
+    while (current.isBefore(cleanToday)) {
       if (current.weekday != DateTime.sunday) {
         lateDays++;
       }
@@ -638,7 +638,9 @@ class SettingsProvider extends ChangeNotifier {
     if (isDaily) {
       DateTime baseDate;
       bool hasPreviousPayment = false;
-      final successfulPayments = payments.where((p) {
+
+      // Filter all valid non-cancelled payment and fee transactions
+      final validTransactions = payments.where((p) {
         final s = p.status.toLowerCase().trim();
         final hasFeeOrPayment = p.paymentAmount > 0 ||
             p.lateFine > 0 ||
@@ -647,13 +649,46 @@ class SettingsProvider extends ChangeNotifier {
         return s != 'failed' && s != 'cancelled' && hasFeeOrPayment;
       }).toList();
 
-      if (successfulPayments.isNotEmpty) {
-        final sortedPayments = List<CollectionPaymentModel>.from(successfulPayments)
+      // Separate regular payments / historical transactions from auto-assessed late-fee records
+      final regularPayments = validTransactions.where((p) {
+        final isAuto = p.id.startsWith('PAY-LATE-') ||
+            (p.remarks != null && p.remarks!.contains('Auto assessed'));
+        return !isAuto;
+      }).toList();
+
+      if (regularPayments.isNotEmpty) {
+        final sorted = List<CollectionPaymentModel>.from(regularPayments)
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        baseDate = sortedPayments.first.createdAt;
+        baseDate = sorted.first.createdAt;
         hasPreviousPayment = true;
       } else {
         baseDate = entry.createdAt;
+        hasPreviousPayment = false;
+      }
+
+      final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
+
+      // Identify active auto-assessed records after baseDate and strictly before today
+      final autoAssessedInInterval = validTransactions.where((p) {
+        final isAuto = p.id.startsWith('PAY-LATE-') ||
+            (p.remarks != null && p.remarks!.contains('Auto assessed'));
+        final cleanDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
+        return isAuto && cleanDate.isAfter(cleanBaseDate) && cleanDate.isBefore(today);
+      }).toList();
+
+      if (autoAssessedInInterval.isNotEmpty) {
+        final sortedAuto = List<CollectionPaymentModel>.from(autoAssessedInInterval)
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        final latestAutoDate = sortedAuto.first.createdAt;
+
+        // Pending unrecorded completed days after latest auto-assessed record
+        final pendingDays = calculateDailyLateDays(
+          baseDate: latestAutoDate,
+          asOfDate: today,
+          hasPreviousPayment: true,
+        );
+
+        return autoAssessedInInterval.length + pendingDays;
       }
 
       return calculateDailyLateDays(

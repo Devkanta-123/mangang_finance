@@ -16,11 +16,11 @@ void main() {
       await settingsProvider.loadSettings();
     });
 
-    test('User Test 1: Maturity passed, latest payment 09-Sep-2026, current 12-Sep-2026 -> 3 late days, ₹18 fine', () {
+    test('User Test 1: Maturity passed, latest payment 09-Sep-2026, current 12-Sep-2026 -> 2 late days (today 12-Sep excluded), ₹12 fine', () {
       final sanctionDate = DateTime(2026, 2, 1);
       final maturityDate = DateTime(2026, 7, 1); // Maturity passed before Sep 2026
       final latestPaymentDate = DateTime(2026, 9, 9);
-      final currentDate = DateTime(2026, 9, 12); // Saturday
+      final currentDate = DateTime(2026, 9, 12); // Saturday (today - excluded)
 
       final entry = RoCollectionEntry(
         id: 'COL-TEST-01',
@@ -58,10 +58,10 @@ void main() {
       );
 
       expect(breakdown.isPastMaturity, isTrue);
-      expect(breakdown.lateUnits, equals(3), reason: '10-Sep(1), 11-Sep(2), 12-Sep(3) = 3 late days');
+      expect(breakdown.lateUnits, equals(2), reason: '10-Sep(1), 11-Sep(2) = 2 completed late days; 12-Sep (today) excluded');
       expect(breakdown.baseInstallment, equals(200.0));
       expect(breakdown.lateFineRate, equals(6.0)); // 200 * 3% = ₹6/day
-      expect(breakdown.calculatedLateFine, equals(18.0), reason: '3 days * ₹6 = ₹18.00');
+      expect(breakdown.calculatedLateFine, equals(12.0), reason: '2 days * ₹6 = ₹12.00');
 
       // Verify 7% post-maturity interest is preserved independently
       expect(breakdown.postMaturityBreakdown, isNotNull);
@@ -69,11 +69,11 @@ void main() {
       expect(breakdown.postMaturityBreakdown!.postMaturityInterestRate, equals(7.0));
     });
 
-    test('User Test 2: Maturity passed, latest payment 10-Sep-2026, current 12-Sep-2026 -> 2 late days, ₹12 fine', () {
+    test('User Test 2: Maturity passed, latest payment 10-Sep-2026, current 12-Sep-2026 -> 1 late day, ₹6 fine', () {
       final sanctionDate = DateTime(2026, 2, 1);
       final maturityDate = DateTime(2026, 7, 1);
       final latestPaymentDate = DateTime(2026, 9, 10); // Thursday
-      final currentDate = DateTime(2026, 9, 12); // Saturday
+      final currentDate = DateTime(2026, 9, 12); // Saturday (today - excluded)
 
       final entry = RoCollectionEntry(
         id: 'COL-TEST-02',
@@ -111,10 +111,10 @@ void main() {
       );
 
       expect(breakdown.isPastMaturity, isTrue);
-      expect(breakdown.lateUnits, equals(2), reason: '11-Sep(1), 12-Sep(2) = 2 late days');
+      expect(breakdown.lateUnits, equals(1), reason: '11-Sep(1) = 1 late day; 12-Sep (today) excluded');
       expect(breakdown.baseInstallment, equals(200.0));
       expect(breakdown.lateFineRate, equals(6.0));
-      expect(breakdown.calculatedLateFine, equals(12.0), reason: '2 days * ₹6 = ₹12.00');
+      expect(breakdown.calculatedLateFine, equals(6.0), reason: '1 day * ₹6 = ₹6.00');
     });
 
     test('User Test 3: Outstanding balance is ₹0 -> Late Payment Fee does not continue increasing', () {
@@ -219,7 +219,7 @@ void main() {
       );
       expect(breakdownSunday.lateUnits, equals(0), reason: 'Sunday skipped -> 0 late days');
 
-      // Monday 14-Sep has 1 late day:
+      // Monday 14-Sep: Monday 14-Sep is currently running so not completed yet.
       final breakdownMonday = settingsProvider.getLatePayableBreakdownForEntry(
         entry: entry,
         payments: payments,
@@ -229,8 +229,20 @@ void main() {
         sanctionDate: sanctionDate,
         asOfDate: DateTime(2026, 9, 14),
       );
-      expect(breakdownMonday.lateUnits, equals(1), reason: 'Monday is 1 late day');
-      expect(breakdownMonday.calculatedLateFine, equals(6.0));
+      expect(breakdownMonday.lateUnits, equals(0), reason: 'Monday is ongoing, 0 completed late days');
+
+      // Tuesday 15-Sep: Monday 14-Sep has completed -> 1 late day
+      final breakdownTuesday = settingsProvider.getLatePayableBreakdownForEntry(
+        entry: entry,
+        payments: payments,
+        loaneeLoanAmount: 20000.0,
+        loaneeDueAmount: 14000.0,
+        maturityDate: maturityDate,
+        sanctionDate: sanctionDate,
+        asOfDate: DateTime(2026, 9, 15),
+      );
+      expect(breakdownTuesday.lateUnits, equals(1), reason: 'Tuesday checks completed Monday -> 1 late day');
+      expect(breakdownTuesday.calculatedLateFine, equals(6.0));
     });
 
     test('No double counting: Cleared late fees are not added again', () {
@@ -276,15 +288,16 @@ void main() {
         asOfDate: currentDate,
       );
 
-      // Only the 3 new days (10th, 11th, 12th) are assessed: 3 * ₹6 = ₹18.00.
+      // On 12-Sep-2026, 12-Sep is today (excluded).
+      // Completed missed days: 10-Sep, 11-Sep -> 2 days * ₹6 = ₹12.00.
       // The previous ₹12 is NOT added again.
-      expect(breakdown.lateUnits, equals(3));
+      expect(breakdown.lateUnits, equals(2));
       expect(breakdown.previousUnpaidLateFee, equals(0.0));
-      expect(breakdown.currentIntervalLateFine, equals(18.0));
-      expect(breakdown.calculatedLateFine, equals(18.0));
+      expect(breakdown.currentIntervalLateFine, equals(12.0));
+      expect(breakdown.calculatedLateFine, equals(12.0));
     });
 
-    test('Exact User Scenario: Base ₹121, Late Fee ₹3 history (stored under interest), As-Of 12-Sep-2026 -> exactly 3 late days and ₹10.89 fine (NOT 7 days / ₹25.41)', () {
+    test('Exact User Scenario: Base ₹121, Late Fee ₹3 history (stored under interest), As-Of 12-Sep-2026 -> 2 completed late days and ₹7.26 fine; As-Of 13-Sep -> 3 days and ₹10.89 fine', () {
       final sanctionDate = DateTime(2026, 2, 1);
       final maturityDate = DateTime(2026, 7, 1);
       final asOfDate = DateTime(2026, 9, 12); // Saturday
@@ -366,11 +379,11 @@ void main() {
         asOfDate: asOfDate,
       );
 
-      // Verify the number of late days is 3 (10-Sep, 11-Sep, 12-Sep), NOT 7
-      expect(breakdown.lateUnits, equals(3), reason: 'Missed days since 09-Sep are 10-Sep, 11-Sep, 12-Sep (3 days)');
+      // On 12-Sep-2026: 2 completed late days (10-Sep, 11-Sep), 12-Sep is today and excluded!
+      expect(breakdown.lateUnits, equals(2), reason: 'Missed completed days since 09-Sep are 10-Sep and 11-Sep (12-Sep excluded today)');
       expect(breakdown.baseInstallment, equals(121.0));
       expect(breakdown.lateFineRate, equals(3.63)); // 121 * 3% = 3.63/day
-      expect(breakdown.calculatedLateFine, equals(10.89), reason: '3 days * ₹3.63 = ₹10.89 (NOT ₹25.41)');
+      expect(breakdown.calculatedLateFine, equals(7.26), reason: '2 days * ₹3.63 = ₹7.26 (NOT 7 days / ₹25.41)');
 
       // Also verify LoaneeLateFineStatus calculationExplanation and overdueUnits
       final status = settingsProvider.getLateFineStatusForEntry(
@@ -383,9 +396,22 @@ void main() {
         asOfDate: asOfDate,
       );
 
-      expect(status.overdueUnits, equals(3));
-      expect(status.calculatedLateFine, equals(10.89));
+      expect(status.overdueUnits, equals(2));
+      expect(status.calculatedLateFine, equals(7.26));
       expect(status.lastPaymentDate, equals(DateTime(2026, 9, 9)));
+
+      // On 13-Sep-2026 00:00: 12-Sep has completed -> 3 late days, ₹10.89 late fee
+      final breakdown13 = settingsProvider.getLatePayableBreakdownForEntry(
+        entry: entry,
+        payments: payments,
+        loaneeLoanAmount: 12100.0,
+        loaneeDueAmount: 5000.0,
+        maturityDate: maturityDate,
+        sanctionDate: sanctionDate,
+        asOfDate: DateTime(2026, 9, 13),
+      );
+      expect(breakdown13.lateUnits, equals(3), reason: 'At 13-Sep 00:00, 12-Sep completed -> 3 days');
+      expect(breakdown13.calculatedLateFine, equals(10.89), reason: '3 days * ₹3.63 = ₹10.89');
     });
   });
 }

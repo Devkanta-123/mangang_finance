@@ -410,6 +410,14 @@ class _RoCollectionSheetViewPageState
       return;
     }
 
+    try {
+      final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+      final sp = Provider.of<SettingsProvider>(context, listen: false);
+      await cp.syncAutoLateFeesForEntry(entry: entry, settingsProvider: sp);
+    } catch (_) {}
+
+    if (!context.mounted) return;
+
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -3882,13 +3890,26 @@ class _LoanPaymentHistoryDialog extends StatefulWidget {
     this.loaneeProvider,
   });
 
-  static Future<void> show(BuildContext context, RoCollectionEntry entry) {
+  static Future<void> show(BuildContext context, RoCollectionEntry entry) async {
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
+    final settingsProvider =
+        Provider.of<SettingsProvider>(context, listen: false);
     LoaneeProvider? loaneeProvider;
     try {
       loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
     } catch (_) {}
+
+    try {
+      await collectionProvider.syncAutoLateFeesForEntry(
+        entry: entry,
+        settingsProvider: settingsProvider,
+      );
+    } catch (e) {
+      debugPrint('Note: Auto late fee sync before history modal: $e');
+    }
+
+    if (!context.mounted) return;
 
     return showDialog<void>(
       context: context,

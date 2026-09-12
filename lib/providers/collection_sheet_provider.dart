@@ -462,6 +462,228 @@ class CollectionSheetProvider extends ChangeNotifier {
     return true;
   }
 
+  /// Synchronize and automatically insert missing daily late fee records into 'ro_collection_payments'
+  /// for completed missed collection days strictly before today (today is excluded).
+  Future<List<CollectionPaymentModel>> syncAutoLateFeesForEntry({
+    required RoCollectionEntry entry,
+    required SettingsProvider settingsProvider,
+    DateTime? asOfDate,
+    bool saveToRemote = true,
+  }) async {
+    // 1. Only daily loans qualify for daily late payment fee auto-assessment
+    if (entry.collectionType.toLowerCase().trim() != 'daily') {
+      return [];
+    }
+
+    final now = asOfDate ?? DateTime.now();
+    final cleanToday = DateTime(now.year, now.month, now.day);
+
+    // 2. Validate outstanding balance > 0 (loan not cleared)
+    final cardPayments = getPaymentsForCollection(entry.id);
+    final totalCollected = cardPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
+    final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
+        ? entry.loanAmount!
+        : (entry.actualPrincipal ?? 0.0);
+    final double totalInterest = cardPayments.fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
+    final double currentRemainingBalance = (initialLoan > 0)
+        ? (initialLoan + totalInterest - totalCollected).clamp(0.0, double.infinity)
+        : (cardPayments.isNotEmpty && cardPayments.first.remainingBalance > 0
+            ? cardPayments.first.remainingBalance
+            : 0.0);
+
+    final bool isCleared = (initialLoan > 0 && currentRemainingBalance <= 0.01) ||
+        (cardPayments.isNotEmpty && cardPayments.first.remainingBalance <= 0.01 && totalCollected > 0);
+    if (isCleared) {
+      return [];
+    }
+
+    // 3. Calculate daily late fine rate from existing formula
+    final double baseDailyInstallment = entry.getCalculatedPayableAmount(
+      configuredInterestRate: settingsProvider.investmentInterestRate,
+      configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+      configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+      configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+    );
+    final double fineRate = double.parse((baseDailyInstallment * (settingsProvider.lateFinePercentage / 100.0)).toStringAsFixed(2));
+    if (fineRate <= 0) {
+      return [];
+    }
+
+    // 4. Identify latest relevant non-auto transaction in ro_collection_payments
+    final allSuccessful = cardPayments.where((p) {
+      final s = p.status.toLowerCase().trim();
+      final hasFeeOrPayment = p.paymentAmount > 0 ||
+          p.lateFine > 0 ||
+          p.interest > 0 ||
+          p.postMaturityInterest > 0;
+      return s != 'failed' && s != 'cancelled' && hasFeeOrPayment;
+    }).toList();
+
+    DateTime baseDate;
+    bool hasPreviousTransaction = false;
+
+    // We exclude auto-assessed records so that candidate evaluation starts from the last real/historical transaction
+    final nonAutoTx = allSuccessful.where((p) {
+      final isAuto = p.id.startsWith('PAY-LATE-') ||
+          (p.remarks != null && p.remarks!.contains('Auto assessed'));
+      return !isAuto;
+    }).toList();
+
+    if (nonAutoTx.isNotEmpty) {
+      final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      baseDate = sorted.first.createdAt;
+      hasPreviousTransaction = true;
+    } else {
+      baseDate = entry.createdAt;
+      hasPreviousTransaction = false;
+    }
+
+    final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
+    if (!cleanToday.isAfter(cleanBaseDate)) {
+      return [];
+    }
+
+    final firstCheckDate = hasPreviousTransaction
+        ? cleanBaseDate.add(const Duration(days: 1))
+        : cleanBaseDate;
+
+    // 5. Identify completed candidate late dates strictly BEFORE today (today is excluded!)
+    final List<DateTime> candidateDates = [];
+    DateTime current = firstCheckDate;
+    while (current.isBefore(cleanToday)) {
+      if (current.weekday != DateTime.sunday) {
+        candidateDates.add(DateTime(current.year, current.month, current.day));
+      }
+      current = current.add(const Duration(days: 1));
+    }
+
+    if (candidateDates.isEmpty) {
+      return [];
+    }
+
+    final List<DateTime> alreadyAssessedDates = [];
+    final List<DateTime> newLateDates = [];
+    final List<CollectionPaymentModel> newlyCreatedRecords = [];
+
+    for (final candidate in candidateDates) {
+      final paymentsOnDate = cardPayments.where((p) {
+        final s = p.status.toLowerCase().trim();
+        return p.createdAt.year == candidate.year &&
+            p.createdAt.month == candidate.month &&
+            p.createdAt.day == candidate.day &&
+            s != 'failed' &&
+            s != 'cancelled';
+      }).toList();
+
+      // Check if borrower made payment on this date
+      final hasPayment = paymentsOnDate.any((p) => p.paymentAmount > 0);
+      if (hasPayment) {
+        continue;
+      }
+
+      // Check if late fee record already exists for this exact date
+      final hasLateFee = paymentsOnDate.any((p) => p.lateFine > 0 || p.interest > 0);
+      if (hasLateFee) {
+        alreadyAssessedDates.add(candidate);
+        continue;
+      }
+
+      // Candidate date is a completed missed day needing auto-insertion
+      newLateDates.add(candidate);
+
+      final dateStr = '${candidate.year}${candidate.month.toString().padLeft(2, '0')}${candidate.day.toString().padLeft(2, '0')}';
+      final recordId = 'PAY-LATE-${entry.id}-$dateStr';
+
+      final record = CollectionPaymentModel(
+        id: recordId,
+        collectionId: entry.id,
+        paymentAmount: 0.0,
+        lateFine: fineRate,
+        interest: 0.0,
+        postMaturityInterest: 0.0,
+        remainingBalance: currentRemainingBalance,
+        paymentType: 'Late Fee',
+        roPasscode: '',
+        roName: 'System (Auto)',
+        roId: 'SYS-AUTO',
+        roRoute: entry.route,
+        createdAt: DateTime(candidate.year, candidate.month, candidate.day, 12, 0, 0),
+        status: 'Success',
+        remarks: 'Daily Late Fee: ₹${fineRate.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(candidate)})',
+      );
+
+      newlyCreatedRecords.add(record);
+    }
+
+    // 6. Debug logging matching Requirement 19
+    final StringBuffer logBuf = StringBuffer();
+    logBuf.writeln('=== [AUTOMATIC LATE PAYMENT FEE SYNCHRONIZATION] ===');
+    logBuf.writeln('Loan / Collection ID: ${entry.id} | Account: ${entry.accountNumber}');
+    logBuf.writeln('Loanee Name: ${entry.loaneeName}');
+    logBuf.writeln('Base Installment: ₹${baseDailyInstallment.toStringAsFixed(2)} | Late Fine Rate: ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% | Daily Late Fee: ₹${fineRate.toStringAsFixed(2)}');
+    logBuf.writeln('Outstanding Balance: ₹${currentRemainingBalance.toStringAsFixed(2)}');
+    logBuf.writeln('Current Date: ${SettingsProvider.formatDate(cleanToday)}');
+    logBuf.writeln('Latest Transaction: ${SettingsProvider.formatDate(cleanBaseDate)}');
+    logBuf.writeln('Candidate Dates:');
+    for (final d in candidateDates) {
+      logBuf.writeln('  ${SettingsProvider.formatDate(d)}');
+    }
+    logBuf.writeln('Excluded:');
+    logBuf.writeln('  ${SettingsProvider.formatDate(cleanToday)} (today)');
+    if (alreadyAssessedDates.isNotEmpty) {
+      logBuf.writeln('Already Assessed (Skipped):');
+      for (final d in alreadyAssessedDates) {
+        logBuf.writeln('  ${SettingsProvider.formatDate(d)}');
+      }
+    }
+    if (newLateDates.isNotEmpty) {
+      logBuf.writeln('New Records:');
+      for (final d in newLateDates) {
+        logBuf.writeln('  ${SettingsProvider.formatDate(d)} → ₹${fineRate.toStringAsFixed(2)}');
+      }
+    } else {
+      logBuf.writeln('New Records: None (all candidate dates already exist or were satisfied)');
+    }
+    logBuf.writeln('====================================================');
+    debugPrint(logBuf.toString());
+
+    // 7. Insert new records in-memory and save to Supabase
+    if (newlyCreatedRecords.isNotEmpty) {
+      for (final rec in newlyCreatedRecords) {
+        if (!_payments.any((p) => p.id == rec.id || (p.collectionId == rec.collectionId && p.createdAt.year == rec.createdAt.year && p.createdAt.month == rec.createdAt.month && p.createdAt.day == rec.createdAt.day))) {
+          _payments.insert(0, rec);
+        }
+      }
+
+      if (saveToRemote && SupabaseService.instance.isInitialized) {
+        await SupabaseService.instance.saveCollectionPaymentsBatch(newlyCreatedRecords);
+      }
+
+      notifyListeners();
+    }
+
+    return newlyCreatedRecords;
+  }
+
+  /// Synchronize automatic late fees across all active entries
+  Future<int> syncAutoLateFeesForAllEntries({
+    required SettingsProvider settingsProvider,
+    DateTime? asOfDate,
+    bool saveToRemote = true,
+  }) async {
+    int totalCount = 0;
+    for (final entry in _collectionEntries) {
+      final list = await syncAutoLateFeesForEntry(
+        entry: entry,
+        settingsProvider: settingsProvider,
+        asOfDate: asOfDate,
+        saveToRemote: saveToRemote,
+      );
+      totalCount += list.length;
+    }
+    return totalCount;
+  }
 
   Future<PaginatedPaymentsResult> getPaginatedPaymentHistory({
     int page = 1,
@@ -788,6 +1010,14 @@ class CollectionSheetProvider extends ChangeNotifier {
             _payments.add(p);
           }
         }
+      }
+
+      try {
+        final settingsProvider = SettingsProvider();
+        await settingsProvider.loadSettings();
+        await syncAutoLateFeesForAllEntries(settingsProvider: settingsProvider);
+      } catch (e) {
+        debugPrint('Note: Auto late fee initial sync fallback: $e');
       }
     } catch (e) {
       debugPrint('Error fetching data from Supabase: $e');
