@@ -552,7 +552,7 @@ class SettingsProvider extends ChangeNotifier {
     int lateDays = 0;
     DateTime current = firstCheckDate;
 
-    while (current.isBefore(cleanToday)) {
+    while (!current.isAfter(cleanToday)) {
       if (current.weekday != DateTime.sunday) {
         lateDays++;
       }
@@ -617,7 +617,7 @@ class SettingsProvider extends ChangeNotifier {
           return (amt - clearedSince).clamp(0.0, double.infinity);
         }
       }
-      clearedSince += p.lateFine;
+      clearedSince += (p.interest > 0 ? p.interest : p.lateFine);
     }
 
     return 0.0;
@@ -638,9 +638,17 @@ class SettingsProvider extends ChangeNotifier {
     if (isDaily) {
       DateTime baseDate;
       bool hasPreviousPayment = false;
+      final successfulPayments = payments.where((p) {
+        final s = p.status.toLowerCase().trim();
+        final hasFeeOrPayment = p.paymentAmount > 0 ||
+            p.lateFine > 0 ||
+            p.interest > 0 ||
+            p.postMaturityInterest > 0;
+        return s != 'failed' && s != 'cancelled' && hasFeeOrPayment;
+      }).toList();
 
-      if (payments.isNotEmpty) {
-        final sortedPayments = List<CollectionPaymentModel>.from(payments)
+      if (successfulPayments.isNotEmpty) {
+        final sortedPayments = List<CollectionPaymentModel>.from(successfulPayments)
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
         baseDate = sortedPayments.first.createdAt;
         hasPreviousPayment = true;
@@ -1066,22 +1074,31 @@ class SettingsProvider extends ChangeNotifier {
       initialLoanAmount: initialLoan > 0 ? initialLoan : remainingBalance,
     );
 
-    final int lateUnits = calculateLateUnits(
-      entry: entry,
-      payments: payments,
-      asOfDate: asOfDate,
-    );
+    final bool isLoanCleared = (initialLoan > 0 && calculatedBalance <= 0) ||
+        (sortedPayments.isNotEmpty && sortedPayments.first.remainingBalance <= 0 && totalPaid > 0);
+
+    final int lateUnits = !isLoanCleared
+        ? calculateLateUnits(
+            entry: entry,
+            payments: payments,
+            asOfDate: asOfDate,
+          )
+        : 0;
 
     final double fineRate = baseInstallment * (_lateFinePercentage / 100.0);
-    final double currentIntervalFine = (lateUnits > 0 && !postMaturity.isPastMaturity) ? (lateUnits * fineRate) : 0.0;
+    final double currentIntervalFine = (lateUnits > 0 && !isLoanCleared)
+        ? (lateUnits * fineRate)
+        : 0.0;
 
     // Compute previous unpaid late fee carried forward from earlier payments
-    final double previousUnpaidFee = calculatePreviousUnpaidLateFee(
-      entry: entry,
-      payments: payments,
-      loaneeLoanAmount: loaneeLoanAmount,
-      sanctionDate: effectiveSanctionDate,
-    );
+    final double previousUnpaidFee = !isLoanCleared
+        ? calculatePreviousUnpaidLateFee(
+            entry: entry,
+            payments: payments,
+            loaneeLoanAmount: loaneeLoanAmount,
+            sanctionDate: effectiveSanctionDate,
+          )
+        : 0.0;
 
     final double calculatedFine = currentIntervalFine + previousUnpaidFee;
 

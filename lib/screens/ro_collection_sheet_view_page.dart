@@ -3287,7 +3287,7 @@ class _RoCollectionDetailsModalSheetState
                           ),
                         ),
                         child: Text(
-                          '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.totalPayableAmount)}',
+                          '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.calculatedLateFine > 0 ? latePayable.grandTotalWithPenalty : latePayable.totalPayableAmount)}',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
@@ -5421,7 +5421,7 @@ class __AddPaymentEntryModalContentState
                                     border: Border.all(color: (breakdown.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade300 : Colors.green.shade300),
                                   ),
                                   child: Text(
-                                    '₹ ${breakdown.totalPayableAmount.toStringAsFixed(2)}',
+                                    '₹ ${(breakdown.calculatedLateFine > 0 ? breakdown.grandTotalWithPenalty : breakdown.totalPayableAmount).toStringAsFixed(2)}',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,

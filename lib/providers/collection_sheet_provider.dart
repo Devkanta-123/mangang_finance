@@ -142,7 +142,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       return p.createdAt.year == date.year &&
           p.createdAt.month == date.month &&
           p.createdAt.day == date.day;
-    }).fold(0.0, (sum, p) => sum + p.lateFine);
+    }).fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine));
   }
 
   /// Get unpaid late fee carried forward for a collection entry
