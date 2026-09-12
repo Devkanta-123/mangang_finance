@@ -617,7 +617,7 @@ class SettingsProvider extends ChangeNotifier {
           return (amt - clearedSince).clamp(0.0, double.infinity);
         }
       }
-      clearedSince += (p.interest > 0 ? p.interest : p.lateFine);
+      clearedSince += p.effectiveLateFine;
     }
 
     return 0.0;
@@ -864,7 +864,7 @@ class SettingsProvider extends ChangeNotifier {
       final preMaturityInterest = sortedPayments.where((p) {
         final pDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
         return !pDate.isAfter(cleanMaturity);
-      }).fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
+      }).fold(0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
 
       final balanceAtMaturity = (initialLoanAmount + preMaturityInterest - preMaturityPaid).clamp(0.0, double.infinity);
 
@@ -1072,7 +1072,7 @@ class SettingsProvider extends ChangeNotifier {
     final double totalPaid = (overrideTotalPaid != null && overrideTotalPaid > inMemPaid)
         ? overrideTotalPaid
         : inMemPaid;
-    final double totalInterest = payments.fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
+    final double totalInterest = payments.fold(0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
         : ((loaneeLoanAmount != null && loaneeLoanAmount > 0)
@@ -1086,13 +1086,9 @@ class SettingsProvider extends ChangeNotifier {
         ? (initialLoan + totalInterest - totalPaid).clamp(0.0, double.infinity)
         : (sortedPayments.isNotEmpty && sortedPayments.first.remainingBalance > 0
             ? sortedPayments.first.remainingBalance
-            : (loaneeDueAmount ?? 0.0));
+            : 0.0);
 
-    final double remainingBalance = (calculatedBalance > 0 || (sortedPayments.isEmpty && loaneeDueAmount == null))
-        ? calculatedBalance
-        : (sortedPayments.isNotEmpty && sortedPayments.first.remainingBalance > 0
-            ? sortedPayments.first.remainingBalance
-            : (loaneeDueAmount ?? 0.0));
+    final double remainingBalance = calculatedBalance;
 
     final effectiveSanctionDate = sanctionDate ?? entry.createdAt;
     final effectiveMaturityDate = maturityDate ?? LoaneeAccount.calculateMaturityDate(effectiveSanctionDate);

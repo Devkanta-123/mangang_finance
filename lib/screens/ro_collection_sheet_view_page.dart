@@ -584,7 +584,7 @@ class _RoCollectionSheetViewPageState
                                     ),
                                     Builder(
                                       builder: (context) {
-                                        final lateFeeVal = p.interest > 0 ? p.interest : p.lateFine;
+                                        final lateFeeVal = p.effectiveLateFine;
                                         final postMatVal = p.postMaturityInterest;
 
                                         return Row(
@@ -639,9 +639,7 @@ class _RoCollectionSheetViewPageState
                                   children: [
                                     Builder(
                                       builder: (context) {
-                                        final lateFeeVal = p.lateFine > 0
-                                            ? p.lateFine
-                                            : (p.postMaturityInterest == 0 && (p.remarks?.toLowerCase().contains('late') ?? false) ? p.interest : 0.0);
+                                        final lateFeeVal = p.effectiveLateFine;
                                         final postMatVal = p.postMaturityInterest > 0
                                             ? p.postMaturityInterest
                                             : ((p.remarks?.toLowerCase().contains('post maturity') ?? false) ? p.interest : 0.0);
@@ -2724,7 +2722,7 @@ class _RoCollectionDetailsModalSheetState
         } else if (paymentsList.isNotEmpty) {
           for (final p in paymentsList) {
             calculatedTotalCollected += p.paymentAmount;
-            final lateFeeVal = p.interest > 0 ? p.interest : p.lateFine;
+            final lateFeeVal = p.effectiveLateFine;
             calculatedLateFees += lateFeeVal;
             calculatedPostMat += p.postMaturityInterest;
           }
@@ -3900,15 +3898,6 @@ class _LoanPaymentHistoryDialog extends StatefulWidget {
       loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
     } catch (_) {}
 
-    try {
-      await collectionProvider.syncAutoLateFeesForEntry(
-        entry: entry,
-        settingsProvider: settingsProvider,
-      );
-    } catch (e) {
-      debugPrint('Note: Auto late fee sync before history modal: $e');
-    }
-
     if (!context.mounted) return;
 
     return showDialog<void>(
@@ -4302,7 +4291,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                             "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
                         final roName = (p.roName?.isNotEmpty == true) ? p.roName! : "RO Officer";
 
-                        final lateFeeVal = p.interest > 0 ? p.interest : p.lateFine;
+                        final lateFeeVal = p.effectiveLateFine;
                         final postMatVal = p.postMaturityInterest;
 
                         return DataRow(
@@ -4591,9 +4580,7 @@ class __AddPaymentEntryModalContentState
           ? widget.entry.loanAmount!
           : ((loanee != null && loanee.loanAmount > 0)
               ? loanee.loanAmount
-              : ((loanee != null && loanee.dueAmount > 0)
-                  ? loanee.dueAmount
-                  : widget.entry.initialBalance));
+              : (widget.entry.actualPrincipal ?? widget.entry.initialBalance));
       final totalPaid =
           collectionProvider.getTotalPaidForCollection(widget.entry.id);
       final totalInterest =
@@ -4920,6 +4907,7 @@ class __AddPaymentEntryModalContentState
       paymentAmount: paymentAmount,
       remainingBalance: newRemainingBalance,
       lateFine: lateFine,
+      interest: 0.0,
       paymentType: _selectedPaymentType,
       roPasscode: enteredPasscode,
       roName: realRoName,

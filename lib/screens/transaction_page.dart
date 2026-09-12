@@ -148,6 +148,7 @@ class _TransactionPageState extends State<TransactionPage> {
       paymentAmount: paymentAmount,
       remainingBalance: newRemainingBalance,
       lateFine: lateFine,
+      interest: 0.0,
       paymentType: _selectedPaymentMode,
       roPasscode: passCode,
       roName: roName,

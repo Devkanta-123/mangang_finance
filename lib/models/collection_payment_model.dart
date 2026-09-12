@@ -40,6 +40,10 @@ class CollectionPaymentModel {
   // Alias getter for backward compatibility
   double get amount => paymentAmount;
 
+  /// Effective late fine for this payment:
+  /// Uses lateFine if recorded (> 0), otherwise falls back to interest for historical records.
+  double get effectiveLateFine => lateFine > 0 ? lateFine : interest;
+
   /// Check if the payment entry was recorded directly by Administrator or for Office Master Route
   bool get isAdminOrOfficeEntry {
     final cleanId = roId?.toUpperCase().trim() ?? '';
@@ -95,6 +99,10 @@ class CollectionPaymentModel {
     double parsedLateFine = (json['late_fine'] ?? json['lateFine'] ?? json['late_payment_fee'] ?? json['latePaymentFee'] ?? 0.0).toDouble();
     double parsedPostMat = (json['post_maturity_interest'] ?? json['postMaturityInterest'] ?? 0.0).toDouble();
 
+    final pId = json['id']?.toString() ?? '';
+    final remStr = json['remarks']?.toString() ?? '';
+    final isHistorical = pId.startsWith('PAY-HIST') || remStr.contains('Historical');
+
     if (json['remarks'] != null) {
       final rem = json['remarks'].toString();
       if (parsedPostMat == 0.0) {
@@ -103,11 +111,28 @@ class CollectionPaymentModel {
           parsedPostMat = double.tryParse(pmMatch.group(1) ?? '') ?? 0.0;
         }
       }
+      if (parsedLateFine == 0.0) {
+        // Check for partial/cleared late fee note first: e.g. "Late Fee: ₹7.26 assessed..., ₹5.00 cleared, ₹2.26 carried forward"
+        final clearedMatch = RegExp(r'₹?\s*([0-9.]+)\s*cleared', caseSensitive: false).firstMatch(rem);
+        if (clearedMatch != null) {
+          parsedLateFine = double.tryParse(clearedMatch.group(1) ?? '') ?? 0.0;
+        } else if (!rem.toLowerCase().contains('assessed')) {
+          // Standard late fee format: e.g. "Daily Late Fee: ₹3.63" or "Late Fee: ₹3.00"
+          final lfMatch = RegExp(r'(?:Daily/Weekly\s*)?Late\s*(?:Payment\s*)?(?:Fee|Fine):\s*₹?\s*([0-9.]+)').firstMatch(rem);
+          if (lfMatch != null) {
+            parsedLateFine = double.tryParse(lfMatch.group(1) ?? '') ?? 0.0;
+          }
+        }
+      }
       if (parsedInterest == 0.0) {
-        final lfMatch = RegExp(r'(?:Daily/Weekly\s*)?Late\s*(?:Payment\s*)?(?:Fee|Fine|Interest):\s*₹?\s*([0-9.]+)').firstMatch(rem);
-        if (lfMatch != null) {
-          parsedInterest = double.tryParse(lfMatch.group(1) ?? '') ?? 0.0;
-        } else {
+        // Only historical imports map late fee remarks to the interest column
+        if (isHistorical) {
+          final lfMatch = RegExp(r'(?:Daily/Weekly\s*)?Late\s*(?:Payment\s*)?(?:Fee|Fine|Interest):\s*₹?\s*([0-9.]+)').firstMatch(rem);
+          if (lfMatch != null) {
+            parsedInterest = double.tryParse(lfMatch.group(1) ?? '') ?? 0.0;
+          }
+        }
+        if (parsedInterest == 0.0) {
           final match = RegExp(r'(?:^|[(,\s])(?:Total\s*)?Interest:\s*₹?\s*([0-9.]+)').firstMatch(rem);
           if (match != null) {
             final val = double.tryParse(match.group(1) ?? '') ?? 0.0;
@@ -120,17 +145,8 @@ class CollectionPaymentModel {
           }
         }
       }
-      if (parsedLateFine == 0.0 && parsedInterest == 0.0) {
-        final lfMatch = RegExp(r'Late\s*(?:Payment\s*)?(?:Fee|Fine):\s*₹?\s*([0-9.]+)').firstMatch(rem);
-        if (lfMatch != null) {
-          parsedLateFine = double.tryParse(lfMatch.group(1) ?? '') ?? 0.0;
-        }
-      }
     }
 
-    final pId = json['id']?.toString() ?? '';
-    final remStr = json['remarks']?.toString() ?? '';
-    final isHistorical = pId.startsWith('PAY-HIST') || remStr.contains('Historical');
     if (isHistorical && parsedInterest == 0.0 && parsedLateFine > 0.0) {
       parsedInterest = parsedLateFine;
       parsedLateFine = 0.0;

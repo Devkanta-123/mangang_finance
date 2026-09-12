@@ -2480,7 +2480,7 @@ class _LoaneeRepaymentHistorySectionState
     final double totalFilteredPaid =
         filteredPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
     final double totalFilteredFine = filteredPayments.fold(
-        0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
+        0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2696,7 +2696,7 @@ class _LoaneeRepaymentHistorySectionState
                       ? 'Recorded by Admin ($officerName) • Mode: ${p.paymentType}'
                       : 'Collected By: $officerName • Mode: ${p.paymentType}',
                   routeName: routeName,
-                  lateFine: (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest,
+                  lateFine: p.effectiveLateFine + p.postMaturityInterest,
                   isAdminEntry: p.isAdminOrOfficeEntry,
                   isSuccess: true,
                 );
@@ -3268,7 +3268,7 @@ class _AdminAllCollectionsLedgerSectionState
     final double totalFilteredAmount =
         filteredPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
     final double totalFilteredLateFine = filteredPayments.fold(
-        0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
+        0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
 
     return Container(
       padding: const EdgeInsets.all(16),

@@ -104,17 +104,17 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
   /// Calculate total interest and overdue fees for a collection card ID from payment table
-  /// (Includes daily/weekly late fees in interest column and post maturity interest)
+  /// (Includes daily/weekly late fees and post maturity interest)
   double getTotalInterestForCollection(String collectionId) {
     final cardPayments = getPaymentsForCollection(collectionId);
-    return cardPayments.fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
+    return cardPayments.fold(0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
   }
 
   /// Calculate total daily/weekly late payment fees for a collection card ID from payment table
-  /// (Reads from table column interest for imported records, or lateFine for manual entries)
+  /// (Reads from table column lateFine for payments, or interest for historical imported records)
   double getTotalLatePaymentFeesForCollection(String collectionId) {
     final cardPayments = getPaymentsForCollection(collectionId);
-    return cardPayments.fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine));
+    return cardPayments.fold(0.0, (sum, p) => sum + p.effectiveLateFine);
   }
 
   /// Calculate total post-maturity interest/fine for a collection card ID from payment table
@@ -142,7 +142,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       return p.createdAt.year == date.year &&
           p.createdAt.month == date.month &&
           p.createdAt.day == date.day;
-    }).fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine));
+    }).fold(0.0, (sum, p) => sum + p.effectiveLateFine);
   }
 
   /// Get unpaid late fee carried forward for a collection entry
@@ -484,7 +484,7 @@ class CollectionSheetProvider extends ChangeNotifier {
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
         : (entry.actualPrincipal ?? 0.0);
-    final double totalInterest = cardPayments.fold(0.0, (sum, p) => sum + (p.interest > 0 ? p.interest : p.lateFine) + p.postMaturityInterest);
+    final double totalInterest = cardPayments.fold(0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
     final double currentRemainingBalance = (initialLoan > 0)
         ? (initialLoan + totalInterest - totalCollected).clamp(0.0, double.infinity)
         : (cardPayments.isNotEmpty && cardPayments.first.remainingBalance > 0
@@ -535,8 +535,10 @@ class CollectionSheetProvider extends ChangeNotifier {
       baseDate = sorted.first.createdAt;
       hasPreviousTransaction = true;
     } else {
-      baseDate = entry.createdAt;
-      hasPreviousTransaction = false;
+      // If there are no real payment records in ro_collection_payments for this entry
+      // (e.g. database table ro_collection_payments was cleared or loan has no transaction history),
+      // we must strictly NOT fabricate or auto-insert historical late fee records.
+      return [];
     }
 
     final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
@@ -967,6 +969,7 @@ class CollectionSheetProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _dbTotalCollectedCache.clear();
       final remoteRoutes = await SupabaseService.instance.fetchRoutes();
       if (remoteRoutes != null) {
         _routes.clear();
@@ -1010,14 +1013,6 @@ class CollectionSheetProvider extends ChangeNotifier {
             _payments.add(p);
           }
         }
-      }
-
-      try {
-        final settingsProvider = SettingsProvider();
-        await settingsProvider.loadSettings();
-        await syncAutoLateFeesForAllEntries(settingsProvider: settingsProvider);
-      } catch (e) {
-        debugPrint('Note: Auto late fee initial sync fallback: $e');
       }
     } catch (e) {
       debugPrint('Error fetching data from Supabase: $e');
