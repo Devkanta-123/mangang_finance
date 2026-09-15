@@ -9,6 +9,7 @@ import '../models/notification_model.dart';
 import '../providers/collection_sheet_provider.dart';
 import '../providers/loanee_provider.dart';
 import '../providers/notification_provider.dart';
+import '../providers/settings_provider.dart';
 import 'supabase_service.dart';
 
 class RealtimeSyncService {
@@ -21,16 +22,19 @@ class RealtimeSyncService {
   CollectionSheetProvider? _collectionProvider;
   LoaneeProvider? _loaneeProvider;
   NotificationProvider? _notificationProvider;
+  SettingsProvider? _settingsProvider;
 
   /// Register providers once to prevent duplicate listeners
   void registerProviders({
     required CollectionSheetProvider collectionProvider,
     required LoaneeProvider loaneeProvider,
     required NotificationProvider notificationProvider,
+    SettingsProvider? settingsProvider,
   }) {
     _collectionProvider = collectionProvider;
     _loaneeProvider = loaneeProvider;
     _notificationProvider = notificationProvider;
+    _settingsProvider = settingsProvider;
   }
 
   /// Initialize and start Supabase Realtime Postgres Changes Subscription
@@ -95,10 +99,20 @@ class RealtimeSyncService {
         },
       );
 
+      // 5. Listen to 'holidays' table
+      _realtimeChannel!.onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'holidays',
+        callback: (PostgresChangePayload payload) {
+          _handleHolidayChange(payload);
+        },
+      );
+
       _realtimeChannel!.subscribe((status, error) {
         if (status == RealtimeSubscribeStatus.subscribed) {
           _isSubscribed = true;
-          debugPrint('🟢 Supabase Realtime connected & listening to (payments, entries, loanees, notifications)');
+          debugPrint('🟢 Supabase Realtime connected & listening to (payments, entries, loanees, notifications, holidays)');
         } else if (status == RealtimeSubscribeStatus.closed || status == RealtimeSubscribeStatus.channelError) {
           _isSubscribed = false;
           debugPrint('🔴 Supabase Realtime channel status: $status, error: $error');
@@ -245,6 +259,15 @@ class RealtimeSyncService {
       }
     } catch (e) {
       debugPrint('⚠️ Error processing realtime notification change: $e');
+    }
+  }
+
+  void _handleHolidayChange(PostgresChangePayload payload) {
+    try {
+      debugPrint('⚡ Realtime Holiday Event: ${payload.eventType}');
+      _settingsProvider?.loadHolidays();
+    } catch (e) {
+      debugPrint('⚠️ Error handling realtime holiday change: $e');
     }
   }
 

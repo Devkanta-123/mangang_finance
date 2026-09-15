@@ -546,15 +546,20 @@ class CollectionSheetProvider extends ChangeNotifier {
       return [];
     }
 
-    final firstCheckDate = hasPreviousTransaction
-        ? cleanBaseDate.add(const Duration(days: 1))
-        : cleanBaseDate;
+    final firstCheckDate = cleanBaseDate.add(const Duration(days: 1));
 
     // 5. Identify completed candidate late dates strictly BEFORE today (today is excluded!)
+    // Sundays and official registered Holidays are strictly excluded!
     final List<DateTime> candidateDates = [];
+    final List<DateTime> skippedHolidays = [];
     DateTime current = firstCheckDate;
     while (current.isBefore(cleanToday)) {
-      if (current.weekday != DateTime.sunday) {
+      final isSunday = current.weekday == DateTime.sunday;
+      final isHoliday = settingsProvider.isHoliday(current);
+      if (isHoliday) {
+        skippedHolidays.add(DateTime(current.year, current.month, current.day));
+      }
+      if (!isSunday && !isHoliday) {
         candidateDates.add(DateTime(current.year, current.month, current.day));
       }
       current = current.add(const Duration(days: 1));
@@ -633,6 +638,13 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
     logBuf.writeln('Excluded:');
     logBuf.writeln('  ${SettingsProvider.formatDate(cleanToday)} (today)');
+    if (skippedHolidays.isNotEmpty) {
+      logBuf.writeln('Official Holidays (Skipped):');
+      for (final h in skippedHolidays) {
+        final holidayInfo = settingsProvider.getHolidayForDate(h);
+        logBuf.writeln('  ${SettingsProvider.formatDate(h)} (${holidayInfo?.description ?? "Official Holiday"})');
+      }
+    }
     if (alreadyAssessedDates.isNotEmpty) {
       logBuf.writeln('Already Assessed (Skipped):');
       for (final d in alreadyAssessedDates) {

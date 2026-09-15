@@ -223,6 +223,14 @@ class AppDrawer extends StatelessWidget {
           badgeColor: const Color(0xFF8B1A1A),
         ),
         DrawerMenuItemData(
+          index: 14,
+          icon: Icons.event_available_rounded,
+          title: 'Official Holidays',
+          subtitle: 'Declare holidays & manage calendar',
+          badge: 'CALENDAR',
+          badgeColor: Colors.deepOrange.shade800,
+        ),
+        DrawerMenuItemData(
           index: 8,
           icon: Icons.account_circle_rounded,
           title: 'Admin Profile',

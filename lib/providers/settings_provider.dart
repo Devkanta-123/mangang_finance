@@ -5,6 +5,7 @@ import '../models/ro_collection_entry_model.dart';
 import '../models/collection_payment_model.dart';
 import '../models/investment_model.dart';
 import '../models/loanee_model.dart';
+import '../models/holiday_model.dart';
 import '../services/supabase_service.dart';
 
 class WeeklyBreakdown {
@@ -239,6 +240,33 @@ class SettingsProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   DateTime? get lastUpdated => _lastUpdated;
 
+  // Holidays state
+  List<Holiday> _holidays = [];
+  List<Holiday> get holidays => List.unmodifiable(_holidays);
+  List<DateTime> get holidayDates => _holidays
+      .map((h) => DateTime(h.date.year, h.date.month, h.date.day))
+      .toList();
+
+  /// Check if a specific date is a registered holiday
+  bool isHoliday(DateTime date) {
+    return _holidays.any((h) =>
+        h.date.year == date.year &&
+        h.date.month == date.month &&
+        h.date.day == date.day);
+  }
+
+  /// Get holiday instance for a specific date if one exists
+  Holiday? getHolidayForDate(DateTime date) {
+    for (final h in _holidays) {
+      if (h.date.year == date.year &&
+          h.date.month == date.month &&
+          h.date.day == date.day) {
+        return h;
+      }
+    }
+    return null;
+  }
+
   /// Load settings with Supabase 'system_settings' table as single source of truth (Row-wise)
   Future<void> loadSettings() async {
     _isLoading = true;
@@ -331,12 +359,96 @@ class SettingsProvider extends ChangeNotifier {
           _lastUpdated = DateTime.tryParse(lastIso);
         }
       }
+
+      // Load registered holidays
+      await loadHolidays();
     } catch (e) {
       debugPrint('⚠️ Error loading SettingsProvider: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  /// Load holidays from Supabase 'holidays' table
+  Future<void> loadHolidays() async {
+    try {
+      final list = await SupabaseService.instance.fetchHolidays();
+      _holidays = list;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('⚠️ Error loading holidays in SettingsProvider: $e');
+    }
+  }
+
+  /// Add a new official holiday and dispatch real-time broadcast notification to all users
+  Future<bool> addHoliday({
+    required DateTime date,
+    required String description,
+    String? createdBy,
+    bool saveToRemote = true,
+  }) async {
+    final cleanDate = DateTime(date.year, date.month, date.day);
+    if (isHoliday(cleanDate)) {
+      debugPrint('⚠️ Holiday already registered for $cleanDate');
+      return false;
+    }
+
+    final holiday = Holiday(
+      id: 'HOL-${cleanDate.year}${cleanDate.month.toString().padLeft(2, '0')}${cleanDate.day.toString().padLeft(2, '0')}',
+      date: cleanDate,
+      description: description.trim(),
+      createdBy: createdBy ?? 'Administrator',
+      createdAt: DateTime.now(),
+    );
+
+    try {
+      bool saved = true;
+      if (saveToRemote && SupabaseService.instance.isInitialized) {
+        saved = await SupabaseService.instance.saveHoliday(holiday);
+      }
+
+      if (saved) {
+        _holidays.removeWhere((h) =>
+            h.date.year == cleanDate.year &&
+            h.date.month == cleanDate.month &&
+            h.date.day == cleanDate.day);
+        _holidays.add(holiday);
+        _holidays.sort((a, b) => a.date.compareTo(b.date));
+        notifyListeners();
+
+        // Broadcast real-time notification to all users
+        if (saveToRemote && SupabaseService.instance.isInitialized) {
+          await SupabaseService.instance.createHolidayNotification(
+            holiday: holiday,
+            createdBy: createdBy ?? 'Administrator',
+          );
+        }
+
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error adding holiday: $e');
+    }
+    return false;
+  }
+
+  /// Delete a holiday from 'holidays' table
+  Future<bool> deleteHoliday(String id, {bool saveToRemote = true}) async {
+    try {
+      bool ok = true;
+      if (saveToRemote && SupabaseService.instance.isInitialized) {
+        ok = await SupabaseService.instance.deleteHoliday(id);
+      }
+      if (ok) {
+        _holidays.removeWhere((h) => h.id == id);
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error deleting holiday: $e');
+    }
+    return false;
   }
 
   /// Save investment settings directly to Supabase 'system_settings' table row-wise (Single Source of Truth)
@@ -513,20 +625,22 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   /// Calculate late days between a base date (or due date) and the collection/current date,
-  /// skipping every Sunday encountered in the date range.
+  /// skipping every Sunday and registered Holiday encountered in the date range.
   ///
   /// Business Rules:
   /// 1. Sunday is NOT a collection / working day.
-  /// 2. If [hasPreviousPayment] is true, [baseDate] is the previous payment date (which was settled),
+  /// 2. Registered Holidays are NOT collection / working days.
+  /// 3. If [hasPreviousPayment] is true, [baseDate] is the previous payment date (which was settled),
   ///    so missed collection days start checking from the day after [baseDate].
-  /// 3. If [hasPreviousPayment] is false, [baseDate] is the loan start / due date.
-  /// 4. Every Sunday encountered between the start checking date and [asOfDate] is excluded.
-  /// 5. If due date was Saturday and collection date is Sunday, 0 late days.
-  /// 6. If due date was Sunday, Sunday itself is not counted as a late day.
+  /// 4. If [hasPreviousPayment] is false, [baseDate] is the loan start / due date.
+  /// 5. Every Sunday and Holiday encountered between the start checking date and [asOfDate] is excluded.
+  /// 6. If due date was Saturday and collection date is Sunday, 0 late days.
+  /// 7. If due date was Sunday, Sunday itself is not counted as a late day.
   static int calculateDailyLateDays({
     required DateTime baseDate,
     required DateTime asOfDate,
     bool hasPreviousPayment = false,
+    List<DateTime>? holidays,
   }) {
     final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
     final cleanToday = DateTime(asOfDate.year, asOfDate.month, asOfDate.day);
@@ -553,7 +667,14 @@ class SettingsProvider extends ChangeNotifier {
     DateTime current = firstCheckDate;
 
     while (current.isBefore(cleanToday)) {
-      if (current.weekday != DateTime.sunday) {
+      final isSunday = current.weekday == DateTime.sunday;
+      final isHoliday = holidays != null &&
+          holidays.any((h) =>
+              h.year == current.year &&
+              h.month == current.month &&
+              h.day == current.day);
+
+      if (!isSunday && !isHoliday) {
         lateDays++;
       }
       current = current.add(const Duration(days: 1));
@@ -562,15 +683,17 @@ class SettingsProvider extends ChangeNotifier {
     return lateDays.clamp(0, 365);
   }
 
-  /// Calculate late days between a due date and collection date, excluding Sundays.
+  /// Calculate late days between a due date and collection date, excluding Sundays & Holidays.
   static int calculateLateDaysBetween({
     required DateTime dueDate,
     required DateTime collectionDate,
+    List<DateTime>? holidays,
   }) {
     return calculateDailyLateDays(
       baseDate: dueDate,
       asOfDate: collectionDate,
       hasPreviousPayment: false,
+      holidays: holidays,
     );
   }
 
@@ -686,6 +809,7 @@ class SettingsProvider extends ChangeNotifier {
           baseDate: latestAutoDate,
           asOfDate: today,
           hasPreviousPayment: true,
+          holidays: holidayDates,
         );
 
         return autoAssessedInInterval.length + pendingDays;
@@ -695,6 +819,7 @@ class SettingsProvider extends ChangeNotifier {
         baseDate: baseDate,
         asOfDate: today,
         hasPreviousPayment: hasPreviousPayment,
+        holidays: holidayDates,
       );
     } else {
       // Weekly Collection based on ₹650/week for 17.5 weeks tenure
@@ -1323,6 +1448,7 @@ class SettingsProvider extends ChangeNotifier {
         baseDate: startDate,
         asOfDate: today,
         hasPreviousPayment: false,
+        holidays: holidayDates,
       );
       final baseAmt = baseDailyAmount;
       final fineRate = baseAmt * (_lateFinePercentage / 100.0);

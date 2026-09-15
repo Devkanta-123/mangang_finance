@@ -10,6 +10,7 @@ import '../providers/loanee_provider.dart';
 import '../providers/ro_provider.dart';
 import '../providers/settings_provider.dart';
 import '../models/collection_payment_model.dart';
+import '../models/holiday_model.dart';
 import '../services/supabase_service.dart';
 import '../services/historical_payment_import_service.dart';
 import '../widgets/historical_payment_import_dialog.dart';
@@ -396,6 +397,42 @@ class _RoCollectionSheetViewPageState
       return;
     }
 
+    // Prevent collection payment on official registered holidays
+    final sp = Provider.of<SettingsProvider>(context, listen: false);
+    final holidayToday = sp.getHolidayForDate(DateTime.now());
+    if (holidayToday != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.deepOrange.shade900,
+          duration: const Duration(seconds: 4),
+          content: Row(
+            children: [
+              const Icon(Icons.event_busy_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '🚫 Holiday: ${holidayToday.description}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    Text(
+                      'Today (${SettingsProvider.formatDate(holidayToday.date)}) is an official holiday. Collection payments cannot be recorded today.',
+                      style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
     // Prevent double payment entry for same date
     if (collectionProvider.hasPaymentForDate(entry.id)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -412,7 +449,6 @@ class _RoCollectionSheetViewPageState
 
     try {
       final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
-      final sp = Provider.of<SettingsProvider>(context, listen: false);
       await cp.syncAutoLateFeesForEntry(entry: entry, settingsProvider: sp);
     } catch (_) {}
 
@@ -943,6 +979,8 @@ class _RoCollectionSheetViewPageState
     final loaneeProvider = Provider.of<LoaneeProvider>(context);
     final roProvider = Provider.of<RoProvider>(context);
     final authProvider = Provider.of<AuthProvider>(context);
+    final settingsProvider = Provider.of<SettingsProvider>(context);
+    final holidayToday = settingsProvider.getHolidayForDate(DateTime.now());
     final isRoPanel = authProvider.activeRole == UserType.ro;
     final isAdmin = authProvider.activeRole == UserType.admin;
 
@@ -1005,6 +1043,9 @@ class _RoCollectionSheetViewPageState
             children: [
               // Top Banner Header
               _buildTopHeader(provider),
+
+              if (holidayToday != null)
+                _buildHolidayAlertBanner(holidayToday),
 
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -1176,6 +1217,53 @@ class _RoCollectionSheetViewPageState
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // HOLIDAY ALERT BANNER
+  // ==========================================
+  Widget _buildHolidayAlertBanner(Holiday holiday) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.deepOrange.shade800, Colors.red.shade900],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.red.shade900.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.celebration_rounded, color: Colors.amber, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Today is a Holiday: ${holiday.description}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13.5),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Official holiday (${SettingsProvider.formatDate(holiday.date)}). Collections and late fine calculations are paused today.',
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -4798,6 +4886,17 @@ class __AddPaymentEntryModalContentState
     });
 
     if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    final holidayToday = settingsProvider.getHolidayForDate(DateTime.now());
+    if (holidayToday != null) {
+      setState(() {
+        _isSubmitting = false;
+        _passcodeError =
+            'Payment Blocked: Today is "${holidayToday.description}" (Official Holiday). Collections cannot be accepted today.';
+      });
       return;
     }
 

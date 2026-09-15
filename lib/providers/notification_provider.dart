@@ -43,6 +43,7 @@ class NotificationProvider extends ChangeNotifier {
       set.add('admin');
       set.add('ADM-01');
     }
+    set.add('all');
     return set.toList();
   }
 
@@ -74,10 +75,12 @@ class NotificationProvider extends ChangeNotifier {
   void handleIncomingRealtimeNotification(AppNotification notification) {
     // Check if this notification is intended for the current user
     final recipients = currentRecipientIds;
-    final isForMe = recipients.any((r) =>
-        r.toLowerCase().trim() == notification.recipientUserId.toLowerCase().trim() ||
-        (_currentUser?.userType == UserType.admin &&
-            (notification.recipientUserId == 'admin' || notification.recipientUserId.startsWith('ADM-'))));
+    final isBroadcast = notification.recipientUserId.toLowerCase().trim() == 'all';
+    final isForMe = isBroadcast ||
+        recipients.any((r) =>
+            r.toLowerCase().trim() == notification.recipientUserId.toLowerCase().trim() ||
+            (_currentUser?.userType == UserType.admin &&
+                (notification.recipientUserId == 'admin' || notification.recipientUserId.startsWith('ADM-'))));
 
     if (!isForMe) return;
 

@@ -21,6 +21,7 @@ import 'screens/settings_page.dart';
 import 'screens/late_fines_page.dart';
 import 'screens/admin_users_list_page.dart';
 import 'screens/collection_performance_page.dart';
+import 'screens/holiday_management_page.dart';
 import 'providers/auth_provider.dart';
 import 'providers/loanee_provider.dart';
 import 'providers/ro_provider.dart';
@@ -99,6 +100,7 @@ class MyApp extends StatelessWidget {
           '/otp-verify': (context) => const OTPVerificationPage(),
           '/login': (context) => const LoginPage(),
           '/home': (context) => const MainPage(),
+          '/holidays': (context) => const HolidayManagementPage(),
         },
       ),
     );
@@ -132,11 +134,13 @@ class _MainPageState extends State<MainPage> {
     final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
     final notifProvider = Provider.of<NotificationProvider>(context, listen: false);
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
 
     RealtimeSyncService.instance.registerProviders(
       collectionProvider: collectionProvider,
       loaneeProvider: loaneeProvider,
       notificationProvider: notifProvider,
+      settingsProvider: settingsProvider,
     );
 
     notifProvider.initForUser(authProvider.currentUser);
@@ -148,6 +152,101 @@ class _MainPageState extends State<MainPage> {
         _showInAppNotificationBanner(notif);
       }
     });
+
+    // Check for today's or upcoming official holiday on login / app launch
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkHolidayOnLogin(settingsProvider);
+    });
+  }
+
+  void _checkHolidayOnLogin(SettingsProvider settingsProvider) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final cleanNow = DateTime(now.year, now.month, now.day);
+    final holidayToday = settingsProvider.getHolidayForDate(now);
+
+    if (holidayToday != null) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.celebration_rounded, color: Colors.amber, size: 26),
+              SizedBox(width: 10),
+              Text('Official Holiday', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Today is an Official Holiday:\n"${holidayToday.description}"',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF8B1A1A)),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Date: ${SettingsProvider.formatDate(holidayToday.date)}\n\n• Collection payments are suspended today.\n• No late fine penalties or auto-assessed fee records will be applied for today.',
+                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF8B1A1A),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Understood'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // Check if an upcoming holiday is within next 3 days
+      for (int i = 1; i <= 3; i++) {
+        final futureDate = cleanNow.add(Duration(days: i));
+        final upcoming = settingsProvider.getHolidayForDate(futureDate);
+        if (upcoming != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              behavior: SnackBarBehavior.floating,
+              margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              backgroundColor: Colors.indigo.shade900,
+              elevation: 8,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              duration: const Duration(seconds: 5),
+              content: Row(
+                children: [
+                  const Icon(Icons.event_note_rounded, color: Colors.amber, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '📢 Upcoming Holiday: ${upcoming.description}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 12.5),
+                        ),
+                        Text(
+                          '${SettingsProvider.formatDate(upcoming.date)} (${upcoming.relativeLabel}). Collections will be closed.',
+                          style: const TextStyle(color: Colors.white70, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+          break;
+        }
+      }
+    }
   }
 
   void _showInAppNotificationBanner(AppNotification notif) {
@@ -315,13 +414,18 @@ class _MainPageState extends State<MainPage> {
           });
         },
       ),
+      // Index 14: Official Holiday Management (Admin only)
+      const HolidayManagementPage(),
     ];
 
-    // Access control protection: Only Admin and Manager can access index 13
+    // Access control protection: Only Admin and Manager can access index 13, Admin for 14
     int effectiveIndex = _selectedIndex;
     if (effectiveIndex == 13 &&
         authProvider.activeRole != UserType.admin &&
         authProvider.activeRole != UserType.manager) {
+      effectiveIndex = 0;
+    }
+    if (effectiveIndex == 14 && authProvider.activeRole != UserType.admin) {
       effectiveIndex = 0;
     }
 

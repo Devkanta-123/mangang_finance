@@ -9,6 +9,7 @@ import '../models/user_model.dart';
 import '../models/collection_payment_model.dart';
 import '../models/investment_model.dart';
 import '../models/notification_model.dart';
+import '../models/holiday_model.dart';
 import 'customer_id_service.dart';
 
 class SupabaseService {
@@ -2316,6 +2317,7 @@ class SupabaseService {
         validRecipients.add('admin');
         validRecipients.add('ADM-01');
       }
+      validRecipients.add('all');
 
       if (validRecipients.isEmpty) return [];
 
@@ -2486,5 +2488,94 @@ class SupabaseService {
       debugPrint('⚠️ Error clearing all notifications: $e');
     }
     return false;
+  }
+
+  // ==========================================
+  // HOLIDAY MANAGEMENT METHODS
+  // ==========================================
+
+  /// Fetch all registered official holidays ordered by date ascending
+  Future<List<Holiday>> fetchHolidays() async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return [];
+
+      final response = await supaClient
+          .from('holidays')
+          .select('*')
+          .order('holiday_date', ascending: true);
+
+      if (response.isNotEmpty) {
+        return (response as List)
+            .map((item) => Holiday.fromJson(Map<String, dynamic>.from(item)))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching holidays from Supabase: $e');
+    }
+    return [];
+  }
+
+  /// Insert or update a holiday in the 'holidays' table
+  Future<bool> saveHoliday(Holiday holiday) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        await supaClient
+            .from('holidays')
+            .upsert(holiday.toJson(), onConflict: 'holiday_date')
+            .select();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error saving holiday: $e');
+    }
+    return false;
+  }
+
+  /// Delete a holiday from 'holidays' table
+  Future<bool> deleteHoliday(String id) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        await supaClient.from('holidays').delete().eq('id', id);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error deleting holiday: $e');
+    }
+    return false;
+  }
+
+  /// Broadcast a real-time notification to all users when a holiday is added
+  Future<bool> createHolidayNotification({
+    required Holiday holiday,
+    required String createdBy,
+  }) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return false;
+
+      final formattedDate =
+          '${holiday.date.day.toString().padLeft(2, '0')}/${holiday.date.month.toString().padLeft(2, '0')}/${holiday.date.year}';
+
+      final notif = AppNotification(
+        id: 'notif_hol_${holiday.id}',
+        recipientUserId: 'all',
+        senderUserId: createdBy,
+        notificationType: 'holiday',
+        title: '📢 Holiday Declared: ${holiday.description}',
+        message:
+            'Notice: $formattedDate has been declared an official holiday ("${holiday.description}"). No collection payments or late fine penalties will occur on this day.',
+        referenceId: holiday.id,
+        isRead: false,
+        createdAt: DateTime.now(),
+      );
+
+      return await saveNotification(notif);
+    } catch (e) {
+      debugPrint('⚠️ Error creating holiday notification: $e');
+      return false;
+    }
   }
 }
