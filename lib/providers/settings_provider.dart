@@ -970,200 +970,69 @@ class SettingsProvider extends ChangeNotifier {
       }
     }
 
-    final double monthlyRateDecimal = postRate / 100.0; // e.g. 0.07 for 7%
-    final List<PostMaturityMonthlyStep> steps = [];
-    double currentPayable;
-    double lastPeriodInterest = 0.0;
-    double currentPeriodStartingBalance = 0.0;
-    bool hasRecordedInterestInCurrentPeriod = false;
+    if (remainingBalance <= 0) {
+      return PostMaturityInterestBreakdown(
+        isPastMaturity: false,
+        maturityDate: calculatedMaturity,
+        sanctionDate: sanctionDate,
+        remainingBalance: 0.0,
+        normalInterestRate: normalRate,
+        postMaturityInterestRate: postRate,
+        overdueMonths: 0,
+        overdueExtraDays: 0,
+        daysPastMaturity: 0,
+        totalOverdueMonths: 0.0,
+        postMaturityInterestAmount: 0.0,
+        cumulativeInterestAmount: 0.0,
+        normalInterestAmount: 0.0,
+        postMaturityPayableAmount: 0.0,
+        standardInstallment: standardInstallment,
+        monthlySteps: const [],
+        explanation: 'Loan Due Date: ${formatDate(calculatedMaturity)}. Loan is fully settled. Overdue interest: ₹0.00.',
+      );
+    }
 
-    if (payments != null && payments.isNotEmpty && initialLoanAmount != null && initialLoanAmount > 0) {
+    // Loan is past maturity and has an outstanding remaining balance.
+    // Total Payable Today must be based on the actual current outstanding loan balance,
+    // including only the applicable accrued late/post-maturity amounts from the database.
+    // Remaining Balance = (initialLoan + totalInterest - totalPaid).clamp(0.0, infinity)
+    final double cumulativeRecordedPostMat = payments != null
+        ? payments.fold(0.0, (sum, p) => sum + p.postMaturityInterest)
+        : 0.0;
+
+    double lastRecordedPostMat = 0.0;
+    if (payments != null && payments.isNotEmpty) {
       final sortedPayments = List<CollectionPaymentModel>.from(payments)
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-
-      final preMaturityPaid = sortedPayments.where((p) {
-        final pDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
-        return !pDate.isAfter(cleanMaturity);
-      }).fold(0.0, (sum, p) => sum + p.paymentAmount);
-
-      final preMaturityInterest = sortedPayments.where((p) {
-        final pDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
-        return !pDate.isAfter(cleanMaturity);
-      }).fold(0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
-
-      final balanceAtMaturity = (initialLoanAmount + preMaturityInterest - preMaturityPaid).clamp(0.0, double.infinity);
-
-      if (balanceAtMaturity <= 0) {
-        return PostMaturityInterestBreakdown(
-          isPastMaturity: false,
-          maturityDate: calculatedMaturity,
-          sanctionDate: sanctionDate,
-          remainingBalance: 0.0,
-          normalInterestRate: normalRate,
-          postMaturityInterestRate: postRate,
-          overdueMonths: 0,
-          overdueExtraDays: 0,
-          daysPastMaturity: 0,
-          totalOverdueMonths: 0.0,
-          postMaturityInterestAmount: 0.0,
-          cumulativeInterestAmount: 0.0,
-          normalInterestAmount: 0.0,
-          postMaturityPayableAmount: 0.0,
-          standardInstallment: standardInstallment,
-          monthlySteps: const [],
-          explanation: 'Loan Due Date: ${formatDate(calculatedMaturity)}. Loan is fully settled. Overdue interest: ₹0.00.',
-        );
-      }
-
-      currentPayable = balanceAtMaturity;
-
-      for (int p = 1; p <= overduePeriods; p++) {
-        if (currentPayable <= 0) {
-          lastPeriodInterest = 0.0;
-          break;
-        }
-
-        final periodStart = p == 1 ? cleanMaturity : addMonths(cleanMaturity, p - 1);
-        final periodEnd = addMonths(cleanMaturity, p);
-
-        currentPeriodStartingBalance = currentPayable;
-
-        // Apply payments made during this period p
-        final periodPayments = sortedPayments.where((pm) {
-          final pmDate = DateTime(pm.createdAt.year, pm.createdAt.month, pm.createdAt.day);
-          final inPeriod = pmDate.isAfter(periodStart) &&
-              (p == overduePeriods ? !pmDate.isAfter(today) : !pmDate.isAfter(periodEnd));
-          return inPeriod;
-        }).toList();
-
-        final double periodRecordedPostMaturity = periodPayments.fold(0.0, (sum, pm) => sum + pm.postMaturityInterest);
-        final double periodRecordedLateFees = periodPayments.fold(0.0, (sum, pm) => sum + (pm.interest > 0 ? pm.interest : pm.lateFine));
-        final double periodPaid = periodPayments.fold(0.0, (sum, pm) => sum + pm.paymentAmount);
-
-        final double currentInterest;
-        if (periodRecordedPostMaturity > 0) {
-          // Post-maturity interest for this overdue period was already assessed and recorded in payment history (e.g. imported ledger)
-          currentInterest = double.parse(periodRecordedPostMaturity.toStringAsFixed(2));
-          if (p == overduePeriods) {
-            hasRecordedInterestInCurrentPeriod = true;
-          }
-        } else {
-          // Standard calculation: 7% per overdue month on current payable
-          final double rawInterest = currentPayable * monthlyRateDecimal;
-          currentInterest = double.parse(rawInterest.toStringAsFixed(2));
-        }
-
-        final double payableWithInterest = double.parse((currentPayable + currentInterest + periodRecordedLateFees).toStringAsFixed(2));
-
-        steps.add(PostMaturityMonthlyStep(
-          monthNumber: p,
-          startingBalance: currentPeriodStartingBalance,
-          interestRate: postRate,
-          interestAmount: currentInterest,
-          endingBalance: payableWithInterest,
-        ));
-
-        lastPeriodInterest = currentInterest;
-        currentPayable = (payableWithInterest - periodPaid).clamp(0.0, double.infinity);
-        currentPayable = double.parse(currentPayable.toStringAsFixed(2));
-      }
-    } else {
-      if (remainingBalance <= 0) {
-        return PostMaturityInterestBreakdown(
-          isPastMaturity: false,
-          maturityDate: calculatedMaturity,
-          sanctionDate: sanctionDate,
-          remainingBalance: 0.0,
-          normalInterestRate: normalRate,
-          postMaturityInterestRate: postRate,
-          overdueMonths: 0,
-          overdueExtraDays: 0,
-          daysPastMaturity: 0,
-          totalOverdueMonths: 0.0,
-          postMaturityInterestAmount: 0.0,
-          cumulativeInterestAmount: 0.0,
-          normalInterestAmount: 0.0,
-          postMaturityPayableAmount: 0.0,
-          standardInstallment: standardInstallment,
-          monthlySteps: const [],
-          explanation: 'Loan Due Date: ${formatDate(calculatedMaturity)}. Loan is fully settled. Overdue interest: ₹0.00.',
-        );
-      }
-
-      currentPayable = remainingBalance;
-
-      for (int p = 1; p <= overduePeriods; p++) {
-        if (currentPayable <= 0) {
-          lastPeriodInterest = 0.0;
-          break;
-        }
-        currentPeriodStartingBalance = currentPayable;
-        final double rawInterest = currentPayable * monthlyRateDecimal;
-        final double currentInterest = double.parse(rawInterest.toStringAsFixed(2));
-        final double newPayable = double.parse((currentPayable + currentInterest).toStringAsFixed(2));
-
-        steps.add(PostMaturityMonthlyStep(
-          monthNumber: p,
-          startingBalance: currentPeriodStartingBalance,
-          interestRate: postRate,
-          interestAmount: currentInterest,
-          endingBalance: newPayable,
-        ));
-
-        lastPeriodInterest = currentInterest;
-        currentPayable = newPayable;
+      final paymentsWithPostMat = sortedPayments.where((p) => p.postMaturityInterest > 0).toList();
+      if (paymentsWithPostMat.isNotEmpty) {
+        lastRecordedPostMat = paymentsWithPostMat.last.postMaturityInterest;
       }
     }
 
-    final double cumulativeInterest = steps.fold(0.0, (sum, s) => sum + s.interestAmount);
-    final double finalPayable = currentPayable;
-    final double normalInterest = (currentPeriodStartingBalance * normalRate / 100.0);
-    final double reportedRemainingBalance = hasRecordedInterestInCurrentPeriod
-        ? currentPayable
-        : currentPeriodStartingBalance;
-
-    // Debug logging for overdue calculation pipeline
-    final StringBuffer logBuf = StringBuffer();
-    logBuf.writeln('=== [POST-MATURITY OVERDUE CALCULATION PIPELINE] ===');
-    logBuf.writeln('Original loan amount: ₹${initialLoanAmount?.toStringAsFixed(2) ?? "N/A"}');
-    logBuf.writeln('Sanction Date: ${formatDate(sanctionDate)} | Maturity Date: ${formatDate(cleanMaturity)} | As Of Date: ${formatDate(today)}');
-    logBuf.writeln('Overdue Periods: $overduePeriods');
-    for (final step in steps) {
-      logBuf.writeln('  Period ${step.monthNumber}: Starting Balance=₹${step.startingBalance.toStringAsFixed(2)}, Additional Interest=₹${step.interestAmount.toStringAsFixed(2)}, Ending Balance=₹${step.endingBalance.toStringAsFixed(2)}');
-    }
-    logBuf.writeln('Cumulative additional interest: ₹${cumulativeInterest.toStringAsFixed(2)}');
-    logBuf.writeln('Final remaining balance: ₹${finalPayable.toStringAsFixed(2)}');
-    logBuf.writeln('====================================================');
-    debugPrint(logBuf.toString());
-
-    // Build plain-English explanation without day references
-    final StringBuffer exp = StringBuffer();
-    exp.write('Loan Due Date: ${formatDate(calculatedMaturity)} (Period $overduePeriods overdue). ');
-    exp.write('Under Mangang Finance servicing terms, overdue interest compounds at ${postRate.toStringAsFixed(1)}% per overdue month. ');
-    if (steps.isNotEmpty) {
-      final stepStrs = steps.map((s) => 'Month ${s.monthNumber}: Overdue interest on ₹${s.startingBalance.toStringAsFixed(2)} = ₹${s.interestAmount.toStringAsFixed(2)} (Payable: ₹${s.endingBalance.toStringAsFixed(2)})').join('; ');
-      exp.write('[$stepStrs]. ');
-    }
-    exp.write('Current Overdue Interest: ₹${lastPeriodInterest.toStringAsFixed(2)}. Total Payable Amount = ₹${finalPayable.toStringAsFixed(2)}.');
+    final double normalInterest = (remainingBalance * normalRate / 100.0);
+    final String explanation = 'Loan Due Date: ${formatDate(calculatedMaturity)} (Period $overduePeriods past maturity). '
+        'Outstanding balance: ₹${remainingBalance.toStringAsFixed(2)}${cumulativeRecordedPostMat > 0 ? " (includes ₹${cumulativeRecordedPostMat.toStringAsFixed(2)} accrued post-maturity interest)" : ""}. '
+        'Total Payable Amount = ₹${remainingBalance.toStringAsFixed(2)}.';
 
     return PostMaturityInterestBreakdown(
       isPastMaturity: true,
       maturityDate: calculatedMaturity,
       sanctionDate: sanctionDate,
-      remainingBalance: reportedRemainingBalance,
+      remainingBalance: remainingBalance,
       normalInterestRate: normalRate,
       postMaturityInterestRate: postRate,
       overdueMonths: overduePeriods,
       overdueExtraDays: 0,
       daysPastMaturity: 0,
       totalOverdueMonths: overduePeriods.toDouble(),
-      postMaturityInterestAmount: lastPeriodInterest, // Current period's interest ONLY (NOT cumulative!)
-      cumulativeInterestAmount: cumulativeInterest,
+      postMaturityInterestAmount: lastRecordedPostMat,
+      cumulativeInterestAmount: cumulativeRecordedPostMat,
       normalInterestAmount: double.parse(normalInterest.toStringAsFixed(2)),
-      postMaturityPayableAmount: finalPayable, // Total Compounded Payable
+      postMaturityPayableAmount: remainingBalance,
       standardInstallment: standardInstallment,
-      monthlySteps: steps,
-      explanation: exp.toString(),
+      monthlySteps: const [],
+      explanation: explanation,
     );
   }
 
@@ -1233,72 +1102,87 @@ class SettingsProvider extends ChangeNotifier {
     final bool isLoanCleared = (initialLoan > 0 && calculatedBalance <= 0) ||
         (sortedPayments.isNotEmpty && sortedPayments.first.remainingBalance <= 0 && totalPaid > 0);
 
-    final int lateUnits = !isLoanCleared
-        ? calculateLateUnits(
-            entry: entry,
-            payments: payments,
-            asOfDate: asOfDate,
-          )
-        : 0;
-
+    final int lateUnits;
     final double fineRate = baseInstallment * (_lateFinePercentage / 100.0);
-    final double currentIntervalFine = (lateUnits > 0 && !isLoanCleared)
-        ? (lateUnits * fineRate)
-        : 0.0;
-
-    // Compute previous unpaid late fee carried forward from earlier payments
-    final double previousUnpaidFee = !isLoanCleared
-        ? calculatePreviousUnpaidLateFee(
-            entry: entry,
-            payments: payments,
-            loaneeLoanAmount: loaneeLoanAmount,
-            sanctionDate: effectiveSanctionDate,
-          )
-        : 0.0;
-
-    final double calculatedFine = currentIntervalFine + previousUnpaidFee;
-
-    // For a loan past maturity date:
-    // Total Payable Amount = Remaining Due + New Overdue Interest Amount (NOT the daily installment)
+    final double currentIntervalFine;
+    final double previousUnpaidFee;
+    final double calculatedFine;
     final double overdueMissedAmount;
     final double currentInstallment;
     final double totalPayable;
+    final double grandTotal;
+    final String explanation;
+    final String shortSummary;
+    final String? carriedForwardExplanation;
 
     if (postMaturity.isPastMaturity) {
-      overdueMissedAmount = postMaturity.postMaturityInterestAmount;
-      currentInstallment = postMaturity.remainingBalance;
-      totalPayable = postMaturity.postMaturityPayableAmount; // Remaining Due + New Overdue Interest
+      // AFTER MATURITY:
+      // Total Payable Today must be based on the actual current outstanding loan balance,
+      // including only the applicable accrued late/post-maturity amounts already factored
+      // into remainingBalance.
+      // Do not add active tenure daily late units, previous unpaid fees, or duplicate any components.
+      lateUnits = 0;
+      currentIntervalFine = 0.0;
+      previousUnpaidFee = 0.0;
+      calculatedFine = 0.0;
+      overdueMissedAmount = 0.0;
+      currentInstallment = remainingBalance;
+      totalPayable = remainingBalance;
+      grandTotal = remainingBalance;
+      carriedForwardExplanation = null;
+      explanation = '⚠️ PAST MATURITY: ${postMaturity.explanation}';
+      shortSummary = '₹${totalPayable.toStringAsFixed(0)} (Matured${postMaturity.overdueMonths > 0 ? " ${postMaturity.overdueMonths}M" : ""})';
     } else {
+      // BEFORE MATURITY:
+      // Keep existing calculation where today's payable is based on applicable scheduled
+      // installment(s), missed installments, and late fee.
+      lateUnits = !isLoanCleared
+          ? calculateLateUnits(
+              entry: entry,
+              payments: payments,
+              asOfDate: asOfDate,
+            )
+          : 0;
+
+      currentIntervalFine = (lateUnits > 0 && !isLoanCleared)
+          ? (lateUnits * fineRate)
+          : 0.0;
+
+      previousUnpaidFee = !isLoanCleared
+          ? calculatePreviousUnpaidLateFee(
+              entry: entry,
+              payments: payments,
+              loaneeLoanAmount: loaneeLoanAmount,
+              sanctionDate: effectiveSanctionDate,
+            )
+          : 0.0;
+
+      calculatedFine = currentIntervalFine + previousUnpaidFee;
+
       final double effectiveBase = baseInstallment;
       overdueMissedAmount = lateUnits * effectiveBase;
       currentInstallment = effectiveBase;
       totalPayable = overdueMissedAmount + currentInstallment;
-    }
+      grandTotal = totalPayable + calculatedFine;
 
-    final double grandTotal = totalPayable + calculatedFine;
+      final String unitName = isDaily ? (lateUnits == 1 ? 'day' : 'days') : (lateUnits == 1 ? 'week' : 'weeks');
 
-    final String unitName = isDaily ? (lateUnits == 1 ? 'day' : 'days') : (lateUnits == 1 ? 'week' : 'weeks');
+      if (lateUnits > 0) {
+        final feeBreakdownNote = 'Late payment fee assessed for $lateUnits missed $unitName: ₹${currentIntervalFine.toStringAsFixed(2)} penalty.';
+        final carriedNote = previousUnpaidFee > 0 ? ' Previous unpaid late fee: ₹${previousUnpaidFee.toStringAsFixed(2)} carried forward from missed collection (Total fee: ₹${calculatedFine.toStringAsFixed(2)}).' : '';
+        explanation = '$lateUnits $unitName late: $lateUnits missed ${isDaily ? "days" : "weeks"} (₹${overdueMissedAmount.toStringAsFixed(2)}) + ${isDaily ? "Today's" : "This week's"} installment (₹${currentInstallment.toStringAsFixed(2)}) = ₹${totalPayable.toStringAsFixed(2)} Total Due Today. $feeBreakdownNote$carriedNote';
+        shortSummary = '₹${totalPayable.toStringAsFixed(0)} ($lateUnits $unitName late + today)';
+      } else if (previousUnpaidFee > 0) {
+        explanation = 'On Time: Scheduled ${isDaily ? "daily" : "weekly"} installment = ₹${currentInstallment.toStringAsFixed(2)}. ₹${previousUnpaidFee.toStringAsFixed(2)} unpaid late fee carried forward from previous missed collection.';
+        shortSummary = '₹${currentInstallment.toStringAsFixed(0)} / $freq (+₹${previousUnpaidFee.toStringAsFixed(0)} fee)';
+      } else {
+        explanation = 'On Time: Scheduled ${isDaily ? "daily" : "weekly"} installment = ₹${currentInstallment.toStringAsFixed(2)} (Standard rate). Late Payment Fee: ₹0.00.';
+        shortSummary = '₹${currentInstallment.toStringAsFixed(0)} / $freq';
+      }
 
-    final String explanation;
-    final String shortSummary;
-    final String carriedForwardExplanation = previousUnpaidFee > 0
-        ? '₹${previousUnpaidFee.toStringAsFixed(2)} unpaid late fee carried forward from previous missed collection.'
-        : '';
-
-    if (postMaturity.isPastMaturity) {
-      explanation = '⚠️ PAST MATURITY: ${postMaturity.explanation}${calculatedFine > 0 ? " Late Payment Fee: ₹${calculatedFine.toStringAsFixed(2)} penalty assessed for missed collection." : ""}';
-      shortSummary = '₹${totalPayable.toStringAsFixed(0)} (Matured${postMaturity.overdueMonths > 0 ? " ${postMaturity.overdueMonths}M" : ""})';
-    } else if (lateUnits > 0) {
-      final feeBreakdownNote = 'Late payment fee assessed for $lateUnits missed $unitName: ₹${currentIntervalFine.toStringAsFixed(2)} penalty.';
-      final carriedNote = previousUnpaidFee > 0 ? ' Previous unpaid late fee: ₹${previousUnpaidFee.toStringAsFixed(2)} carried forward from missed collection (Total fee: ₹${calculatedFine.toStringAsFixed(2)}).' : '';
-      explanation = '$lateUnits $unitName late: $lateUnits missed ${isDaily ? "days" : "weeks"} (₹${overdueMissedAmount.toStringAsFixed(2)}) + ${isDaily ? "Today's" : "This week's"} installment (₹${currentInstallment.toStringAsFixed(2)}) = ₹${totalPayable.toStringAsFixed(2)} Total Due Today. $feeBreakdownNote$carriedNote';
-      shortSummary = '₹${totalPayable.toStringAsFixed(0)} ($lateUnits $unitName late + today)';
-    } else if (previousUnpaidFee > 0) {
-      explanation = 'On Time: Scheduled ${isDaily ? "daily" : "weekly"} installment = ₹${currentInstallment.toStringAsFixed(2)}. ₹${previousUnpaidFee.toStringAsFixed(2)} unpaid late fee carried forward from previous missed collection.';
-      shortSummary = '₹${currentInstallment.toStringAsFixed(0)} / $freq (+₹${previousUnpaidFee.toStringAsFixed(0)} fee)';
-    } else {
-      explanation = 'On Time: Scheduled ${isDaily ? "daily" : "weekly"} installment = ₹${currentInstallment.toStringAsFixed(2)} (Standard rate). Late Payment Fee: ₹0.00.';
-      shortSummary = '₹${currentInstallment.toStringAsFixed(0)} / $freq';
+      carriedForwardExplanation = previousUnpaidFee > 0
+          ? '₹${previousUnpaidFee.toStringAsFixed(2)} unpaid late fee carried forward from previous missed collection.'
+          : null;
     }
 
     final double totalOutstanding = remainingBalance + calculatedFine;
@@ -1320,7 +1204,7 @@ class SettingsProvider extends ChangeNotifier {
       currentIntervalLateFine: currentIntervalFine,
       effectiveLoanAmount: effectiveLoanAmount,
       totalOutstandingDue: totalOutstanding,
-      carriedForwardExplanation: carriedForwardExplanation.isNotEmpty ? carriedForwardExplanation : null,
+      carriedForwardExplanation: carriedForwardExplanation,
       postMaturityBreakdown: postMaturity,
     );
   }
@@ -1444,26 +1328,46 @@ class SettingsProvider extends ChangeNotifier {
       final now = asOfDate ?? DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
       final startDate = fallbackStartDate ?? now;
-      final daysDiff = calculateDailyLateDays(
-        baseDate: startDate,
-        asOfDate: today,
-        hasPreviousPayment: false,
-        holidays: holidayDates,
-      );
       final baseAmt = baseDailyAmount;
-      final fineRate = baseAmt * (_lateFinePercentage / 100.0);
-      final fine = daysDiff > 0 ? (daysDiff * fineRate) : 0.0;
-      final overdueMissed = daysDiff * baseAmt;
-      final totalPayable = overdueMissed + baseAmt;
+      final double remainingBalance = fallbackDueAmount > 0 ? fallbackDueAmount : fallbackLoanAmount;
 
       final postMaturity = getPostMaturityBreakdown(
         sanctionDate: startDate,
         maturityDate: fallbackMaturityDate,
-        remainingBalance: fallbackDueAmount > 0 ? fallbackDueAmount : fallbackLoanAmount,
+        remainingBalance: remainingBalance,
         standardInstallment: baseAmt,
         asOfDate: asOfDate,
         isDaily: true,
       );
+
+      final int daysDiff;
+      final double fineRate = baseAmt * (_lateFinePercentage / 100.0);
+      final double fine;
+      final double overdueMissed;
+      final double totalPayable;
+      final String explanation;
+      final String shortSummary;
+
+      if (postMaturity.isPastMaturity) {
+        daysDiff = 0;
+        fine = 0.0;
+        overdueMissed = 0.0;
+        totalPayable = remainingBalance;
+        explanation = '⚠️ PAST MATURITY: ${postMaturity.explanation}';
+        shortSummary = '₹${totalPayable.toStringAsFixed(0)} (Matured${postMaturity.overdueMonths > 0 ? " ${postMaturity.overdueMonths}M" : ""})';
+      } else {
+        daysDiff = calculateDailyLateDays(
+          baseDate: startDate,
+          asOfDate: today,
+          hasPreviousPayment: false,
+          holidays: holidayDates,
+        );
+        fine = daysDiff > 0 ? (daysDiff * fineRate) : 0.0;
+        overdueMissed = daysDiff * baseAmt;
+        totalPayable = overdueMissed + baseAmt;
+        explanation = 'Calculated from registration date ${formatDate(startDate)}: $daysDiff days late missed amount ₹${overdueMissed.toStringAsFixed(2)} + Today ₹${baseAmt.toStringAsFixed(2)} = ₹${totalPayable.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${fine.toStringAsFixed(2)}.';
+        shortSummary = '₹${totalPayable.toStringAsFixed(0)} ($daysDiff days late + today)';
+      }
 
       final fallbackBreakdown = CollectionLatePayableBreakdown(
         baseInstallment: baseAmt,
@@ -1471,13 +1375,13 @@ class SettingsProvider extends ChangeNotifier {
         isDaily: true,
         frequencyLabel: 'Day',
         overdueMissedAmount: overdueMissed,
-        currentInstallment: baseAmt,
+        currentInstallment: postMaturity.isPastMaturity ? remainingBalance : baseAmt,
         totalPayableAmount: totalPayable,
         lateFineRate: fineRate,
         calculatedLateFine: fine,
         grandTotalWithPenalty: totalPayable + fine,
-        explanation: 'Calculated from registration date ${formatDate(startDate)}: $daysDiff days late missed amount ₹${overdueMissed.toStringAsFixed(2)} + Today ₹${baseAmt.toStringAsFixed(2)} = ₹${totalPayable.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${fine.toStringAsFixed(2)}.',
-        shortSummary: '₹${totalPayable.toStringAsFixed(0)} ($daysDiff days late + today)',
+        explanation: explanation,
+        shortSummary: shortSummary,
         effectiveLoanAmount: fallbackLoanAmount > 0 ? fallbackLoanAmount : (fallbackDueAmount > 0 ? fallbackDueAmount : 10000.0),
         currentIntervalLateFine: fine,
         postMaturityBreakdown: postMaturity,
