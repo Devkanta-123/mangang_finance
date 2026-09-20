@@ -133,14 +133,42 @@ class _TransactionPageState extends State<TransactionPage> {
     final paymentAmount = double.tryParse(_amountController.text.trim()) ?? 0.0;
     final lateFine = double.tryParse(_lateFineController.text.trim()) ?? 0.0;
     final currentBal = provider.getLatestRemainingBalance(_selectedCard!.id);
-    final newRemainingBalance = (currentBal - paymentAmount).clamp(0.0, 999999.0);
 
-    final double totalAssessedFee = _selectedBreakdown?.calculatedLateFine ?? 0.0;
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    final isPastMat = _selectedBreakdown?.isPastMaturity == true;
+    final baseInstallment = _selectedBreakdown?.baseInstallment ?? _selectedCard!.getCalculatedPayableAmount(
+      configuredInterestRate: settingsProvider.investmentInterestRate,
+      configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+      configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+      configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+    );
+
+    double partialPaymentCharge = 0.0;
+    double unpaidBaseAmount = 0.0;
+    if (!isPastMat && paymentAmount > 0 && paymentAmount < baseInstallment) {
+      unpaidBaseAmount = baseInstallment - paymentAmount;
+      final finePct = settingsProvider.lateFinePercentage;
+      partialPaymentCharge = double.parse((unpaidBaseAmount * (finePct / 100.0)).toStringAsFixed(2));
+    }
+
+    final newRemainingBalance = (currentBal - paymentAmount + partialPaymentCharge).clamp(0.0, 999999.0);
+
+    final totalLateFees = provider.getTotalLatePaymentFeesForCollection(_selectedCard!.id);
+    final double totalAssessedFee = totalLateFees > 0
+        ? totalLateFees
+        : (_selectedBreakdown?.calculatedLateFine ?? 0.0);
     final double unpaidCarried = (totalAssessedFee > lateFine) ? (totalAssessedFee - lateFine) : 0.0;
     final String lateFeeNote = unpaidCarried > 0
         ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed for missed collection, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
         : (lateFine > 0 ? ' | Late Fee: ₹${lateFine.toStringAsFixed(2)} cleared' : '');
-    final finalRemarks = remarks != null ? '$remarks$lateFeeNote' : (lateFeeNote.isNotEmpty ? lateFeeNote.replaceFirst(' | ', '') : null);
+
+    final String partialPaymentNote = partialPaymentCharge > 0
+        ? ' | Partial Payment: ₹${paymentAmount.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)} base (Unpaid: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Charge: ₹${partialPaymentCharge.toStringAsFixed(2)}, Balance Impact: ₹${(unpaidBaseAmount + partialPaymentCharge).toStringAsFixed(2)})'
+        : '';
+
+    final finalRemarks = remarks != null
+        ? '$remarks$lateFeeNote$partialPaymentNote'
+        : ((lateFeeNote + partialPaymentNote).isNotEmpty ? (lateFeeNote + partialPaymentNote).replaceFirst(' | ', '') : null);
 
     final payment = CollectionPaymentModel(
       id: 'PAY-${DateTime.now().millisecondsSinceEpoch}',
@@ -148,7 +176,7 @@ class _TransactionPageState extends State<TransactionPage> {
       paymentAmount: paymentAmount,
       remainingBalance: newRemainingBalance,
       lateFine: lateFine,
-      interest: 0.0,
+      interest: partialPaymentCharge,
       paymentType: _selectedPaymentMode,
       roPasscode: passCode,
       roName: roName,
@@ -473,7 +501,11 @@ class _TransactionPageState extends State<TransactionPage> {
                                     );
                                     _selectedBreakdown = breakdown;
                                     _amountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
-                                    _lateFineController.text = breakdown.calculatedLateFine.toStringAsFixed(2);
+                                    final totalLateFees = collectionProvider.getTotalLatePaymentFeesForCollection(val.id);
+                                    final double lateFeeToAutofill = totalLateFees > 0
+                                        ? totalLateFees
+                                        : breakdown.calculatedLateFine;
+                                    _lateFineController.text = lateFeeToAutofill.toStringAsFixed(2);
                                     _lateFineFormulaText = (breakdown.carriedForwardExplanation?.isNotEmpty == true)
                                         ? '${breakdown.explanation}\n• ${breakdown.carriedForwardExplanation}'
                                         : breakdown.explanation;
@@ -574,13 +606,34 @@ class _TransactionPageState extends State<TransactionPage> {
                                         ),
                                       ),
                                     ],
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text('Amount Due Till Last Month:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
-                                        Text('₹ ${collectionProvider.getLatestRemainingBalance(_selectedCard!.id).toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                                      ],
-                                    ),
+                                     Builder(
+                                       builder: (context) {
+                                         final totalLateFeesCard = collectionProvider.getTotalLatePaymentFeesForCollection(_selectedCard!.id);
+                                         if (totalLateFeesCard > 0) {
+                                           return Padding(
+                                             padding: const EdgeInsets.only(bottom: 6),
+                                             child: Row(
+                                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                               children: [
+                                                 Text('Total Late Payment Interest:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900)),
+                                                 Text(
+                                                   '+ ₹ ${totalLateFeesCard.toStringAsFixed(2)}',
+                                                   style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                                                 ),
+                                               ],
+                                             ),
+                                           );
+                                         }
+                                         return const SizedBox.shrink();
+                                       },
+                                     ),
+                                     Row(
+                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                       children: [
+                                         Text('Amount Due Till Last Month:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
+                                         Text('₹ ${collectionProvider.getLatestRemainingBalance(_selectedCard!.id).toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                       ],
+                                     ),
                                     if (_selectedBreakdown!.calculatedLateFine > 0) ...[
                                       const SizedBox(height: 6),
                                       Row(
@@ -643,35 +696,44 @@ class _TransactionPageState extends State<TransactionPage> {
                                           prefixIcon: Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
                                         ),
                                       ),
-                                      if (_selectedBreakdown != null && _selectedBreakdown!.calculatedLateFine > 0) ...[
-                                        const SizedBox(height: 4),
-                                        Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: InkWell(
-                                            onTap: () {
-                                              setState(() {
-                                                _lateFineController.text = '0.00';
-                                              });
-                                            },
-                                            child: Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: Colors.orange.shade50,
-                                                borderRadius: BorderRadius.circular(4),
-                                                border: Border.all(color: Colors.orange.shade300),
-                                              ),
-                                              child: Text(
-                                                'Carry Forward (₹0.00)',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.orange.shade900,
+                                      Builder(
+                                        builder: (context) {
+                                          final totalLateFeesCard = _selectedCard != null ? collectionProvider.getTotalLatePaymentFeesForCollection(_selectedCard!.id) : 0.0;
+                                          final double assessedFine = totalLateFeesCard > 0 ? totalLateFeesCard : (_selectedBreakdown?.calculatedLateFine ?? 0.0);
+                                          if (assessedFine > 0) {
+                                            return Padding(
+                                              padding: const EdgeInsets.only(top: 4),
+                                              child: Align(
+                                                alignment: Alignment.centerLeft,
+                                                child: InkWell(
+                                                  onTap: () {
+                                                    setState(() {
+                                                      _lateFineController.text = '0.00';
+                                                    });
+                                                  },
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.orange.shade50,
+                                                      borderRadius: BorderRadius.circular(4),
+                                                      border: Border.all(color: Colors.orange.shade300),
+                                                    ),
+                                                    child: Text(
+                                                      'Carry Forward (₹0.00)',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: Colors.orange.shade900,
+                                                      ),
+                                                    ),
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
+                                            );
+                                          }
+                                          return const SizedBox.shrink();
+                                        },
+                                      ),
                                       if (_lateFineFormulaText.isNotEmpty) ...[
                                         const SizedBox(height: 3),
                                         Text(
@@ -687,6 +749,67 @@ class _TransactionPageState extends State<TransactionPage> {
                                   ),
                                 ),
                               ],
+                            ),
+                            Builder(
+                              builder: (context) {
+                                final enteredAmt = double.tryParse(_amountController.text.trim()) ?? 0.0;
+                                final breakdown = _selectedBreakdown;
+                                final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                                final isPastMat = breakdown?.isPastMaturity == true;
+                                final baseInstallment = breakdown?.baseInstallment ?? (_selectedCard != null ? _selectedCard!.getCalculatedPayableAmount(
+                                  configuredInterestRate: settingsProvider.investmentInterestRate,
+                                  configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+                                  configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+                                  configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+                                ) : 0.0);
+
+                                if (!isPastMat && baseInstallment > 0 && enteredAmt > 0 && enteredAmt < baseInstallment) {
+                                  final unpaid = baseInstallment - enteredAmt;
+                                  final finePct = settingsProvider.lateFinePercentage;
+                                  final charge = double.parse((unpaid * (finePct / 100.0)).toStringAsFixed(2));
+                                  final totalImpact = unpaid + charge;
+
+                                  return Container(
+                                    width: double.infinity,
+                                    margin: const EdgeInsets.only(top: 8, bottom: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.shade50,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.amber.shade400),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(Icons.info_outline_rounded, size: 14, color: Colors.amber.shade900),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              'Partial Base Payment Detected',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.amber.shade900,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Base: ₹${baseInstallment.toStringAsFixed(2)} • Unpaid: ₹${unpaid.toStringAsFixed(2)} • ${finePct.toStringAsFixed(1)}% Charge: ₹${charge.toStringAsFixed(2)} • Outstanding Balance Impact: ₹${totalImpact.toStringAsFixed(2)}',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.brown.shade800,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                return const SizedBox.shrink();
+                              },
                             ),
                             const SizedBox(height: 12),
                             Row(

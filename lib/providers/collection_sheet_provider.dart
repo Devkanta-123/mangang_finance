@@ -103,11 +103,11 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
   }
 
-  /// Calculate total interest and overdue fees for a collection card ID from payment table
-  /// (Includes daily/weekly late fees and post maturity interest)
+  /// Calculate total interest and overdue charges for a collection card ID from payment table
+  /// (Includes partial payment charges on unpaid base installments, historical fees, and post maturity interest)
   double getTotalInterestForCollection(String collectionId) {
     final cardPayments = getPaymentsForCollection(collectionId);
-    return cardPayments.fold(0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
+    return cardPayments.fold(0.0, (sum, p) => sum + p.balanceImpactingCharge + p.postMaturityInterest);
   }
 
   /// Calculate total daily/weekly late payment fees for a collection card ID from payment table
@@ -484,7 +484,7 @@ class CollectionSheetProvider extends ChangeNotifier {
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
         : (entry.actualPrincipal ?? 0.0);
-    final double totalInterest = cardPayments.fold(0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
+    final double totalInterest = cardPayments.fold(0.0, (sum, p) => sum + p.balanceImpactingCharge + p.postMaturityInterest);
     final double currentRemainingBalance = (initialLoan > 0)
         ? (initialLoan + totalInterest - totalCollected).clamp(0.0, double.infinity)
         : (cardPayments.isNotEmpty && cardPayments.first.remainingBalance > 0

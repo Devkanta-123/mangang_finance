@@ -40,9 +40,21 @@ class CollectionPaymentModel {
   // Alias getter for backward compatibility
   double get amount => paymentAmount;
 
+  /// Check if this is a historical Excel imported transaction
+  bool get isHistorical => id.startsWith('PAY-HIST') || (remarks != null && remarks!.contains('Historical'));
+
   /// Effective late fine for this payment:
   /// Uses lateFine if recorded (> 0), otherwise falls back to interest for historical records.
   double get effectiveLateFine => lateFine > 0 ? lateFine : interest;
+
+  /// Total charges recorded on this payment that directly impact loan remaining balance:
+  /// - Includes partial payment charges on unpaid base installments (stored in interest)
+  /// - For historical payments, falls back to lateFine if interest is 0.
+  double get balanceImpactingCharge {
+    if (interest > 0) return interest;
+    if (isHistorical && lateFine > 0) return lateFine;
+    return 0.0;
+  }
 
   /// Check if the payment entry was recorded directly by Administrator or for Office Master Route
   bool get isAdminOrOfficeEntry {
@@ -142,6 +154,12 @@ class CollectionPaymentModel {
             if (!isDuplicatedBug) {
               parsedInterest = val;
             }
+          }
+        }
+        if (parsedInterest == 0.0) {
+          final partialMatch = RegExp(r'(?:Partial\s*(?:Payment|Base)|unpaid\s*\+\s*₹?\s*[0-9.]+).*?₹?\s*([0-9.]+)\s*fee', caseSensitive: false).firstMatch(rem);
+          if (partialMatch != null) {
+            parsedInterest = double.tryParse(partialMatch.group(1) ?? '') ?? 0.0;
           }
         }
       }

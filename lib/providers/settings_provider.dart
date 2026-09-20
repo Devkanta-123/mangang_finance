@@ -18,6 +18,7 @@ class WeeklyBreakdown {
   final int lateWeeks;
   final double lateFineRate;
   final double totalCalculatedFine;
+  final double unpaidAmount;
 
   WeeklyBreakdown({
     required this.weeklyInstallment,
@@ -29,6 +30,7 @@ class WeeklyBreakdown {
     required this.lateWeeks,
     required this.lateFineRate,
     required this.totalCalculatedFine,
+    this.unpaidAmount = 0.0,
   });
 }
 
@@ -608,19 +610,26 @@ class SettingsProvider extends ChangeNotifier {
     final int expectedWeeks = weeksElapsed.clamp(0, maxTenureWeeks);
 
     final int lateWeeks = (expectedWeeks - weeksPaid).clamp(0, maxTenureWeeks);
+    final double totalExpected = expectedWeeks * weeklyInstallmentToUse;
+    final double totalTenureAmount = weeklyInstallmentToUse * _weeklyTenureWeeks;
+    final double totalUnpaid = (totalExpected - totalPaid).clamp(0.0, totalTenureAmount).toDouble();
     final double weeklyRate = weeklyInstallmentToUse * (_lateFinePercentage / 100.0);
-    final double calculatedFine = lateWeeks > 0 ? (lateWeeks * weeklyRate) : 0.0;
+    // Apply late fine percentage to the actual unpaid portion across overdue weeks
+    final double calculatedFine = totalUnpaid > 0
+        ? double.parse((totalUnpaid * (_lateFinePercentage / 100.0)).toStringAsFixed(2))
+        : 0.0;
 
     return WeeklyBreakdown(
       weeklyInstallment: weeklyInstallmentToUse,
       tenureWeeks: _weeklyTenureWeeks,
-      totalTenureAmount: weeklyInstallmentToUse * _weeklyTenureWeeks,
+      totalTenureAmount: totalTenureAmount,
       totalPaid: totalPaid,
       weeksPaid: weeksPaid,
       expectedWeeks: expectedWeeks,
       lateWeeks: lateWeeks,
       lateFineRate: weeklyRate,
       totalCalculatedFine: calculatedFine,
+      unpaidAmount: totalUnpaid,
     );
   }
 
@@ -835,6 +844,19 @@ class SettingsProvider extends ChangeNotifier {
   /// Percentage-based Late Fee Rate: 3% of base installment for both Daily & Weekly schemes (only when late)
   double getLateFeeRateForBaseInstallment(double baseInstallment) {
     return baseInstallment * (_lateFinePercentage / 100.0);
+  }
+
+  /// Calculate partial payment charge on unpaid base installment portion
+  /// Formula: unpaidAmount * (lateFinePercentage / 100.0)
+  double calculatePartialPaymentCharge({
+    required double baseInstallment,
+    required double paymentAmount,
+  }) {
+    if (paymentAmount <= 0 || paymentAmount >= baseInstallment) {
+      return 0.0;
+    }
+    final unpaid = baseInstallment - paymentAmount;
+    return double.parse((unpaid * (_lateFinePercentage / 100.0)).toStringAsFixed(2));
   }
 
   /// Calculate the recommended late fine amount for an entry (3% of base installment when late + carried forward unpaid fees)
@@ -1066,7 +1088,7 @@ class SettingsProvider extends ChangeNotifier {
     final double totalPaid = (overrideTotalPaid != null && overrideTotalPaid > inMemPaid)
         ? overrideTotalPaid
         : inMemPaid;
-    final double totalInterest = payments.fold(0.0, (sum, p) => sum + p.effectiveLateFine + p.postMaturityInterest);
+    final double totalInterest = payments.fold(0.0, (sum, p) => sum + p.balanceImpactingCharge + p.postMaturityInterest);
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
         : ((loaneeLoanAmount != null && loaneeLoanAmount > 0)
