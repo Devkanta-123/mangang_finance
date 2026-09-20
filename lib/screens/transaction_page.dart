@@ -151,12 +151,9 @@ class _TransactionPageState extends State<TransactionPage> {
       partialPaymentCharge = double.parse((unpaidBaseAmount * (finePct / 100.0)).toStringAsFixed(2));
     }
 
-    final newRemainingBalance = (currentBal - paymentAmount + partialPaymentCharge).clamp(0.0, 999999.0);
+    final newRemainingBalance = (currentBal + lateFine - paymentAmount + partialPaymentCharge).clamp(0.0, 999999.0);
 
-    final totalLateFees = provider.getTotalLatePaymentFeesForCollection(_selectedCard!.id);
-    final double totalAssessedFee = totalLateFees > 0
-        ? totalLateFees
-        : (_selectedBreakdown?.calculatedLateFine ?? 0.0);
+    final double totalAssessedFee = (_selectedBreakdown?.calculatedLateFine ?? 0.0);
     final double unpaidCarried = (totalAssessedFee > lateFine) ? (totalAssessedFee - lateFine) : 0.0;
     final String lateFeeNote = unpaidCarried > 0
         ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed for missed collection, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
@@ -501,10 +498,7 @@ class _TransactionPageState extends State<TransactionPage> {
                                     );
                                     _selectedBreakdown = breakdown;
                                     _amountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
-                                    final totalLateFees = collectionProvider.getTotalLatePaymentFeesForCollection(val.id);
-                                    final double lateFeeToAutofill = totalLateFees > 0
-                                        ? totalLateFees
-                                        : breakdown.calculatedLateFine;
+                                    final double lateFeeToAutofill = breakdown.calculatedLateFine;
                                     _lateFineController.text = lateFeeToAutofill.toStringAsFixed(2);
                                     _lateFineFormulaText = (breakdown.carriedForwardExplanation?.isNotEmpty == true)
                                         ? '${breakdown.explanation}\n• ${breakdown.carriedForwardExplanation}'

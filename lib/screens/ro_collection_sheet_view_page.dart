@@ -2800,10 +2800,8 @@ class _RoCollectionDetailsModalSheetState
             if (rawPost != null) {
               rowPost = (rawPost is num) ? rawPost.toDouble() : (double.tryParse(rawPost.toString()) ?? 0.0);
             }
-            if (rowInt == 0.0 && rowLate > 0.0) {
-              rowInt = rowLate;
-            }
-            calculatedLateFees += (rowInt > 0.0 ? rowInt : rowLate);
+            final rowLateFee = (rowLate > 0.0) ? rowLate : rowInt;
+            calculatedLateFees += rowLateFee;
             calculatedPostMat += rowPost;
           }
           calculatedInterest = calculatedLateFees + calculatedPostMat;
@@ -2825,9 +2823,7 @@ class _RoCollectionDetailsModalSheetState
           if (calculatedPostMat == 0.0) {
             calculatedPostMat = cp.getTotalPostMaturityInterestForCollection(widget.entry.id);
           }
-          if (calculatedInterest == 0.0) {
-            calculatedInterest = calculatedLateFees + calculatedPostMat;
-          }
+          calculatedInterest = calculatedLateFees + calculatedPostMat;
 
           setState(() {
             _totalCollected = calculatedTotalCollected;
@@ -2927,9 +2923,11 @@ class _RoCollectionDetailsModalSheetState
     final totalPostMaturityInterest = _isDbLoaded
         ? _totalPostMaturityInterest
         : collectionProvider.getTotalPostMaturityInterestForCollection(entry.id);
-    final effectiveTotalInterest = totalInterest > 0
-        ? totalInterest
-        : (totalLateFees + totalPostMaturityInterest);
+    final totalOverdueAdditionalInterest =
+        totalLateFees + totalPostMaturityInterest;
+    final effectiveTotalInterest = totalOverdueAdditionalInterest > 0
+        ? totalOverdueAdditionalInterest
+        : totalInterest;
     final payments = _isDbLoaded
         ? _payments
         : collectionProvider.getPaymentsForCollection(entry.id);
@@ -3273,13 +3271,13 @@ class _RoCollectionDetailsModalSheetState
                       ],
                     ),
                   ],
-                  if (effectiveTotalInterest > 0 && (totalLateFees > 0 && totalPostMaturityInterest > 0)) ...[
+                  if (totalOverdueAdditionalInterest > 0 && (totalLateFees > 0 && totalPostMaturityInterest > 0)) ...[
                     const SizedBox(height: 6),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text('Total Overdue / Additional Interest:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.red.shade900)),
-                        Text('+ ₹ ${_RoCollectionDetailsModalSheet._formatCurrency(effectiveTotalInterest)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.red.shade900)),
+                        Text('+ ₹ ${_RoCollectionDetailsModalSheet._formatCurrency(totalOverdueAdditionalInterest)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.red.shade900)),
                       ],
                     ),
                   ],
@@ -4245,7 +4243,8 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                   final totalLateFees = cp.getTotalLatePaymentFeesForCollection(entry.id);
                   final totalPostMat = cp.getTotalPostMaturityInterestForCollection(entry.id);
                   final totalInt = cp.getTotalInterestForCollection(entry.id);
-                  final effectiveInt = totalInt > 0 ? totalInt : (totalLateFees + totalPostMat);
+                  final totalOverdueInterest = totalLateFees + totalPostMat;
+                  final effectiveInt = totalOverdueInterest > 0 ? totalOverdueInterest : totalInt;
                   final loanAmt = loanee?.loanAmount ?? entry.loanAmount ?? entry.initialBalance;
                   final remaining = (loanAmt + effectiveInt - totalPaid).clamp(0.0, double.infinity);
 
@@ -4673,8 +4672,6 @@ class __AddPaymentEntryModalContentState
           collectionProvider.getTotalPaidForCollection(widget.entry.id);
       final totalInterest =
           collectionProvider.getTotalInterestForCollection(widget.entry.id);
-      final totalLateFeesEntry =
-          collectionProvider.getTotalLatePaymentFeesForCollection(widget.entry.id);
 
       _currentDueBalance =
           (initialBal + totalInterest - totalPaid).clamp(0.0, double.infinity);
@@ -4682,10 +4679,8 @@ class __AddPaymentEntryModalContentState
       if (_paymentAmountController.text.trim().isEmpty) {
         _paymentAmountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
       }
-      // Autofill late fee directly inside the late payment fees input field matching Total Late Payment Interest
-      final double autofillLateFee = totalLateFeesEntry > 0
-          ? totalLateFeesEntry
-          : breakdown.calculatedLateFine;
+      // Autofill late fee directly inside the late payment fees input field matching calculated late fine
+      final double autofillLateFee = breakdown.calculatedLateFine;
       _lateFineController.text = autofillLateFee.toStringAsFixed(2);
       _updateRemainingBalanceDisplay();
     }
@@ -4716,9 +4711,12 @@ class __AddPaymentEntryModalContentState
       partialPaymentCharge = double.parse((unpaid * (finePct / 100.0)).toStringAsFixed(2));
     }
 
-    // Remaining Balance impact: unpaid portion + partial payment charge remains in balance
-    final calculatedBal = (baseTarget >= payment)
-        ? (baseTarget - payment + partialPaymentCharge)
+    final lateFine =
+        double.tryParse(_lateFineController.text.trim()) ?? 0.0;
+    // Remaining Balance impact: loan due balance + late fine - payment + partial payment charge
+    final double effectiveTarget = baseTarget + lateFine;
+    final calculatedBal = (effectiveTarget >= payment)
+        ? (effectiveTarget - payment + partialPaymentCharge)
         : 0.0;
     _remainingBalanceController.text = calculatedBal.toStringAsFixed(2);
     if (mounted) {
@@ -4998,10 +4996,7 @@ class __AddPaymentEntryModalContentState
     final breakdown = _payableBreakdown;
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
-    final totalLateFeesEntry = collectionProvider.getTotalLatePaymentFeesForCollection(widget.entry.id);
-    final double totalAssessedFee = totalLateFeesEntry > 0
-        ? totalLateFeesEntry
-        : (breakdown?.calculatedLateFine ?? 0.0);
+    final double totalAssessedFee = (breakdown?.calculatedLateFine ?? 0.0);
     final double baseTarget = (breakdown?.isPastMaturity == true)
         ? breakdown!.totalPayableAmount
         : _currentDueBalance;
@@ -5022,9 +5017,10 @@ class __AddPaymentEntryModalContentState
       partialPaymentCharge = double.parse((unpaidBaseAmount * (finePct / 100.0)).toStringAsFixed(2));
     }
 
-    // Remaining balance: unpaid portion + partial payment charge remains in balance
-    final newRemainingBalance = (baseTarget >= paymentAmount)
-        ? (baseTarget - paymentAmount + partialPaymentCharge)
+    // Remaining balance: loan due balance + late fine - payment + partial payment charge
+    final double effectiveTarget = baseTarget + lateFine;
+    final newRemainingBalance = (effectiveTarget >= paymentAmount)
+        ? (effectiveTarget - paymentAmount + partialPaymentCharge)
         : 0.0;
 
     final double unpaidCarried = (totalAssessedFee > lateFine)
@@ -5424,7 +5420,10 @@ class __AddPaymentEntryModalContentState
                                 final totalLateFeesEntry = collectionProvider.getTotalLatePaymentFeesForCollection(widget.entry.id);
                                 final totalPostMatEntry = collectionProvider.getTotalPostMaturityInterestForCollection(widget.entry.id);
                                 final totalIntEntry = collectionProvider.getTotalInterestForCollection(widget.entry.id);
-                                final effectiveIntEntry = totalIntEntry > 0 ? totalIntEntry : (totalLateFeesEntry + totalPostMatEntry);
+                                final totalOverdueAdditionalInterest = totalLateFeesEntry + totalPostMatEntry;
+                                final effectiveIntEntry = totalOverdueAdditionalInterest > 0
+                                    ? totalOverdueAdditionalInterest
+                                    : totalIntEntry;
                                 final remainingBeforeIntEntry = (loanBreakdown.loanAmount - totalPaidEntry).clamp(0.0, double.infinity);
 
                                 return Column(
@@ -5476,14 +5475,14 @@ class __AddPaymentEntryModalContentState
                                         ],
                                       ),
                                     ],
-                                    if (effectiveIntEntry > 0 && (totalLateFeesEntry > 0 && totalPostMatEntry > 0)) ...[
+                                    if (totalOverdueAdditionalInterest > 0 && (totalLateFeesEntry > 0 && totalPostMatEntry > 0)) ...[
                                       const SizedBox(height: 6),
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [
                                           Text('Total Overdue / Additional Interest:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.red.shade900)),
                                           Text(
-                                            '+ ₹ ${effectiveIntEntry.toStringAsFixed(2)}',
+                                            '+ ₹ ${totalOverdueAdditionalInterest.toStringAsFixed(2)}',
                                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.red.shade900),
                                           ),
                                         ],

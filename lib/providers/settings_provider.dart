@@ -1088,7 +1088,9 @@ class SettingsProvider extends ChangeNotifier {
     final double totalPaid = (overrideTotalPaid != null && overrideTotalPaid > inMemPaid)
         ? overrideTotalPaid
         : inMemPaid;
-    final double totalInterest = payments.fold(0.0, (sum, p) => sum + p.balanceImpactingCharge + p.postMaturityInterest);
+    final double totalLateFees = payments.fold(0.0, (sum, p) => sum + p.effectiveLateFine);
+    final double totalPostMat = payments.fold(0.0, (sum, p) => sum + p.postMaturityInterest);
+    final double totalInterest = totalLateFees + totalPostMat;
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
         : ((loaneeLoanAmount != null && loaneeLoanAmount > 0)
