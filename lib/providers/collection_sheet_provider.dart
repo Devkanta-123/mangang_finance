@@ -462,6 +462,42 @@ class CollectionSheetProvider extends ChangeNotifier {
     return true;
   }
 
+  /// Deletes all automatically assessed PAY-LATE entries in ro_collection_payments falling within a date range
+  Future<int> removeAutoLateFeesInDateRange({
+    required String collectionId,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) async {
+    final cleanFrom = DateTime(fromDate.year, fromDate.month, fromDate.day);
+    final cleanTo = DateTime(toDate.year, toDate.month, toDate.day);
+
+    final cardPayments = getPaymentsForCollection(collectionId);
+    final toRemove = cardPayments.where((p) {
+      final isAuto = p.id.startsWith('PAY-LATE-') ||
+          (p.remarks != null && p.remarks!.contains('Auto assessed'));
+      if (!isAuto) return false;
+      final clean = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
+      return !clean.isBefore(cleanFrom) && !clean.isAfter(cleanTo);
+    }).toList();
+
+    if (toRemove.isEmpty) return 0;
+
+    int deletedCount = 0;
+    for (final p in toRemove) {
+      try {
+        final ok = await deleteCollectionPayment(p.id);
+        if (ok) deletedCount++;
+      } catch (e) {
+        debugPrint('⚠️ Error removing auto late fee record ${p.id}: $e');
+      }
+    }
+
+    if (deletedCount > 0) {
+      notifyListeners();
+    }
+    return deletedCount;
+  }
+
   /// Synchronize and automatically insert missing daily late fee records into 'ro_collection_payments'
   /// for completed missed collection days strictly before today (today is excluded).
   Future<List<CollectionPaymentModel>> syncAutoLateFeesForEntry({
@@ -520,7 +556,6 @@ class CollectionSheetProvider extends ChangeNotifier {
     }).toList();
 
     DateTime baseDate;
-    bool hasPreviousTransaction = false;
 
     // We exclude auto-assessed records so that candidate evaluation starts from the last real/historical transaction
     final nonAutoTx = allSuccessful.where((p) {
@@ -533,7 +568,6 @@ class CollectionSheetProvider extends ChangeNotifier {
       final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
       baseDate = sorted.first.createdAt;
-      hasPreviousTransaction = true;
     } else {
       // If there are no real payment records in ro_collection_payments for this entry
       // (e.g. database table ro_collection_payments was cleared or loan has no transaction history),
@@ -549,17 +583,23 @@ class CollectionSheetProvider extends ChangeNotifier {
     final firstCheckDate = cleanBaseDate.add(const Duration(days: 1));
 
     // 5. Identify completed candidate late dates strictly BEFORE today (today is excluded!)
-    // Sundays and official registered Holidays are strictly excluded!
+    // Sundays, official registered Holidays, and Administrator Paused Dates are strictly excluded!
     final List<DateTime> candidateDates = [];
     final List<DateTime> skippedHolidays = [];
+    final List<DateTime> skippedPausedDates = [];
     DateTime current = firstCheckDate;
     while (current.isBefore(cleanToday)) {
       final isSunday = current.weekday == DateTime.sunday;
       final isHoliday = settingsProvider.isHoliday(current);
+      final isPaused = settingsProvider.isLateFinePaused(entry.id, current, customerId: entry.customerId);
+
       if (isHoliday) {
         skippedHolidays.add(DateTime(current.year, current.month, current.day));
       }
-      if (!isSunday && !isHoliday) {
+      if (isPaused) {
+        skippedPausedDates.add(DateTime(current.year, current.month, current.day));
+      }
+      if (!isSunday && !isHoliday && !isPaused) {
         candidateDates.add(DateTime(current.year, current.month, current.day));
       }
       current = current.add(const Duration(days: 1));

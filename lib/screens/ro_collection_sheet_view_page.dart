@@ -16,6 +16,7 @@ import '../services/historical_payment_import_service.dart';
 import '../widgets/historical_payment_import_dialog.dart';
 import '../widgets/edit_collection_entry_dialog.dart';
 import '../widgets/edit_loanee_dialog.dart';
+import '../widgets/pause_late_fine_dialog.dart';
 
 class RoCollectionSheetViewPage extends StatefulWidget {
   final VoidCallback? onAddLoaneePressed;
@@ -330,8 +331,8 @@ class _RoCollectionSheetViewPageState
   }
 
   // Popup Modal for View Details
-  void _showViewDetailsModal(BuildContext context, RoCollectionEntry entry) {
-    showModalBottomSheet(
+  void _showViewDetailsModal(BuildContext context, RoCollectionEntry entry) async {
+    final action = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -344,6 +345,30 @@ class _RoCollectionSheetViewPageState
                 knownRemainingBal: remainingBal),
       ),
     );
+
+    if (!context.mounted || action == null) return;
+
+    if (action == 'pause_late_fine') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) {
+          PauseLateFineModalSheet.show(context, entry);
+        }
+      });
+    } else if (action == 'edit_card') {
+      EditCollectionEntryDialog.show(context, entry);
+    } else if (action == 'edit_loanee') {
+      final loanee = Provider.of<LoaneeProvider>(context, listen: false)
+          .getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+      if (loanee != null) {
+        EditLoaneeDialog.show(context, loanee);
+      }
+    } else if (action == 'view_full_history') {
+      _LoanPaymentHistoryDialog.show(context, entry);
+    }
   }
 
   // Popup Modal for Add Payment Entry (Admin or RO, single entry per date)
@@ -460,6 +485,15 @@ class _RoCollectionSheetViewPageState
       backgroundColor: Colors.transparent,
       builder: (ctx) => _AddPaymentEntryModalContent(entry: entry),
     );
+
+    if (result != null && result['action'] == 'pause_late_fine' && context.mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) {
+          PauseLateFineModalSheet.show(context, entry);
+        }
+      });
+      return;
+    }
 
     if (result != null && result['success'] == true && context.mounted) {
       final double paidAmt = (result['paymentAmount'] ?? 0.0).toDouble();
@@ -2101,6 +2135,12 @@ class _RoCollectionSheetViewPageState
                 final todayLateFine =
                     provider.getTodayLateFineForCollection(entry.id);
                 final hasPaidToday = provider.hasPaymentForDate(entry.id);
+                final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                final isLateFinePaused = settingsProvider.isLateFinePaused(
+                  entry.id,
+                  DateTime.now(),
+                  customerId: entry.customerId,
+                );
 
                 return DataRow(
                   color: WidgetStateProperty.resolveWith<Color?>((states) {
@@ -2448,11 +2488,36 @@ class _RoCollectionSheetViewPageState
                                     ],
                                   ),
                                 )
-                              : Text("Pending",
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.orange.shade800,
-                                      fontWeight: FontWeight.w600))),
+                              : (isLateFinePaused
+                                  ? Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.deepPurple.shade50,
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: Colors.deepPurple.shade200),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.pause_circle_filled_rounded,
+                                              size: 11, color: Colors.deepPurple.shade700),
+                                          const SizedBox(width: 2),
+                                          Text(
+                                            "Fine Paused",
+                                            style: TextStyle(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.deepPurple.shade800),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : Text("Pending",
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.orange.shade800,
+                                          fontWeight: FontWeight.w600)))),
                     ),
                     // ACTIONS DROPDOWN (KEEP ALL ACTIONS UNDER DROPDOWN + ADD VIEW HISTORY)
                     DataCell(
@@ -2500,6 +2565,9 @@ class _RoCollectionSheetViewPageState
                               break;
                             case "view_history":
                               _LoanPaymentHistoryDialog.show(context, entry);
+                              break;
+                            case "pause_late_fine":
+                              PauseLateFineModalSheet.show(context, entry);
                               break;
                             case "edit_card":
                               EditCollectionEntryDialog.show(context, entry);
@@ -2578,6 +2646,37 @@ class _RoCollectionSheetViewPageState
                               ),
                             ),
                             if (isAdmin) ...[
+                              PopupMenuItem(
+                                value: "pause_late_fine",
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      isLateFinePaused
+                                          ? Icons.pause_circle_rounded
+                                          : Icons.pause_circle_outline_rounded,
+                                      size: 16,
+                                      color: isLateFinePaused
+                                          ? Colors.deepPurple
+                                          : Colors.indigo,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      isLateFinePaused
+                                          ? "Late Fine (Paused)"
+                                          : "Pause Late Fine",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: isLateFinePaused
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                        color: isLateFinePaused
+                                            ? Colors.deepPurple
+                                            : null,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                               const PopupMenuItem(
                                 value: "edit_card",
                                 child: Row(
@@ -2635,6 +2734,7 @@ class _RoCollectionSheetViewPageState
           onTapView: () => _showViewDetailsModal(context, entry),
           onTapAddPayment: () => _showAddPaymentEntryModal(context, entry),
           onTapViewHistory: () => _LoanPaymentHistoryDialog.show(context, entry),
+          onTapPauseLateFine: isAdmin ? () => PauseLateFineModalSheet.show(context, entry) : null,
           onTapEditCard: isAdmin ? () => EditCollectionEntryDialog.show(context, entry) : null,
           onTapDelete: isAdmin ? () async {
             final confirmed = await _showSweetAlertDeleteConfirm(context, entry);
@@ -2897,7 +2997,8 @@ class _RoCollectionDetailsModalSheetState
     final entry = widget.entry;
     final authProvider =
         Provider.of<AuthProvider>(context, listen: false);
-    final isAdmin = authProvider.activeRole == UserType.admin;
+    final isAdmin = authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin;
     final isManager = authProvider.activeRole == UserType.manager ||
         authProvider.currentUser?.userType == UserType.manager;
     final collectionProvider =
@@ -2972,6 +3073,12 @@ class _RoCollectionDetailsModalSheetState
     );
     final postMaturity = latePayable.postMaturityBreakdown;
     final displayBal = remainingBal;
+    final bool isLateFinePaused = settings.isLateFinePaused(
+      entry.id,
+      DateTime.now(),
+      customerId: entry.customerId,
+    );
+    final pauseInfo = settings.getLateFinePause(entry.id, entry.customerId);
 
     return Container(
       constraints: BoxConstraints(
@@ -3060,6 +3167,64 @@ class _RoCollectionDetailsModalSheetState
             ),
 
             const SizedBox(height: 12),
+
+            if (isLateFinePaused && pauseInfo != null) ...[
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.deepPurple.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.deepPurple.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.pause_circle_filled_rounded,
+                        color: Colors.deepPurple.shade700, size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Late Fine Auto-Calculation Paused',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.deepPurple.shade900,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Active: ${pauseInfo.cleanFromDate.day}/${pauseInfo.cleanFromDate.month}/${pauseInfo.cleanFromDate.year} to ${pauseInfo.cleanToDate.day}/${pauseInfo.cleanToDate.month}/${pauseInfo.cleanToDate.year} (${pauseInfo.totalDays} days)${pauseInfo.reason != null && pauseInfo.reason!.isNotEmpty ? " • ${pauseInfo.reason}" : ""}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.deepPurple.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (isAdmin) ...[
+                      const SizedBox(width: 6),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pop(context, 'pause_late_fine');
+                        },
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.deepPurple.shade900,
+                          backgroundColor: Colors.deepPurple.shade100,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          minimumSize: const Size(0, 28),
+                        ),
+                        child: const Text('Manage', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
 
             // Loanee Account Details Summary Card
             Container(
@@ -3618,8 +3783,7 @@ class _RoCollectionDetailsModalSheetState
                       ),
                     ),
                     onPressed: () {
-                      Navigator.pop(context);
-                      _LoanPaymentHistoryDialog.show(context, entry);
+                      Navigator.pop(context, 'view_full_history');
                     },
                     icon: const Icon(Icons.table_chart_outlined, size: 16),
                     label: const Text('Full History Table',
@@ -3636,63 +3800,79 @@ class _RoCollectionDetailsModalSheetState
                   Expanded(
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.amber.shade900,
-                        side: BorderSide(color: Colors.amber.shade400),
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        foregroundColor: isLateFinePaused ? Colors.deepPurple.shade800 : Colors.indigo.shade800,
+                        side: BorderSide(color: isLateFinePaused ? Colors.deepPurple.shade400 : Colors.indigo.shade300),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        minimumSize: const Size(0, 36),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                       onPressed: () {
-                        Navigator.pop(context);
-                        Future.delayed(const Duration(milliseconds: 100), () {
-                          if (context.mounted) {
-                            EditCollectionEntryDialog.show(context, entry);
-                          }
-                        });
+                        Navigator.pop(context, 'pause_late_fine');
+                      },
+                      icon: Icon(
+                        isLateFinePaused ? Icons.pause_circle_rounded : Icons.pause_circle_outline_rounded,
+                        size: 14,
+                      ),
+                      label: Text(
+                        isLateFinePaused ? 'Fine Paused' : 'Pause Late Fine',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.amber.shade900,
+                        side: BorderSide(color: Colors.amber.shade400),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        minimumSize: const Size(0, 36),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(context, 'edit_card');
                       },
                       icon: const Icon(Icons.edit_document, size: 13),
                       label: const Text('Edit Card', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
                   if (loanee != null) ...[
-                    const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF8B1A1A),
                           side: const BorderSide(color: Color(0xFF8B1A1A)),
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          minimumSize: const Size(0, 36),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
                         onPressed: () {
-                          Navigator.pop(context);
-                          Future.delayed(const Duration(milliseconds: 100), () {
-                            if (context.mounted) {
-                              EditLoaneeDialog.show(context, loanee);
-                            }
-                          });
+                          Navigator.pop(context, 'edit_loanee');
                         },
                         icon: const Icon(Icons.person_rounded, size: 13),
                         label: const Text('Edit Loanee', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
                       ),
                     ),
+                    const SizedBox(width: 8),
                   ],
-                  const SizedBox(width: 8),
                   Expanded(
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red.shade700,
                         side: BorderSide(color: Colors.red.shade300),
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        minimumSize: const Size(0, 36),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -3737,6 +3917,7 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
   final VoidCallback? onTapViewHistory;
   final VoidCallback? onTapEditCard;
   final VoidCallback? onTapDelete;
+  final VoidCallback? onTapPauseLateFine;
 
   const _RoCollectionEntryItemCard({
     required this.entry,
@@ -3746,15 +3927,22 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
     this.onTapViewHistory,
     this.onTapEditCard,
     this.onTapDelete,
+    this.onTapPauseLateFine,
   });
 
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final collectionProvider = Provider.of<CollectionSheetProvider>(context);
+    final settingsProvider = Provider.of<SettingsProvider>(context);
     final loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
     final bool isCompleted = collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider);
     final bool hasPaidToday = collectionProvider.hasPaymentForDate(entry.id);
+    final bool isLateFinePaused = settingsProvider.isLateFinePaused(
+      entry.id,
+      DateTime.now(),
+      customerId: entry.customerId,
+    );
     final bool isAdmin = authProvider.activeRole == UserType.admin ||
         authProvider.currentUser?.userType == UserType.admin;
     final bool isOfficeRoute = CollectionSheetProvider.isOfficeRoute(entry.route);
@@ -3809,12 +3997,20 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: isCompleted
                         ? Colors.teal.shade50
-                        : (hasPaidToday ? Colors.green.shade50 : Colors.orange.shade50),
+                        : (hasPaidToday
+                            ? Colors.green.shade50
+                            : (isLateFinePaused
+                                ? Colors.deepPurple.shade50
+                                : Colors.orange.shade50)),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
                       color: isCompleted
                           ? Colors.teal.shade300
-                          : (hasPaidToday ? Colors.green.shade300 : Colors.orange.shade300),
+                          : (hasPaidToday
+                              ? Colors.green.shade300
+                              : (isLateFinePaused
+                                  ? Colors.deepPurple.shade200
+                                  : Colors.orange.shade300)),
                     ),
                   ),
                   child: Row(
@@ -3823,23 +4019,39 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                       Icon(
                         isCompleted
                             ? Icons.check_circle_rounded
-                            : (hasPaidToday ? Icons.check_circle_rounded : Icons.access_time_rounded),
+                            : (hasPaidToday
+                                ? Icons.check_circle_rounded
+                                : (isLateFinePaused
+                                    ? Icons.pause_circle_filled_rounded
+                                    : Icons.access_time_rounded)),
                         size: 11,
                         color: isCompleted
                             ? Colors.teal.shade700
-                            : (hasPaidToday ? Colors.green.shade700 : Colors.orange.shade800),
+                            : (hasPaidToday
+                                ? Colors.green.shade700
+                                : (isLateFinePaused
+                                    ? Colors.deepPurple.shade700
+                                    : Colors.orange.shade800)),
                       ),
                       const SizedBox(width: 4),
                       Text(
                         isCompleted
                             ? "Completed"
-                            : (hasPaidToday ? "Paid Today" : "Pending Today"),
+                            : (hasPaidToday
+                                ? "Paid Today"
+                                : (isLateFinePaused
+                                    ? "Fine Paused"
+                                    : "Pending Today")),
                         style: TextStyle(
                           fontSize: 9.5,
                           fontWeight: FontWeight.bold,
                           color: isCompleted
                               ? Colors.teal.shade800
-                              : (hasPaidToday ? Colors.green.shade800 : Colors.orange.shade900),
+                              : (hasPaidToday
+                                  ? Colors.green.shade800
+                                  : (isLateFinePaused
+                                      ? Colors.deepPurple.shade800
+                                      : Colors.orange.shade900)),
                         ),
                       ),
                     ],
@@ -3933,6 +4145,7 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                     }
                     if (action == "view_details") onTapView();
                     if (action == "view_history" && onTapViewHistory != null) onTapViewHistory!();
+                    if (action == "pause_late_fine" && onTapPauseLateFine != null) onTapPauseLateFine!();
                     if (action == "edit_card" && onTapEditCard != null) onTapEditCard!();
                     if (action == "delete" && onTapDelete != null) onTapDelete!();
                   },
@@ -3948,6 +4161,29 @@ class _RoCollectionEntryItemCard extends StatelessWidget {
                     const PopupMenuItem(value: "view_details", child: Text("Collection")),
                     const PopupMenuItem(value: "view_history", child: Text("View History")),
                     if (isAdmin) ...[
+                      PopupMenuItem(
+                        value: "pause_late_fine",
+                        child: Row(
+                          children: [
+                            Icon(
+                              isLateFinePaused
+                                  ? Icons.pause_circle_rounded
+                                  : Icons.pause_circle_outline_rounded,
+                              size: 16,
+                              color: isLateFinePaused ? Colors.deepPurple : Colors.indigo,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              isLateFinePaused ? "Late Fine (Paused)" : "Pause Late Fine",
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: isLateFinePaused ? FontWeight.bold : FontWeight.normal,
+                                color: isLateFinePaused ? Colors.deepPurple : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                       const PopupMenuItem(value: "edit_card", child: Text("Edit")),
                       const PopupMenuItem(value: "delete", child: Text("Delete")),
                     ],
@@ -3977,8 +4213,6 @@ class _LoanPaymentHistoryDialog extends StatefulWidget {
   static Future<void> show(BuildContext context, RoCollectionEntry entry) async {
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
-    final settingsProvider =
-        Provider.of<SettingsProvider>(context, listen: false);
     LoaneeProvider? loaneeProvider;
     try {
       loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
@@ -5830,6 +6064,83 @@ class __AddPaymentEntryModalContentState
               ),
 
               const SizedBox(height: 12),
+
+              Builder(
+                builder: (context) {
+                  final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                  final isLateFinePaused = settingsProvider.isLateFinePaused(
+                    widget.entry.id,
+                    DateTime.now(),
+                    customerId: widget.entry.customerId,
+                  );
+                  final pauseModel = settingsProvider.getLateFinePause(widget.entry.id, widget.entry.customerId);
+                  if (!isLateFinePaused || pauseModel == null) return const SizedBox.shrink();
+
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.deepPurple.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.pause_circle_filled_rounded,
+                            size: 18, color: Colors.deepPurple.shade700),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Late Fine Auto-Calculation Paused',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.deepPurple.shade900,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Exempt: ${pauseModel.cleanFromDate.day}/${pauseModel.cleanFromDate.month}/${pauseModel.cleanFromDate.year} to ${pauseModel.cleanToDate.day}/${pauseModel.cleanToDate.month}/${pauseModel.cleanToDate.year} (${pauseModel.totalDays} days)${pauseModel.reason != null && pauseModel.reason!.isNotEmpty ? " • ${pauseModel.reason}" : ""}',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: Colors.deepPurple.shade800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isAdmin) ...[
+                          const SizedBox(width: 6),
+                          InkWell(
+                            onTap: () {
+                              Navigator.pop(context, {'action': 'pause_late_fine'});
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.deepPurple.shade100,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'Manage',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.deepPurple.shade900,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
 
               // Field 3: Late Fine & Field 4: PaymentType
               Row(

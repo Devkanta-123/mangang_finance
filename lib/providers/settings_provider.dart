@@ -6,6 +6,7 @@ import '../models/collection_payment_model.dart';
 import '../models/investment_model.dart';
 import '../models/loanee_model.dart';
 import '../models/holiday_model.dart';
+import '../models/late_fine_pause_model.dart';
 import '../services/supabase_service.dart';
 
 class WeeklyBreakdown {
@@ -269,6 +270,43 @@ class SettingsProvider extends ChangeNotifier {
     return null;
   }
 
+  // Late Fine Pauses state (keyed by collectionId)
+  Map<String, LateFinePauseModel> _lateFinePauses = {};
+  List<LateFinePauseModel> get lateFinePauses => _lateFinePauses.values.toList();
+
+  /// Retrieve active or registered late fine pause for an entry
+  LateFinePauseModel? getLateFinePause(String collectionId, [String? customerId]) {
+    if (_lateFinePauses.containsKey(collectionId)) {
+      return _lateFinePauses[collectionId];
+    }
+    if (customerId != null && customerId.isNotEmpty) {
+      for (final p in _lateFinePauses.values) {
+        if (p.customerId == customerId || p.accountNumber == customerId) return p;
+      }
+    }
+    return null;
+  }
+
+  /// Check if late fine is currently paused for an entry on a specific date
+  bool isLateFinePaused(String collectionId, DateTime date, {String? customerId}) {
+    final pause = getLateFinePause(collectionId, customerId);
+    if (pause == null) return false;
+    return pause.isDatePaused(date);
+  }
+
+  /// Get list of dates paused for an entry
+  List<DateTime> getPausedDatesForEntry(String collectionId, [String? customerId]) {
+    final pause = getLateFinePause(collectionId, customerId);
+    if (pause == null) return [];
+    final List<DateTime> list = [];
+    DateTime cur = pause.cleanFromDate;
+    while (!cur.isAfter(pause.cleanToDate)) {
+      list.add(cur);
+      cur = cur.add(const Duration(days: 1));
+    }
+    return list;
+  }
+
   /// Load settings with Supabase 'system_settings' table as single source of truth (Row-wise)
   Future<void> loadSettings() async {
     _isLoading = true;
@@ -364,6 +402,9 @@ class SettingsProvider extends ChangeNotifier {
 
       // Load registered holidays
       await loadHolidays();
+
+      // Load registered late fine pauses
+      await loadLateFinePauses();
     } catch (e) {
       debugPrint('⚠️ Error loading SettingsProvider: $e');
     } finally {
@@ -449,6 +490,87 @@ class SettingsProvider extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('⚠️ Error deleting holiday: $e');
+    }
+    return false;
+  }
+
+  /// Load late fine pauses from Supabase
+  Future<void> loadLateFinePauses() async {
+    try {
+      final list = await SupabaseService.instance.fetchLateFinePauses();
+      final Map<String, LateFinePauseModel> map = {};
+      for (final p in list) {
+        map[p.collectionId] = p;
+      }
+      _lateFinePauses = map;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('⚠️ Error loading late fine pauses: $e');
+    }
+  }
+
+  /// Set or update late fine pause for an entry
+  Future<bool> setLateFinePause({
+    required String collectionId,
+    required String loaneeName,
+    required DateTime fromDate,
+    required DateTime toDate,
+    String? customerId,
+    String? accountNumber,
+    String? reason,
+    String? pausedBy,
+    bool saveToRemote = true,
+  }) async {
+    final cleanFrom = DateTime(fromDate.year, fromDate.month, fromDate.day);
+    final cleanTo = DateTime(toDate.year, toDate.month, toDate.day);
+
+    final pause = LateFinePauseModel(
+      id: 'PAUSE_$collectionId',
+      collectionId: collectionId,
+      customerId: customerId,
+      accountNumber: accountNumber,
+      loaneeName: loaneeName,
+      fromDate: cleanFrom,
+      toDate: cleanTo,
+      reason: reason,
+      pausedBy: pausedBy,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    try {
+      bool saved = true;
+      if (saveToRemote && SupabaseService.instance.isInitialized) {
+        saved = await SupabaseService.instance.saveLateFinePause(pause);
+      }
+      if (saved) {
+        _lateFinePauses[collectionId] = pause;
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error setting late fine pause: $e');
+    }
+    return false;
+  }
+
+  /// Remove/Resume late fine pause for an entry
+  Future<bool> removeLateFinePause(String collectionId, [String? customerId]) async {
+    try {
+      bool ok = true;
+      if (SupabaseService.instance.isInitialized) {
+        ok = await SupabaseService.instance.deleteLateFinePause(collectionId);
+      }
+      if (ok) {
+        _lateFinePauses.remove(collectionId);
+        if (customerId != null) {
+          _lateFinePauses.removeWhere((k, v) => v.customerId == customerId);
+        }
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error removing late fine pause: $e');
     }
     return false;
   }
@@ -650,6 +772,8 @@ class SettingsProvider extends ChangeNotifier {
     required DateTime asOfDate,
     bool hasPreviousPayment = false,
     List<DateTime>? holidays,
+    List<DateTime>? pausedDates,
+    bool Function(DateTime)? isDatePaused,
   }) {
     final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
     final cleanToday = DateTime(asOfDate.year, asOfDate.month, asOfDate.day);
@@ -682,8 +806,14 @@ class SettingsProvider extends ChangeNotifier {
               h.year == current.year &&
               h.month == current.month &&
               h.day == current.day);
+      final isPaused = (isDatePaused != null && isDatePaused(current)) ||
+          (pausedDates != null &&
+              pausedDates.any((p) =>
+                  p.year == current.year &&
+                  p.month == current.month &&
+                  p.day == current.day));
 
-      if (!isSunday && !isHoliday) {
+      if (!isSunday && !isHoliday && !isPaused) {
         lateDays++;
       }
       current = current.add(const Duration(days: 1));
@@ -813,22 +943,28 @@ class SettingsProvider extends ChangeNotifier {
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
         final latestAutoDate = sortedAuto.first.createdAt;
 
+        final pausedDates = getPausedDatesForEntry(entry.id, entry.customerId);
+
         // Pending unrecorded completed days after latest auto-assessed record
         final pendingDays = calculateDailyLateDays(
           baseDate: latestAutoDate,
           asOfDate: today,
           hasPreviousPayment: true,
           holidays: holidayDates,
+          pausedDates: pausedDates,
         );
 
         return autoAssessedInInterval.length + pendingDays;
       }
+
+      final pausedDates = getPausedDatesForEntry(entry.id, entry.customerId);
 
       return calculateDailyLateDays(
         baseDate: baseDate,
         asOfDate: today,
         hasPreviousPayment: hasPreviousPayment,
         holidays: holidayDates,
+        pausedDates: pausedDates,
       );
     } else {
       // Weekly Collection based on ₹650/week for 17.5 weeks tenure

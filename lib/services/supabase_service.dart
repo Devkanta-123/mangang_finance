@@ -1,4 +1,5 @@
 // lib/services/supabase_service.dart
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/loanee_model.dart';
@@ -10,6 +11,7 @@ import '../models/collection_payment_model.dart';
 import '../models/investment_model.dart';
 import '../models/notification_model.dart';
 import '../models/holiday_model.dart';
+import '../models/late_fine_pause_model.dart';
 import 'customer_id_service.dart';
 
 class SupabaseService {
@@ -2181,6 +2183,109 @@ class SupabaseService {
       debugPrint('⚠️ Error persisting system setting row ($key = $value): $e');
       return false;
     }
+  }
+
+  /// Delete a single setting row in 'system_settings' table
+  Future<bool> deleteSystemSetting(String key) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return false;
+      await supaClient.from('system_settings').delete().eq('setting_key', key);
+      return true;
+    } catch (e) {
+      debugPrint('⚠️ Error deleting system setting $key: $e');
+      return false;
+    }
+  }
+
+  /// Save or update a Loanee Late Fine Pause record
+  /// Tries dedicated table 'loanee_late_fine_pauses' first, falling back to 'system_settings' table
+  Future<bool> saveLateFinePause(LateFinePauseModel pause) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        // 1. Try dedicated table 'loanee_late_fine_pauses'
+        try {
+          await supaClient.from('loanee_late_fine_pauses').upsert(
+            pause.toJson(),
+            onConflict: 'id',
+          ).select();
+          debugPrint('✅ Saved late fine pause for ${pause.loaneeName} to loanee_late_fine_pauses table');
+          return true;
+        } catch (tableErr) {
+          debugPrint('ℹ️ Dedicated table loanee_late_fine_pauses note: $tableErr. Falling back to system_settings');
+        }
+
+        // 2. Fallback: store row-wise in system_settings table as JSON
+        final key = 'late_fine_pause_${pause.collectionId}';
+        final jsonStr = jsonEncode(pause.toJson());
+        final ok = await setSystemSetting(key, jsonStr);
+        if (ok) {
+          debugPrint('✅ Saved late fine pause for ${pause.loaneeName} to system_settings row $key');
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error saving late fine pause: $e');
+    }
+    return false;
+  }
+
+  /// Delete Loanee Late Fine Pause record
+  Future<bool> deleteLateFinePause(String collectionId) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        // 1. Try deleting from dedicated table
+        try {
+          await supaClient.from('loanee_late_fine_pauses').delete().eq('collection_id', collectionId);
+        } catch (_) {}
+
+        // 2. Delete from system_settings row
+        final key = 'late_fine_pause_$collectionId';
+        await deleteSystemSetting(key);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error deleting late fine pause for $collectionId: $e');
+    }
+    return false;
+  }
+
+  /// Fetch all Loanee Late Fine Pause records
+  Future<List<LateFinePauseModel>> fetchLateFinePauses() async {
+    final List<LateFinePauseModel> pauses = [];
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        // 1. Try fetching from dedicated table
+        try {
+          final rows = await supaClient.from('loanee_late_fine_pauses').select('*');
+          for (final r in rows) {
+            pauses.add(LateFinePauseModel.fromJson(Map<String, dynamic>.from(r)));
+          }
+          if (pauses.isNotEmpty) {
+            return pauses;
+          }
+        } catch (_) {}
+
+        // 2. Fallback: parse from system_settings table
+        final allSettings = await fetchAllSystemSettings();
+        for (final entry in allSettings.entries) {
+          if (entry.key.startsWith('late_fine_pause_') && entry.value.isNotEmpty) {
+            try {
+              final map = jsonDecode(entry.value);
+              if (map is Map<String, dynamic>) {
+                pauses.add(LateFinePauseModel.fromJson(map));
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('ℹ️ Error fetching late fine pauses: $e');
+    }
+    return pauses;
   }
 
   /// Fetch all system settings as key-value pairs row-wise from 'system_settings'
