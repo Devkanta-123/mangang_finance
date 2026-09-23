@@ -6,6 +6,7 @@ import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/collection_sheet_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/loanee_provider.dart';
 
 /// Compact, clean Modal Dialog for pausing system auto late fine calculation.
 /// Accessible and executable strictly by Administrator.
@@ -245,9 +246,14 @@ class _PauseLateFineDialogState extends State<PauseLateFineDialog> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             Navigator.pop(context, true);
+            LoaneeProvider? lp;
+            try {
+              lp = Provider.of<LoaneeProvider>(context, listen: false);
+            } catch (_) {}
             collectionProvider.syncAutoLateFeesForEntry(
               entry: widget.entry,
               settingsProvider: settingsProvider,
+              loaneeProvider: lp,
             );
           }
         });
@@ -332,9 +338,14 @@ class _PauseLateFineDialogState extends State<PauseLateFineDialog> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             Navigator.pop(context, true);
+            LoaneeProvider? lp;
+            try {
+              lp = Provider.of<LoaneeProvider>(context, listen: false);
+            } catch (_) {}
             collectionProvider.syncAutoLateFeesForEntry(
               entry: widget.entry,
               settingsProvider: settingsProvider,
+              loaneeProvider: lp,
             );
           }
         });

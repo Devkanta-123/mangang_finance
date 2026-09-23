@@ -86,6 +86,42 @@ class CollectionPaymentModel {
     return (roName != null && roName!.isNotEmpty) ? roName! : 'RO Officer';
   }
 
+  CollectionPaymentModel copyWith({
+    String? id,
+    String? collectionId,
+    double? paymentAmount,
+    double? remainingBalance,
+    double? lateFine,
+    double? interest,
+    double? postMaturityInterest,
+    String? paymentType,
+    String? roPasscode,
+    String? roName,
+    String? roId,
+    String? roRoute,
+    DateTime? createdAt,
+    String? status,
+    String? remarks,
+  }) {
+    return CollectionPaymentModel(
+      id: id ?? this.id,
+      collectionId: collectionId ?? this.collectionId,
+      paymentAmount: paymentAmount ?? this.paymentAmount,
+      remainingBalance: remainingBalance ?? this.remainingBalance,
+      lateFine: lateFine ?? this.lateFine,
+      interest: interest ?? this.interest,
+      postMaturityInterest: postMaturityInterest ?? this.postMaturityInterest,
+      paymentType: paymentType ?? this.paymentType,
+      roPasscode: roPasscode ?? this.roPasscode,
+      roName: roName ?? this.roName,
+      roId: roId ?? this.roId,
+      roRoute: roRoute ?? this.roRoute,
+      createdAt: createdAt ?? this.createdAt,
+      status: status ?? this.status,
+      remarks: remarks ?? this.remarks,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,

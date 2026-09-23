@@ -474,7 +474,24 @@ class _RoCollectionSheetViewPageState
 
     try {
       final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
-      await cp.syncAutoLateFeesForEntry(entry: entry, settingsProvider: sp);
+      final lp = Provider.of<LoaneeProvider>(context, listen: false);
+      final loanee = lp.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+      final effectiveLoanAmt = (entry.loanAmount != null && entry.loanAmount! > 0)
+          ? entry.loanAmount!
+          : ((loanee != null && loanee.loanAmount > 0)
+              ? loanee.loanAmount
+              : (entry.actualPrincipal ?? entry.initialBalance));
+
+      await cp.syncAutoLateFeesForEntry(
+        entry: entry,
+        settingsProvider: sp,
+        loaneeLoanAmount: effectiveLoanAmt,
+        loaneeProvider: lp,
+      );
     } catch (_) {}
 
     if (!context.mounted) return;
@@ -517,7 +534,38 @@ class _RoCollectionSheetViewPageState
   }
 
   // Modal to show today's payment records linked to a collection ID with collecting RO info
-  void _showPaymentHistoryModal(BuildContext context, RoCollectionEntry entry) {
+  void _showPaymentHistoryModal(BuildContext context, RoCollectionEntry entry) async {
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context, listen: false);
+    final settingsProvider =
+        Provider.of<SettingsProvider>(context, listen: false);
+    LoaneeProvider? loaneeProvider;
+    try {
+      loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    } catch (_) {}
+
+    try {
+      final loanee = loaneeProvider?.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+      final effectiveLoanAmt = (entry.loanAmount != null && entry.loanAmount! > 0)
+          ? entry.loanAmount!
+          : ((loanee != null && loanee.loanAmount > 0)
+              ? loanee.loanAmount
+              : (entry.actualPrincipal ?? entry.initialBalance));
+
+      await collectionProvider.syncAutoLateFeesForEntry(
+        entry: entry,
+        settingsProvider: settingsProvider,
+        loaneeLoanAmount: effectiveLoanAmt,
+        loaneeProvider: loaneeProvider,
+      );
+    } catch (_) {}
+
+    if (!context.mounted) return;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -526,10 +574,10 @@ class _RoCollectionSheetViewPageState
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
-        final collectionProvider =
+        final cp =
             Provider.of<CollectionSheetProvider>(context);
         final allPayments =
-            collectionProvider.getPaymentsForCollection(entry.id);
+            cp.getPaymentsForCollection(entry.id);
         final now = DateTime.now();
         final payments = allPayments.where((p) =>
             p.createdAt.year == now.year &&
@@ -3485,20 +3533,6 @@ class _RoCollectionDetailsModalSheetState
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Late Due Amount Till Last Month:',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
-                        ),
-                        Text(
-                          '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(((postMaturity != null && postMaturity.isPastMaturity) ? postMaturity.remainingBalance : displayBal) + latePayable.calculatedLateFine)}',
-                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
-                        ),
-                      ],
-                    ),
                   ],
                   if (postMaturity != null && postMaturity.isPastMaturity && postMaturity.postMaturityPayableAmount > postMaturity.remainingBalance) ...[
                     const SizedBox(height: 6),
@@ -3544,7 +3578,7 @@ class _RoCollectionDetailsModalSheetState
                           ),
                         ),
                         child: Text(
-                          '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.calculatedLateFine > 0 ? latePayable.grandTotalWithPenalty : latePayable.totalPayableAmount)}',
+                          '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.totalPayableAmount)}',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
@@ -4213,9 +4247,31 @@ class _LoanPaymentHistoryDialog extends StatefulWidget {
   static Future<void> show(BuildContext context, RoCollectionEntry entry) async {
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
+    final settingsProvider =
+        Provider.of<SettingsProvider>(context, listen: false);
     LoaneeProvider? loaneeProvider;
     try {
       loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    } catch (_) {}
+
+    try {
+      final loanee = loaneeProvider?.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+      final effectiveLoanAmt = (entry.loanAmount != null && entry.loanAmount! > 0)
+          ? entry.loanAmount!
+          : ((loanee != null && loanee.loanAmount > 0)
+              ? loanee.loanAmount
+              : (entry.actualPrincipal ?? entry.initialBalance));
+
+      await collectionProvider.syncAutoLateFeesForEntry(
+        entry: entry,
+        settingsProvider: settingsProvider,
+        loaneeLoanAmount: effectiveLoanAmt,
+        loaneeProvider: loaneeProvider,
+      );
     } catch (_) {}
 
     if (!context.mounted) return;
@@ -4241,7 +4297,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
   int _totalPages = 1;
   List<CollectionPaymentModel> _payments = [];
   bool _isLoading = true;
-  bool _ascending = true; // Default ascending date sort as requested
+  bool _ascending = false; // Default newest first so latest payment appears at the top
 
   @override
   void initState() {
@@ -4269,7 +4325,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       if (page != null) _page = page;
     });
 
-    // Strictly query only this specific loan collection entry ID in ascending date sort by default
+    // Strictly query only this specific loan collection entry ID in newest-first date sort by default
     final result = await widget.collectionProvider.getPaginatedPaymentHistory(
       collectionId: widget.entry.id,
       page: _page,
@@ -4369,6 +4425,22 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       mobileNo: entry.mobileNo,
       name: entry.loaneeName,
     );
+    final cp = widget.collectionProvider;
+    final totalPaid = cp.getTotalPaidForCollection(entry.id);
+    final totalLateFees = cp.getTotalLatePaymentFeesForCollection(entry.id);
+    final totalPostMat = cp.getTotalPostMaturityInterestForCollection(entry.id);
+    final totalInt = cp.getTotalInterestForCollection(entry.id);
+    final totalOverdueInterest = totalLateFees + totalPostMat;
+    final effectiveInt = totalOverdueInterest > 0 ? totalOverdueInterest : totalInt;
+    final loanAmt = (entry.loanAmount != null && entry.loanAmount! > 0)
+        ? entry.loanAmount!
+        : ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : (entry.actualPrincipal ?? entry.initialBalance));
+    final remaining = (loanAmt + effectiveInt - totalPaid).clamp(0.0, double.infinity);
+    final allPayments = cp.getPaymentsForCollection(entry.id);
+    final latestPaymentId = allPayments.isNotEmpty ? allPayments.first.id : null;
+    final bool isCompleted = cp.isEntryCompleted(entry, loaneeProvider: widget.loaneeProvider);
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -4448,7 +4520,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                   children: [
                     _buildMetricItem(
                       label: "Loan Amount",
-                      value: "₹ ${(loanee?.loanAmount ?? entry.loanAmount ?? 0.0).toStringAsFixed(0)}",
+                      value: "₹ ${loanAmt.toStringAsFixed(0)}",
                     ),
                     _buildMetricItem(
                       label: "Sanction Date",
@@ -4470,60 +4542,46 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
               const SizedBox(height: 8),
 
               // Payment History & Interest Breakdown Banner
-              Builder(
-                builder: (context) {
-                  final cp = widget.collectionProvider;
-                  final totalPaid = cp.getTotalPaidForCollection(entry.id);
-                  final totalLateFees = cp.getTotalLatePaymentFeesForCollection(entry.id);
-                  final totalPostMat = cp.getTotalPostMaturityInterestForCollection(entry.id);
-                  final totalInt = cp.getTotalInterestForCollection(entry.id);
-                  final totalOverdueInterest = totalLateFees + totalPostMat;
-                  final effectiveInt = totalOverdueInterest > 0 ? totalOverdueInterest : totalInt;
-                  final loanAmt = loanee?.loanAmount ?? entry.loanAmount ?? entry.initialBalance;
-                  final remaining = (loanAmt + effectiveInt - totalPaid).clamp(0.0, double.infinity);
-
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF8B1A1A).withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.15)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B1A1A).withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.15)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildMetricItem(
+                      label: "Total Collected",
+                      value: "₹${totalPaid.toStringAsFixed(2)}",
+                      valueColor: Colors.green.shade800,
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _buildMetricItem(
-                          label: "Total Collected",
-                          value: "₹${totalPaid.toStringAsFixed(2)}",
-                          valueColor: Colors.green.shade800,
-                        ),
-                        if (totalLateFees > 0)
-                          _buildMetricItem(
-                            label: "Daily/Wkly Late Fees",
-                            value: "₹${totalLateFees.toStringAsFixed(2)}",
-                            valueColor: Colors.orange.shade900,
-                          ),
-                        if (totalPostMat > 0)
-                          _buildMetricItem(
-                            label: "Post Maturity Fine",
-                            value: "₹${totalPostMat.toStringAsFixed(2)}",
-                            valueColor: Colors.purple.shade900,
-                          ),
-                        if (effectiveInt > 0)
-                          _buildMetricItem(
-                            label: "Total Overdue Interest",
-                            value: "₹${effectiveInt.toStringAsFixed(2)}",
-                            valueColor: Colors.deepOrange.shade900,
-                          ),
-                        _buildMetricItem(
-                          label: "Remaining Balance",
-                          value: "₹${remaining.toStringAsFixed(2)}",
-                          valueColor: remaining > 0 ? Colors.red.shade900 : Colors.green.shade800,
-                        ),
-                      ],
+                    if (totalLateFees > 0)
+                      _buildMetricItem(
+                        label: "Daily/Wkly Late Fees",
+                        value: "₹${totalLateFees.toStringAsFixed(2)}",
+                        valueColor: Colors.orange.shade900,
+                      ),
+                    if (totalPostMat > 0)
+                      _buildMetricItem(
+                        label: "Post Maturity Fine",
+                        value: "₹${totalPostMat.toStringAsFixed(2)}",
+                        valueColor: Colors.purple.shade900,
+                      ),
+                    if (effectiveInt > 0)
+                      _buildMetricItem(
+                        label: "Total Overdue Interest",
+                        value: "₹${effectiveInt.toStringAsFixed(2)}",
+                        valueColor: Colors.deepOrange.shade900,
+                      ),
+                    _buildMetricItem(
+                      label: "Remaining Balance",
+                      value: "₹${remaining.toStringAsFixed(2)}",
+                      valueColor: remaining > 0 ? Colors.red.shade900 : Colors.green.shade800,
                     ),
-                  );
-                },
+                  ],
+                ),
               ),
 
               const SizedBox(height: 16),
@@ -4600,7 +4658,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                         const DataColumn(label: Text("Amount")),
                         const DataColumn(label: Text("Daily/Wkly Late Fee")),
                         const DataColumn(label: Text("Post Maturity Fine")),
-                        const DataColumn(label: Text("Remaining Outstanding")),
+                        const DataColumn(label: Text("Remaining Balance")),
                         const DataColumn(label: Text("Mode")),
                         const DataColumn(label: Text("Collected By")),
                         const DataColumn(label: Text("Status")),
@@ -4661,13 +4719,36 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                               ),
                             ),
                             DataCell(
-                              Text(
-                                "₹ ${p.remainingBalance.toStringAsFixed(2)}",
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1E1E1E),
-                                ),
+                              Builder(
+                                builder: (context) {
+                                  final isLatest = (latestPaymentId != null && p.id == latestPaymentId);
+                                  final double bal;
+                                  if (isLatest) {
+                                    bal = remaining;
+                                  } else if (p.remainingBalance > 0.01) {
+                                    bal = p.remainingBalance;
+                                  } else if (remaining <= 0.01 || isCompleted) {
+                                    bal = 0.0;
+                                  } else {
+                                    // Running balance fallback for historical payments with 0.0 stored balance
+                                    final paidUpToP = allPayments
+                                        .where((item) => !item.createdAt.isAfter(p.createdAt))
+                                        .fold(0.0, (sum, item) => sum + item.paymentAmount);
+                                    final intUpToP = allPayments
+                                        .where((item) => !item.createdAt.isAfter(p.createdAt))
+                                        .fold(0.0, (sum, item) => sum + (item.effectiveLateFine + item.postMaturityInterest));
+                                    bal = (loanAmt + intUpToP - paidUpToP).clamp(0.0, double.infinity);
+                                  }
+
+                                  return Text(
+                                    "₹ ${bal.toStringAsFixed(2)}",
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1E1E1E),
+                                    ),
+                                  );
+                                },
                               ),
                             ),
                             DataCell(
@@ -4945,10 +5026,8 @@ class __AddPaymentEntryModalContentState
       partialPaymentCharge = double.parse((unpaid * (finePct / 100.0)).toStringAsFixed(2));
     }
 
-    final lateFine =
-        double.tryParse(_lateFineController.text.trim()) ?? 0.0;
-    // Remaining Balance impact: loan due balance + late fine - payment + partial payment charge
-    final double effectiveTarget = baseTarget + lateFine;
+    // Remaining Balance impact: loan due balance - payment + partial payment charge (do not add late fine into total)
+    final double effectiveTarget = baseTarget;
     final calculatedBal = (effectiveTarget >= payment)
         ? (effectiveTarget - payment + partialPaymentCharge)
         : 0.0;
@@ -5251,8 +5330,8 @@ class __AddPaymentEntryModalContentState
       partialPaymentCharge = double.parse((unpaidBaseAmount * (finePct / 100.0)).toStringAsFixed(2));
     }
 
-    // Remaining balance: loan due balance + late fine - payment + partial payment charge
-    final double effectiveTarget = baseTarget + lateFine;
+    // Remaining balance: loan due balance - payment + partial payment charge (do not add late fine into total)
+    final double effectiveTarget = baseTarget;
     final newRemainingBalance = (effectiveTarget >= paymentAmount)
         ? (effectiveTarget - paymentAmount + partialPaymentCharge)
         : 0.0;
@@ -5765,20 +5844,6 @@ class __AddPaymentEntryModalContentState
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 6),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text(
-                                    'Late Due Amount Till Last Month:',
-                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
-                                  ),
-                                  Text(
-                                    '₹ ${(((postMaturity != null && postMaturity.isPastMaturity) ? postMaturity.remainingBalance : _currentDueBalance) + breakdown.calculatedLateFine).toStringAsFixed(2)}',
-                                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
-                                  ),
-                                ],
-                              ),
                             ],
                             if (postMaturity != null && postMaturity.isPastMaturity && postMaturity.postMaturityPayableAmount > postMaturity.remainingBalance) ...[
                               const SizedBox(height: 6),
@@ -5809,7 +5874,7 @@ class __AddPaymentEntryModalContentState
                                     border: Border.all(color: (breakdown.isOverdue || (postMaturity?.isPastMaturity == true)) ? Colors.red.shade300 : Colors.green.shade300),
                                   ),
                                   child: Text(
-                                    '₹ ${(breakdown.calculatedLateFine > 0 ? breakdown.grandTotalWithPenalty : breakdown.totalPayableAmount).toStringAsFixed(2)}',
+                                    '₹ ${breakdown.totalPayableAmount.toStringAsFixed(2)}',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,

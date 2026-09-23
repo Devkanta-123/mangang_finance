@@ -102,7 +102,7 @@ class CollectionLatePayableBreakdown {
   final double overdueMissedAmount; // lateUnits * baseInstallment (e.g. 2 * 100 = ₹200.00)
   final double currentInstallment; // today's installment = baseInstallment (e.g. ₹100.00)
   final double totalPayableAmount; // overdueMissedAmount + currentInstallment (e.g. ₹200 + ₹100 = ₹300.00)
-  final double lateFineRate; // e.g. ₹3.00/day, ₹6.00/day, ₹9.00/day or ₹25.00/week
+  final double lateFineRate; // e.g. 3% of base installment (daily or weekly)
   final double calculatedLateFine; // Total fine (current interval + previous unpaid carried forward)
   final double grandTotalWithPenalty; // totalPayableAmount + calculatedLateFine
   final String explanation; // Plain-English rationale
@@ -190,8 +190,8 @@ class LoaneeLateFineStatus {
 }
 
 class SettingsProvider extends ChangeNotifier {
-  double _dailyLateFine = 3.0;
-  double _weeklyLateFine = 25.0;
+  double _dailyLateFine = 0.0;
+  double _weeklyLateFine = 0.0;
   double _lateFinePercentage = 3.0; // 3% of base installment for both daily and weekly schedules
   double _weeklyInstallmentAmount = 650.0;
   double _weeklyTenureWeeks = 17.5;
@@ -372,11 +372,11 @@ class SettingsProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
 
       // Read from local persistent storage for late fines fallback if offline
-      if (prefs.containsKey(_keyDailyLateFine) && _dailyLateFine == 3.0) {
-        _dailyLateFine = prefs.getDouble(_keyDailyLateFine) ?? 3.0;
+      if (prefs.containsKey(_keyDailyLateFine) && _dailyLateFine == 0.0) {
+        _dailyLateFine = prefs.getDouble(_keyDailyLateFine) ?? 0.0;
       }
-      if (prefs.containsKey(_keyWeeklyLateFine) && _weeklyLateFine == 25.0) {
-        _weeklyLateFine = prefs.getDouble(_keyWeeklyLateFine) ?? 25.0;
+      if (prefs.containsKey(_keyWeeklyLateFine) && _weeklyLateFine == 0.0) {
+        _weeklyLateFine = prefs.getDouble(_keyWeeklyLateFine) ?? 0.0;
       }
       if (prefs.containsKey(_keyLateFinePercentage) && _lateFinePercentage == 3.0) {
         _lateFinePercentage = prefs.getDouble(_keyLateFinePercentage) ?? 3.0;
@@ -731,15 +731,23 @@ class SettingsProvider extends ChangeNotifier {
     final int maxTenureWeeks = _weeklyTenureWeeks.ceil(); // e.g. 18 weeks for 17.5
     final int expectedWeeks = weeksElapsed.clamp(0, maxTenureWeeks);
 
-    final int lateWeeks = (expectedWeeks - weeksPaid).clamp(0, maxTenureWeeks);
+    int pausedWeeksCount = 0;
+    if (expectedWeeks > weeksPaid) {
+      for (int w = weeksPaid + 1; w <= expectedWeeks; w++) {
+        final d = entryDate.add(Duration(days: w * 7));
+        if (isLateFinePaused(entry.id, d, customerId: entry.customerId)) {
+          pausedWeeksCount++;
+        }
+      }
+    }
+
+    final int lateWeeks = (expectedWeeks - weeksPaid - pausedWeeksCount).clamp(0, maxTenureWeeks);
     final double totalExpected = expectedWeeks * weeklyInstallmentToUse;
     final double totalTenureAmount = weeklyInstallmentToUse * _weeklyTenureWeeks;
     final double totalUnpaid = (totalExpected - totalPaid).clamp(0.0, totalTenureAmount).toDouble();
     final double weeklyRate = weeklyInstallmentToUse * (_lateFinePercentage / 100.0);
-    // Apply late fine percentage to the actual unpaid portion across overdue weeks
-    final double calculatedFine = totalUnpaid > 0
-        ? double.parse((totalUnpaid * (_lateFinePercentage / 100.0)).toStringAsFixed(2))
-        : 0.0;
+    // Apply late fine percentage (3% of base installment) to each overdue week
+    final double calculatedFine = double.parse((lateWeeks * weeklyRate).toStringAsFixed(2));
 
     return WeeklyBreakdown(
       weeklyInstallment: weeklyInstallmentToUse,
@@ -1737,10 +1745,11 @@ class SettingsProvider extends ChangeNotifier {
   /// Reset to default settings (Row-wise)
   Future<void> resetToDefaults() async {
     await saveLatePaymentSettings(
-      dailyFine: 3.0,
-      weeklyFine: 25.0,
+      dailyFine: 0.0,
+      weeklyFine: 0.0,
       weeklyInstallment: 650.0,
       weeklyTenure: 17.5,
+      lateFinePercentage: 3.0,
     );
     await saveInvestmentSettings(
       baseAmount: 10000.0,

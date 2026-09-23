@@ -151,7 +151,7 @@ class _TransactionPageState extends State<TransactionPage> {
       partialPaymentCharge = double.parse((unpaidBaseAmount * (finePct / 100.0)).toStringAsFixed(2));
     }
 
-    final newRemainingBalance = (currentBal + lateFine - paymentAmount + partialPaymentCharge).clamp(0.0, 999999.0);
+    final newRemainingBalance = (currentBal - paymentAmount + partialPaymentCharge).clamp(0.0, 999999.0);
 
     final double totalAssessedFee = (_selectedBreakdown?.calculatedLateFine ?? 0.0);
     final double unpaidCarried = (totalAssessedFee > lateFine) ? (totalAssessedFee - lateFine) : 0.0;
@@ -643,20 +643,7 @@ class _TransactionPageState extends State<TransactionPage> {
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 6),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          const Text(
-                                            'Late Due Amount Till Last Month:',
-                                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
-                                          ),
-                                          Text(
-                                            '₹ ${(collectionProvider.getLatestRemainingBalance(_selectedCard!.id) + _selectedBreakdown!.calculatedLateFine).toStringAsFixed(2)}',
-                                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
-                                          ),
-                                        ],
-                                      ),
+
                                     ],
                                   ],
                                 ),

@@ -503,23 +503,76 @@ class CollectionSheetProvider extends ChangeNotifier {
   Future<List<CollectionPaymentModel>> syncAutoLateFeesForEntry({
     required RoCollectionEntry entry,
     required SettingsProvider settingsProvider,
+    double? loaneeLoanAmount,
+    LoaneeProvider? loaneeProvider,
     DateTime? asOfDate,
     bool saveToRemote = true,
   }) async {
-    // 1. Only daily loans qualify for daily late payment fee auto-assessment
-    if (entry.collectionType.toLowerCase().trim() != 'daily') {
-      return [];
-    }
+    final bool isDaily = entry.isDaily;
 
     final now = asOfDate ?? DateTime.now();
     final cleanToday = DateTime(now.year, now.month, now.day);
 
-    // 2. Validate outstanding balance > 0 (loan not cleared)
+    // Resolve loanee if provider is supplied
+    LoaneeAccount? loanee;
+    if (loaneeProvider != null) {
+      loanee = loaneeProvider.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+    }
+    final double? effectiveLoanAmount = loaneeLoanAmount ??
+        ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : entry.loanAmount);
+
+    // 2. Calculate late fine rate strictly as 3% of base installment (daily or weekly)
+    final double baseInstallment = entry.getCalculatedPayableAmount(
+      loaneeLoanAmount: effectiveLoanAmount,
+      configuredInterestRate: settingsProvider.investmentInterestRate,
+      configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+      configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+      configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+    );
+    final double fineRate = double.parse((baseInstallment * (settingsProvider.lateFinePercentage / 100.0)).toStringAsFixed(2));
+    if (fineRate <= 0) {
+      return [];
+    }
+
+    // 3. Update any existing system auto records that have an outdated late fine rate (e.g. ₹3 instead of ₹15, or ₹25 instead of ₹19.50)
+    bool existingUpdated = false;
+    for (int i = 0; i < _payments.length; i++) {
+      final p = _payments[i];
+      if (p.collectionId == entry.id) {
+        final isAuto = p.id.startsWith('PAY-LATE-') ||
+            (p.remarks != null && p.remarks!.contains('Auto assessed')) ||
+            p.roId == 'SYS-AUTO';
+        if (isAuto && (p.lateFine - fineRate).abs() > 0.009) {
+          final updated = p.copyWith(
+            lateFine: fineRate,
+            remarks: '${isDaily ? "Daily" : "Weekly"} Late Fee: ₹${fineRate.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(p.createdAt)})',
+          );
+          _payments[i] = updated;
+          existingUpdated = true;
+          if (saveToRemote && SupabaseService.instance.isInitialized) {
+            await SupabaseService.instance.saveCollectionPayment(updated);
+          }
+        }
+      }
+    }
+    if (existingUpdated) {
+      notifyListeners();
+    }
+
+    // 4. Validate outstanding balance > 0 (loan not cleared)
     final cardPayments = getPaymentsForCollection(entry.id);
     final totalCollected = cardPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
-        : (entry.actualPrincipal ?? 0.0);
+        : ((effectiveLoanAmount != null && effectiveLoanAmount > 0)
+            ? effectiveLoanAmount
+            : (entry.actualPrincipal ?? 0.0));
     final double totalInterest = getTotalInterestForCollection(entry.id);
     final double currentRemainingBalance = (initialLoan > 0)
         ? (initialLoan + totalInterest - totalCollected).clamp(0.0, double.infinity)
@@ -533,19 +586,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       return [];
     }
 
-    // 3. Calculate daily late fine rate from existing formula
-    final double baseDailyInstallment = entry.getCalculatedPayableAmount(
-      configuredInterestRate: settingsProvider.investmentInterestRate,
-      configuredBasePrincipal: settingsProvider.investmentBaseAmount,
-      configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
-      configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
-    );
-    final double fineRate = double.parse((baseDailyInstallment * (settingsProvider.lateFinePercentage / 100.0)).toStringAsFixed(2));
-    if (fineRate <= 0) {
-      return [];
-    }
-
-    // 4. Identify latest relevant non-auto transaction in ro_collection_payments
+    // 5. Identify latest relevant non-auto transaction in ro_collection_payments
     final allSuccessful = cardPayments.where((p) {
       final s = p.status.toLowerCase().trim();
       final hasFeeOrPayment = p.paymentAmount > 0 ||
@@ -555,8 +596,6 @@ class CollectionSheetProvider extends ChangeNotifier {
       return s != 'failed' && s != 'cancelled' && hasFeeOrPayment;
     }).toList();
 
-    DateTime baseDate;
-
     // We exclude auto-assessed records so that candidate evaluation starts from the last real/historical transaction
     final nonAutoTx = allSuccessful.where((p) {
       final isAuto = p.id.startsWith('PAY-LATE-') ||
@@ -565,9 +604,7 @@ class CollectionSheetProvider extends ChangeNotifier {
     }).toList();
 
     if (nonAutoTx.isNotEmpty) {
-      final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      baseDate = sorted.first.createdAt;
+      // Valid historical transactions found
     } else {
       // If there are no real payment records in ro_collection_payments for this entry
       // (e.g. database table ro_collection_payments was cleared or loan has no transaction history),
@@ -575,34 +612,68 @@ class CollectionSheetProvider extends ChangeNotifier {
       return [];
     }
 
-    final cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
-    if (!cleanToday.isAfter(cleanBaseDate)) {
-      return [];
-    }
-
-    final firstCheckDate = cleanBaseDate.add(const Duration(days: 1));
-
-    // 5. Identify completed candidate late dates strictly BEFORE today (today is excluded!)
-    // Sundays, official registered Holidays, and Administrator Paused Dates are strictly excluded!
     final List<DateTime> candidateDates = [];
     final List<DateTime> skippedHolidays = [];
     final List<DateTime> skippedPausedDates = [];
-    DateTime current = firstCheckDate;
-    while (current.isBefore(cleanToday)) {
-      final isSunday = current.weekday == DateTime.sunday;
-      final isHoliday = settingsProvider.isHoliday(current);
-      final isPaused = settingsProvider.isLateFinePaused(entry.id, current, customerId: entry.customerId);
+    DateTime cleanBaseDate;
 
-      if (isHoliday) {
-        skippedHolidays.add(DateTime(current.year, current.month, current.day));
+    if (isDaily) {
+      final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final baseDate = sorted.first.createdAt;
+      cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
+      if (!cleanToday.isAfter(cleanBaseDate)) {
+        return [];
       }
-      if (isPaused) {
-        skippedPausedDates.add(DateTime(current.year, current.month, current.day));
+
+      final firstCheckDate = cleanBaseDate.add(const Duration(days: 1));
+      DateTime current = firstCheckDate;
+      while (current.isBefore(cleanToday)) {
+        final isSunday = current.weekday == DateTime.sunday;
+        final isHoliday = settingsProvider.isHoliday(current);
+        final isPaused = settingsProvider.isLateFinePaused(entry.id, current, customerId: entry.customerId);
+
+        if (isHoliday) {
+          skippedHolidays.add(DateTime(current.year, current.month, current.day));
+        }
+        if (isPaused) {
+          skippedPausedDates.add(DateTime(current.year, current.month, current.day));
+        }
+        if (!isSunday && !isHoliday && !isPaused) {
+          candidateDates.add(DateTime(current.year, current.month, current.day));
+        }
+        current = current.add(const Duration(days: 1));
       }
-      if (!isSunday && !isHoliday && !isPaused) {
-        candidateDates.add(DateTime(current.year, current.month, current.day));
+    } else {
+      // Weekly scheme:
+      // Overdue weeks are calculated based on elapsed weeks from start vs weeks paid
+      final effectiveStartDate = loanee?.loanSanctionDate ?? entry.createdAt;
+      cleanBaseDate = DateTime(effectiveStartDate.year, effectiveStartDate.month, effectiveStartDate.day);
+      final int daysSinceStart = cleanToday.difference(cleanBaseDate).inDays;
+      final int weeksElapsed = daysSinceStart ~/ 7;
+      final int maxTenureWeeks = settingsProvider.weeklyTenureWeeks.ceil();
+      final int expectedWeeks = weeksElapsed.clamp(0, maxTenureWeeks);
+
+      final double weeklyInstallmentToUse = baseInstallment > 0
+          ? baseInstallment
+          : settingsProvider.weeklyInstallmentAmount;
+      final int weeksPaid = (weeklyInstallmentToUse > 0)
+          ? (totalCollected / weeklyInstallmentToUse).floor()
+          : 0;
+
+      if (expectedWeeks > weeksPaid) {
+        for (int w = weeksPaid + 1; w <= expectedWeeks; w++) {
+          final candidate = cleanBaseDate.add(Duration(days: w * 7));
+          if (candidate.isBefore(cleanToday)) {
+            final isPaused = settingsProvider.isLateFinePaused(entry.id, candidate, customerId: entry.customerId);
+            if (isPaused) {
+              skippedPausedDates.add(candidate);
+            } else {
+              candidateDates.add(candidate);
+            }
+          }
+        }
       }
-      current = current.add(const Duration(days: 1));
     }
 
     if (candidateDates.isEmpty) {
@@ -623,8 +694,8 @@ class CollectionSheetProvider extends ChangeNotifier {
             s != 'cancelled';
       }).toList();
 
-      // Check if borrower made payment on this date
-      final hasPayment = paymentsOnDate.any((p) => p.paymentAmount > 0);
+      // Check if borrower made payment on this date (only for daily loans)
+      final hasPayment = isDaily && paymentsOnDate.any((p) => p.paymentAmount > 0);
       if (hasPayment) {
         continue;
       }
@@ -636,7 +707,7 @@ class CollectionSheetProvider extends ChangeNotifier {
         continue;
       }
 
-      // Candidate date is a completed missed day needing auto-insertion
+      // Candidate date is a completed missed day/week needing auto-insertion
       newLateDates.add(candidate);
 
       final dateStr = '${candidate.year}${candidate.month.toString().padLeft(2, '0')}${candidate.day.toString().padLeft(2, '0')}';
@@ -657,7 +728,7 @@ class CollectionSheetProvider extends ChangeNotifier {
         roRoute: entry.route,
         createdAt: DateTime(candidate.year, candidate.month, candidate.day, 12, 0, 0),
         status: 'Success',
-        remarks: 'Daily Late Fee: ₹${fineRate.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(candidate)})',
+        remarks: '${isDaily ? "Daily" : "Weekly"} Late Fee: ₹${fineRate.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(candidate)})',
       );
 
       newlyCreatedRecords.add(record);
@@ -665,13 +736,13 @@ class CollectionSheetProvider extends ChangeNotifier {
 
     // 6. Debug logging matching Requirement 19
     final StringBuffer logBuf = StringBuffer();
-    logBuf.writeln('=== [AUTOMATIC LATE PAYMENT FEE SYNCHRONIZATION] ===');
+    logBuf.writeln('=== [AUTOMATIC LATE PAYMENT FEE SYNCHRONIZATION (${isDaily ? "DAILY" : "WEEKLY"})] ===');
     logBuf.writeln('Loan / Collection ID: ${entry.id} | Account: ${entry.accountNumber}');
     logBuf.writeln('Loanee Name: ${entry.loaneeName}');
-    logBuf.writeln('Base Installment: ₹${baseDailyInstallment.toStringAsFixed(2)} | Late Fine Rate: ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% | Daily Late Fee: ₹${fineRate.toStringAsFixed(2)}');
+    logBuf.writeln('Base Installment: ₹${baseInstallment.toStringAsFixed(2)} | Late Fine Rate: ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% | ${isDaily ? "Daily" : "Weekly"} Late Fee: ₹${fineRate.toStringAsFixed(2)}');
     logBuf.writeln('Outstanding Balance: ₹${currentRemainingBalance.toStringAsFixed(2)}');
     logBuf.writeln('Current Date: ${SettingsProvider.formatDate(cleanToday)}');
-    logBuf.writeln('Latest Transaction: ${SettingsProvider.formatDate(cleanBaseDate)}');
+    logBuf.writeln('Latest Transaction / Start: ${SettingsProvider.formatDate(cleanBaseDate)}');
     logBuf.writeln('Candidate Dates:');
     for (final d in candidateDates) {
       logBuf.writeln('  ${SettingsProvider.formatDate(d)}');
@@ -683,6 +754,12 @@ class CollectionSheetProvider extends ChangeNotifier {
       for (final h in skippedHolidays) {
         final holidayInfo = settingsProvider.getHolidayForDate(h);
         logBuf.writeln('  ${SettingsProvider.formatDate(h)} (${holidayInfo?.description ?? "Official Holiday"})');
+      }
+    }
+    if (skippedPausedDates.isNotEmpty) {
+      logBuf.writeln('Paused Dates (Skipped):');
+      for (final p in skippedPausedDates) {
+        logBuf.writeln('  ${SettingsProvider.formatDate(p)} (Admin Paused)');
       }
     }
     if (alreadyAssessedDates.isNotEmpty) {
@@ -723,6 +800,7 @@ class CollectionSheetProvider extends ChangeNotifier {
   /// Synchronize automatic late fees across all active entries
   Future<int> syncAutoLateFeesForAllEntries({
     required SettingsProvider settingsProvider,
+    LoaneeProvider? loaneeProvider,
     DateTime? asOfDate,
     bool saveToRemote = true,
   }) async {
@@ -731,6 +809,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       final list = await syncAutoLateFeesForEntry(
         entry: entry,
         settingsProvider: settingsProvider,
+        loaneeProvider: loaneeProvider,
         asOfDate: asOfDate,
         saveToRemote: saveToRemote,
       );

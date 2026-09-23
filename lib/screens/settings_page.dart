@@ -346,30 +346,8 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
 
-    final dailyFine = double.tryParse(_dailyFineController.text.trim());
-    final weeklyFine = double.tryParse(_weeklyFineController.text.trim());
     final weeklyInstallment = double.tryParse(_weeklyInstallmentController.text.trim());
     final weeklyTenure = double.tryParse(_weeklyTenureController.text.trim());
-
-    if (dailyFine == null || dailyFine < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Daily late fine cannot be negative.'),
-          backgroundColor: Colors.red.shade800,
-        ),
-      );
-      return;
-    }
-
-    if (weeklyFine == null || weeklyFine < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Weekly late fine cannot be negative.'),
-          backgroundColor: Colors.red.shade800,
-        ),
-      );
-      return;
-    }
 
     if (weeklyInstallment == null || weeklyInstallment <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -399,10 +377,11 @@ class _SettingsPageState extends State<SettingsPage> {
         Provider.of<SettingsProvider>(context, listen: false);
 
     final success = await settingsProvider.saveLatePaymentSettings(
-      dailyFine: dailyFine,
-      weeklyFine: weeklyFine,
+      dailyFine: 0.0,
+      weeklyFine: 0.0,
       weeklyInstallment: weeklyInstallment,
       weeklyTenure: weeklyTenure,
+      lateFinePercentage: 3.0,
     );
 
     if (!mounted) return;
@@ -431,7 +410,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                     Text(
-                      'Daily: ₹${dailyFine.toStringAsFixed(2)}/day • Weekly: ₹${weeklyFine.toStringAsFixed(2)}/wk (₹${weeklyInstallment.toStringAsFixed(0)}/wk for ${weeklyTenure.toStringAsFixed(1)} wks)',
+                      'Policy: Fixed 3% of base installment (Daily & Weekly) • Scheme: ₹${weeklyInstallment.toStringAsFixed(0)}/wk for ${weeklyTenure.toStringAsFixed(1)} wks',
                       style: const TextStyle(fontSize: 11, color: Colors.white70),
                     ),
                   ],
@@ -464,7 +443,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ],
         ),
         content: const Text(
-          'This will reset late payment and weekly scheme settings to system defaults:\n• Daily Late Fine: ₹3.00 per day\n• Weekly Late Fine: ₹25.00 per week\n• Weekly Installment: ₹650.00 / week\n• Weekly Tenure: 17.5 weeks\n\nDo you want to proceed?',
+          'This will reset late payment and weekly scheme settings to system defaults:\n• Late Fine Policy: Fixed 3% of base installment (Daily & Weekly)\n• Weekly Installment: ₹650.00 / week\n• Weekly Tenure: 17.5 weeks\n\nDo you want to proceed?',
           style: TextStyle(fontSize: 13),
         ),
         actions: [
@@ -502,7 +481,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: Colors.blueGrey.shade800,
-          content: const Text('Settings reset to default values (₹3/day, ₹25/wk, ₹650 for 17.5 wks).'),
+          content: const Text('Settings reset to default values (Fixed 3% late fine, ₹650 for 17.5 wks).'),
         ),
       );
     }
@@ -1032,44 +1011,36 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           const Divider(height: 24),
 
-                          // FIELD 1: DAILY & WEEKLY LATE FINE PERCENTAGE
+                          // FIELD 1: DAILY & WEEKLY LATE FINE PERCENTAGE (FIXED 3% OF BASE INSTALLMENT)
                           _buildFieldHeader(
-                            title: '1. Late Fine Policy (Base Installment %)',
-                            badgeText: '3% of Base Installment',
+                            title: '1. Late Fine Policy (Fixed 3% of Base Installment)',
+                            badgeText: 'Fixed 3% Policy',
                             badgeColor: Colors.blue.shade100,
                             badgeTextColor: Colors.blue.shade900,
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Late payment penalties are assessed at 3% of the base installment for both daily and weekly schedules (strictly when late). Unpaid fees carry forward across payments until cleared.',
+                            'Late payment penalties are strictly fixed at 3% of the base installment (e.g. ₹500 base installment → ₹15 late fine per missed day/week). Unpaid fees carry forward across payments until cleared.',
                             style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.35),
                           ),
                           const SizedBox(height: 8),
                           TextFormField(
-                            controller: _dailyFineController,
-                            enabled: isAdmin && !_isSaving,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
-                            ],
+                            initialValue: '3.0 % of Base Installment (Fixed Policy)',
+                            enabled: false,
                             style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: Color(0xFF1E1E1E),
                             ),
                             decoration: InputDecoration(
-                              labelText: 'TIER-1 BASE DAILY LATE FINE (₹) *',
-                              hintText: '3.00',
-                              prefixIcon: const Icon(Icons.today_rounded, color: Color(0xFF8B1A1A), size: 20),
-                              prefixText: '₹ ',
-                              prefixStyle: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF8B1A1A),
+                              labelText: 'LATE FINE POLICY RATE *',
+                              prefixIcon: const Icon(Icons.percent_rounded, color: Color(0xFF8B1A1A), size: 20),
+                              suffixIcon: const Tooltip(
+                                message: 'Fixed at 3.0% of the calculated base installment',
+                                child: Icon(Icons.lock_outline_rounded, size: 18, color: Colors.grey),
                               ),
-                              suffixText: 'per day',
-                              suffixStyle: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                               filled: true,
-                              fillColor: isAdmin ? Colors.white : Colors.grey.shade100,
+                              fillColor: Colors.grey.shade100,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide(color: Colors.grey.shade300),
@@ -1078,24 +1049,11 @@ class _SettingsPageState extends State<SettingsPage> {
                                 borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide(color: Colors.grey.shade300),
                               ),
-                              focusedBorder: OutlineInputBorder(
+                              disabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(color: Color(0xFF8B1A1A), width: 1.5),
+                                borderSide: BorderSide(color: Colors.grey.shade300),
                               ),
                             ),
-                            validator: (val) {
-                              if (val == null || val.trim().isEmpty) {
-                                return 'Please enter daily late fine';
-                              }
-                              final amt = double.tryParse(val.trim());
-                              if (amt == null) {
-                                return 'Please enter a valid numeric amount';
-                              }
-                              if (amt < 0) {
-                                return 'Fine amount cannot be negative';
-                              }
-                              return null;
-                            },
                           ),
                           const SizedBox(height: 6),
                           // Daily calculation explanation note & preview
@@ -1135,37 +1093,29 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Weekly collection scheme calculates overdue weeks based on expected installments over the tenure. Late fine is assessed at 3% of the weekly installment amount when overdue.',
+                            'Weekly collection scheme calculates overdue weeks based on expected installments over the tenure. Late fine is assessed at 3% of the weekly base installment per overdue week (e.g. ₹650 base → ₹19.50/week).',
                             style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                           ),
                           const SizedBox(height: 8),
 
-                          // Weekly Late Fine Field
+                          // Weekly Late Fine Policy Rate Display (Read-Only)
                           TextFormField(
-                            controller: _weeklyFineController,
-                            enabled: isAdmin && !_isSaving,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
-                            ],
+                            initialValue: '3.0 % of Weekly Base Installment (Fixed Policy)',
+                            enabled: false,
                             style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: Color(0xFF1E1E1E),
                             ),
                             decoration: InputDecoration(
-                              labelText: 'WEEKLY LATE FINE (₹ PER WEEK) *',
-                              hintText: '25.00',
-                              prefixIcon: const Icon(Icons.date_range_rounded, color: Color(0xFF8B1A1A), size: 20),
-                              prefixText: '₹ ',
-                              prefixStyle: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF8B1A1A),
+                              labelText: 'WEEKLY LATE FINE POLICY RATE *',
+                              prefixIcon: const Icon(Icons.percent_rounded, color: Color(0xFF8B1A1A), size: 20),
+                              suffixIcon: const Tooltip(
+                                message: 'Fixed at 3.0% of the calculated weekly base installment (e.g. ₹650 base → ₹19.50)',
+                                child: Icon(Icons.lock_outline_rounded, size: 18, color: Colors.grey),
                               ),
-                              suffixText: 'per week',
-                              suffixStyle: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                               filled: true,
-                              fillColor: isAdmin ? Colors.white : Colors.grey.shade100,
+                              fillColor: Colors.grey.shade100,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide(color: Colors.grey.shade300),
@@ -1174,24 +1124,11 @@ class _SettingsPageState extends State<SettingsPage> {
                                 borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide(color: Colors.grey.shade300),
                               ),
-                              focusedBorder: OutlineInputBorder(
+                              disabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(color: Color(0xFF8B1A1A), width: 1.5),
+                                borderSide: BorderSide(color: Colors.grey.shade300),
                               ),
                             ),
-                            validator: (val) {
-                              if (val == null || val.trim().isEmpty) {
-                                return 'Please enter weekly late fine';
-                              }
-                              final amt = double.tryParse(val.trim());
-                              if (amt == null) {
-                                return 'Please enter a valid numeric amount';
-                              }
-                              if (amt < 0) {
-                                return 'Fine amount cannot be negative';
-                              }
-                              return null;
-                            },
                           ),
                           const SizedBox(height: 10),
 
@@ -1315,7 +1252,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                       Text(
                                         settingsProvider.lastUpdated != null
                                             ? 'Last updated: ${settingsProvider.lastUpdated.toString().split('.')[0]}'
-                                            : 'Default system rates active (₹3/day, ₹25/wk, ₹650 for 17.5 wks)',
+                                            : 'Default system rates active (Fixed 3% of base installment, ₹650 for 17.5 wks)',
                                         style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
                                       ),
                                     ],
@@ -1366,7 +1303,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               onPressed: _isSaving ? null : _confirmResetToDefaults,
                               icon: const Icon(Icons.restart_alt_rounded, size: 18),
                               label: const Text(
-                                'Reset to System Defaults (₹3 / ₹25 / ₹650)',
+                                'Reset to System Defaults (Fixed 3% / ₹650)',
                                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
                               ),
                             ),
