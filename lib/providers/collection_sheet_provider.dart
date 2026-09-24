@@ -9,6 +9,7 @@ import '../services/supabase_service.dart';
 import 'settings_provider.dart';
 import '../models/loanee_model.dart';
 import 'loanee_provider.dart';
+import '../services/payment_reconciliation_service.dart';
 
 class CollectionSheetProvider extends ChangeNotifier {
   // Routes Master List - Pulled directly from Supabase table route_master
@@ -61,6 +62,45 @@ class CollectionSheetProvider extends ChangeNotifier {
     final list = _payments.where((p) => p.collectionId == collectionId).toList();
     list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list;
+  }
+
+  /// Ensures all payments for a specific collection card ID are loaded from Supabase into memory
+  Future<List<CollectionPaymentModel>> fetchAllPaymentsForCollection(String collectionId) async {
+    if (SupabaseService.instance.isInitialized) {
+      try {
+        final remote = await SupabaseService.instance.fetchPaymentsForCollection(collectionId);
+        if (remote != null) {
+          for (final p in remote) {
+            final idx = _payments.indexWhere((existing) => existing.id == p.id);
+            if (idx >= 0) {
+              _payments[idx] = p;
+            } else {
+              _payments.add(p);
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error fetching payments for collection $collectionId: $e');
+      }
+    }
+    return getPaymentsForCollection(collectionId);
+  }
+
+  /// Calculates the strictly chronological ledger and audit reconciliation result
+  /// for a collection entry.
+  PaymentReconciliationResult? getReconciliationForCollection(
+    String collectionId, {
+    LoaneeAccount? loanee,
+    RoCollectionEntry? entryOverride,
+  }) {
+    final entry = entryOverride ?? getCollectionEntryById(collectionId);
+    if (entry == null) return null;
+    final cardPayments = getPaymentsForCollection(collectionId);
+    return PaymentReconciliationService.reconcileLedger(
+      entry: entry,
+      loanee: loanee,
+      payments: cardPayments,
+    );
   }
 
   final Map<String, double> _dbTotalCollectedCache = {};
@@ -458,6 +498,22 @@ class CollectionSheetProvider extends ChangeNotifier {
     notifyListeners();
     if (SupabaseService.instance.isInitialized) {
       return await SupabaseService.instance.deleteCollectionPayment(paymentId);
+    }
+    return true;
+  }
+
+  /// Update an existing collection payment record in memory and Supabase
+  Future<bool> updateCollectionPayment(CollectionPaymentModel updatedPayment) async {
+    final idx = _payments.indexWhere((p) => p.id == updatedPayment.id);
+    if (idx != -1) {
+      _payments[idx] = updatedPayment;
+    } else {
+      _payments.insert(0, updatedPayment);
+    }
+    notifyListeners();
+
+    if (SupabaseService.instance.isInitialized) {
+      return await SupabaseService.instance.saveCollectionPayment(updatedPayment);
     }
     return true;
   }

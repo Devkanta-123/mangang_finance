@@ -13,6 +13,7 @@ import '../models/collection_payment_model.dart';
 import '../models/holiday_model.dart';
 import '../services/supabase_service.dart';
 import '../services/historical_payment_import_service.dart';
+import '../services/payment_reconciliation_service.dart';
 import '../widgets/historical_payment_import_dialog.dart';
 import '../widgets/edit_collection_entry_dialog.dart';
 import '../widgets/edit_loanee_dialog.dart';
@@ -4335,16 +4336,35 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
   List<CollectionPaymentModel> _payments = [];
   bool _isLoading = true;
   bool _ascending = false; // Default newest first so latest payment appears at the top
+  PaymentReconciliationResult? _reconciliation;
+  bool _isExporting = false;
+  String? _editingPaymentId;
+  DateTime? _editDate;
+  late TextEditingController _editAmountController;
+  late TextEditingController _editLateFeeController;
+  late TextEditingController _editPostMatController;
+  late TextEditingController _editRoNameController;
+  String _editPaymentType = 'Cash';
+  String _editStatus = 'Success';
+  bool _isSavingEdit = false;
 
   @override
   void initState() {
     super.initState();
+    _editAmountController = TextEditingController();
+    _editLateFeeController = TextEditingController();
+    _editPostMatController = TextEditingController();
+    _editRoNameController = TextEditingController();
     widget.collectionProvider.addListener(_onProviderChange);
     _loadHistory(page: 1);
   }
 
   @override
   void dispose() {
+    _editAmountController.dispose();
+    _editLateFeeController.dispose();
+    _editPostMatController.dispose();
+    _editRoNameController.dispose();
     widget.collectionProvider.removeListener(_onProviderChange);
     super.dispose();
   }
@@ -4362,7 +4382,22 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       if (page != null) _page = page;
     });
 
-    // Strictly query only this specific loan collection entry ID in newest-first date sort by default
+    // 1. Ensure all payments for this collection card are synchronized from Supabase / memory
+    final allPayments = await widget.collectionProvider.fetchAllPaymentsForCollection(widget.entry.id);
+    final loanee = widget.loaneeProvider?.getLoaneeForUser(
+      customerId: widget.entry.customerId,
+      mobileNo: widget.entry.mobileNo,
+      name: widget.entry.loaneeName,
+    );
+
+    // 2. Perform strictly chronological ledger reconciliation
+    final reconciliation = PaymentReconciliationService.reconcileLedger(
+      entry: widget.entry,
+      loanee: loanee,
+      payments: allPayments,
+    );
+
+    // 3. Strictly query only this specific loan collection entry ID in current page sort
     final result = await widget.collectionProvider.getPaginatedPaymentHistory(
       collectionId: widget.entry.id,
       page: _page,
@@ -4372,12 +4407,277 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
 
     if (!mounted) return;
     setState(() {
+      _reconciliation = reconciliation;
       _payments = result.payments;
       _totalCount = result.totalCount;
       _totalPages = result.totalPages;
       _page = result.page;
       _isLoading = false;
     });
+  }
+
+  Future<void> _handleExportExcel() async {
+    if (_reconciliation == null) return;
+    setState(() => _isExporting = true);
+    try {
+      final loanee = widget.loaneeProvider?.getLoaneeForUser(
+        customerId: widget.entry.customerId,
+        mobileNo: widget.entry.mobileNo,
+        name: widget.entry.loaneeName,
+      );
+      await PaymentReconciliationService.exportPaymentHistoryToExcel(
+        context: context,
+        entry: widget.entry,
+        loanee: loanee,
+        reconciliation: _reconciliation!,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isExporting = false);
+      }
+    }
+  }
+
+  Widget _buildDiagnosticBanner(PaymentReconciliationResult rec) {
+    if (rec.isReconciled) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE8F5E9),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFA5D6A7)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.verified_rounded, color: Color(0xFF2E7D32), size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                "✓ Payment history reconciled — All ${rec.totalTransactions} transactions follow chronological ledger rules without balance discrepancies.",
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1B5E20),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFFB74D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFE65100), size: 16),
+              const SizedBox(width: 6),
+              Text(
+                "Reconciliation Notice: ${rec.issues.length} Issue${rec.issues.length == 1 ? '' : 's'} Identified",
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFFB71C1C),
+                ),
+              ),
+              const Spacer(),
+              const Text(
+                "Chronological ledger enforced",
+                style: TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF795548),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...rec.issues.take(3).map((issue) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    margin: const EdgeInsets.only(top: 1, right: 6),
+                    decoration: BoxDecoration(
+                      color: issue.badgeColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: issue.badgeColor.withValues(alpha: 0.5)),
+                    ),
+                    child: Text(
+                      issue.typeLabel,
+                      style: TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.bold,
+                        color: issue.badgeColor,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      issue.description,
+                      style: const TextStyle(fontSize: 10.5, color: Color(0xFF3E2723)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          if (rec.issues.length > 3)
+            Text(
+              "+ ${rec.issues.length - 3} more issue(s). Full audit details available in Excel Export.",
+              style: const TextStyle(fontSize: 9.5, fontStyle: FontStyle.italic, color: Color(0xFF5D4037)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _startEditing(CollectionPaymentModel p) {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isManager = authProvider.activeRole == UserType.manager ||
+        authProvider.currentUser?.userType == UserType.manager;
+    if (!isManager) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text("Access Denied: Only Manager can edit payment rows."),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _editingPaymentId = p.id;
+      _editDate = p.createdAt;
+      _editAmountController.text = p.paymentAmount.toStringAsFixed(2);
+      _editLateFeeController.text = p.effectiveLateFine.toStringAsFixed(2);
+      _editPostMatController.text = p.postMaturityInterest.toStringAsFixed(2);
+      _editRoNameController.text = p.roName ?? '';
+      _editPaymentType = p.paymentType;
+      _editStatus = p.status;
+    });
+  }
+
+  void _cancelEditing() {
+    setState(() {
+      _editingPaymentId = null;
+      _editDate = null;
+    });
+  }
+
+  Future<void> _saveEditedRow(CollectionPaymentModel original) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isManager = authProvider.activeRole == UserType.manager ||
+        authProvider.currentUser?.userType == UserType.manager;
+    if (!isManager) return;
+
+    final double? parsedAmount = double.tryParse(_editAmountController.text.trim());
+    if (parsedAmount == null || parsedAmount < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text("Please enter a valid non-negative payment amount."),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final double parsedLateFee = double.tryParse(_editLateFeeController.text.trim()) ?? 0.0;
+    final double parsedPostMat = double.tryParse(_editPostMatController.text.trim()) ?? 0.0;
+    final String roName = _editRoNameController.text.trim();
+
+    setState(() => _isSavingEdit = true);
+
+    try {
+      final updatedPayment = original.copyWith(
+        createdAt: _editDate ?? original.createdAt,
+        paymentAmount: parsedAmount,
+        lateFine: parsedLateFee,
+        postMaturityInterest: parsedPostMat,
+        paymentType: _editPaymentType,
+        roName: roName.isNotEmpty ? roName : original.roName,
+        status: _editStatus,
+      );
+
+      final success = await widget.collectionProvider.updateCollectionPayment(updatedPayment);
+
+      if (success) {
+        // Re-fetch all payments and reconcile
+        final allPayments = await widget.collectionProvider.fetchAllPaymentsForCollection(widget.entry.id);
+        final loanee = widget.loaneeProvider?.getLoaneeForUser(
+          customerId: widget.entry.customerId,
+          mobileNo: widget.entry.mobileNo,
+          name: widget.entry.loaneeName,
+        );
+
+        final rec = PaymentReconciliationService.reconcileLedger(
+          entry: widget.entry,
+          loanee: loanee,
+          payments: allPayments,
+        );
+
+        widget.loaneeProvider?.handlePaymentUpdated(
+          customerId: widget.entry.customerId,
+          accountNumber: widget.entry.accountNumber,
+          newTotalPaid: rec.totalPaid,
+          newRemainingBalance: rec.finalRemainingBalance,
+        );
+
+        if (mounted) {
+          setState(() {
+            _editingPaymentId = null;
+            _editDate = null;
+            _reconciliation = rec;
+            _isSavingEdit = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text("Payment row updated successfully."),
+              backgroundColor: Colors.green.shade700,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          _loadHistory();
+        }
+      } else {
+        if (mounted) {
+          setState(() => _isSavingEdit = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text("Failed to update payment record."),
+              backgroundColor: Colors.red.shade700,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSavingEdit = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error updating payment: $e"),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _confirmDeletePayment(CollectionPaymentModel payment) async {
@@ -4466,6 +4766,9 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
     final bool isOnlyAdmin = authProvider.activeRole == UserType.admin &&
         (authProvider.currentUser == null ||
             authProvider.currentUser?.userType == UserType.admin);
+    final bool isManager = authProvider.activeRole == UserType.manager ||
+        authProvider.currentUser?.userType == UserType.manager;
+    final bool canShowActionColumn = isOnlyAdmin || isManager;
     final entry = widget.entry;
     final loanee = widget.loaneeProvider?.getLoaneeForUser(
       customerId: entry.customerId,
@@ -4485,9 +4788,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
             ? loanee.loanAmount
             : (entry.actualPrincipal ?? entry.initialBalance));
     final remaining = (loanAmt + effectiveInt - totalPaid).clamp(0.0, double.infinity);
-    final allPayments = cp.getPaymentsForCollection(entry.id);
-    final latestPaymentId = allPayments.isNotEmpty ? allPayments.first.id : null;
-    final bool isCompleted = cp.isEntryCompleted(entry, loaneeProvider: widget.loaneeProvider);
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -4545,9 +4845,36 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                       ],
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                    onPressed: () => Navigator.pop(context),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: (_isExporting || _reconciliation == null) ? null : _handleExportExcel,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF1E7E34),
+                          side: const BorderSide(color: Color(0xFF1E7E34)),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          minimumSize: const Size(0, 32),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: _isExporting
+                            ? const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1E7E34)),
+                              )
+                            : const Icon(Icons.table_view_rounded, size: 15, color: Color(0xFF1E7E34)),
+                        label: Text(
+                          _isExporting ? "Exporting..." : "Excel Export",
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1E7E34)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -4631,6 +4958,11 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                 ),
               ),
 
+              if (_reconciliation != null) ...[
+                const SizedBox(height: 10),
+                _buildDiagnosticBanner(_reconciliation!),
+              ],
+
               const SizedBox(height: 16),
 
               // Payments Table
@@ -4665,7 +4997,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(minWidth: isOnlyAdmin ? 900 : 820),
+                    constraints: BoxConstraints(minWidth: canShowActionColumn ? 960 : 820),
                     child: DataTable(
                       sortColumnIndex: 0,
                       sortAscending: _ascending,
@@ -4675,7 +5007,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                         color: Colors.white,
                         fontSize: 11,
                       ),
-                      dataRowMaxHeight: 48,
+                      dataRowMaxHeight: 52,
                       dataRowMinHeight: 40,
                       columnSpacing: 14,
                       horizontalMargin: 12,
@@ -4709,9 +5041,10 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                         const DataColumn(label: Text("Mode")),
                         const DataColumn(label: Text("Collected By")),
                         const DataColumn(label: Text("Status")),
-                        if (isOnlyAdmin) const DataColumn(label: Text("Action")),
+                        if (canShowActionColumn) const DataColumn(label: Text("Action")),
                       ],
                       rows: _payments.map((p) {
+                        final bool isEditing = _editingPaymentId == p.id;
                         final d = p.createdAt;
                         final formattedDate =
                             "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
@@ -4721,133 +5054,348 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                         final postMatVal = p.postMaturityInterest;
 
                         return DataRow(
+                          color: isEditing ? WidgetStateProperty.all(const Color(0xFFFFF9C4)) : null,
                           cells: [
                             DataCell(
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.calendar_today_rounded,
-                                      size: 12, color: Colors.grey.shade600),
-                                  const SizedBox(width: 5),
-                                  Text(formattedDate,
+                              isEditing
+                                  ? InkWell(
+                                      onTap: () async {
+                                        final picked = await showDatePicker(
+                                          context: context,
+                                          initialDate: _editDate ?? p.createdAt,
+                                          firstDate: DateTime(2020),
+                                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                                          builder: (ctx, child) => Theme(
+                                            data: Theme.of(ctx).copyWith(
+                                              colorScheme: const ColorScheme.light(
+                                                primary: Color(0xFF8B1A1A),
+                                                onPrimary: Colors.white,
+                                                onSurface: Color(0xFF1E1E1E),
+                                              ),
+                                            ),
+                                            child: child!,
+                                          ),
+                                        );
+                                        if (picked != null) {
+                                          setState(() {
+                                            final old = _editDate ?? p.createdAt;
+                                            _editDate = DateTime(
+                                              picked.year,
+                                              picked.month,
+                                              picked.day,
+                                              old.hour,
+                                              old.minute,
+                                              old.second,
+                                            );
+                                          });
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          border: Border.all(color: Colors.blue.shade400),
+                                          borderRadius: BorderRadius.circular(4),
+                                          color: Colors.blue.shade50.withValues(alpha: 0.6),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.edit_calendar_rounded, size: 12, color: Colors.blue.shade700),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              _editDate != null
+                                                  ? "${_editDate!.day.toString().padLeft(2, '0')}/${_editDate!.month.toString().padLeft(2, '0')}/${_editDate!.year}"
+                                                  : formattedDate,
+                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    )
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.calendar_today_rounded,
+                                            size: 12, color: Colors.grey.shade600),
+                                        const SizedBox(width: 5),
+                                        Text(formattedDate,
+                                            style: const TextStyle(
+                                                fontSize: 11, fontWeight: FontWeight.w600)),
+                                      ],
+                                    ),
+                            ),
+                            DataCell(
+                              isEditing
+                                  ? SizedBox(
+                                      width: 80,
+                                      height: 32,
+                                      child: TextField(
+                                        controller: _editAmountController,
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.green),
+                                        decoration: InputDecoration(
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: Colors.green)),
+                                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: Colors.green, width: 1.5)),
+                                        ),
+                                      ),
+                                    )
+                                  : Text(
+                                      "₹ ${p.paymentAmount.toStringAsFixed(2)}",
                                       style: const TextStyle(
-                                          fontSize: 11, fontWeight: FontWeight.w600)),
-                                ],
-                              ),
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.green,
+                                      ),
+                                    ),
                             ),
                             DataCell(
-                              Text(
-                                "₹ ${p.paymentAmount.toStringAsFixed(2)}",
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green,
-                                ),
-                              ),
+                              isEditing
+                                  ? SizedBox(
+                                      width: 75,
+                                      height: 32,
+                                      child: TextField(
+                                        controller: _editLateFeeController,
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                                        decoration: InputDecoration(
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.orange.shade400)),
+                                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.orange.shade700, width: 1.5)),
+                                        ),
+                                      ),
+                                    )
+                                  : Text(
+                                      lateFeeVal > 0 ? "₹ ${lateFeeVal.toStringAsFixed(2)}" : "-",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: lateFeeVal > 0 ? Colors.orange.shade900 : Colors.grey.shade500,
+                                        fontWeight: lateFeeVal > 0 ? FontWeight.bold : FontWeight.normal,
+                                      ),
+                                    ),
                             ),
                             DataCell(
-                              Text(
-                                lateFeeVal > 0 ? "₹ ${lateFeeVal.toStringAsFixed(2)}" : "-",
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: lateFeeVal > 0 ? Colors.orange.shade900 : Colors.grey.shade500,
-                                  fontWeight: lateFeeVal > 0 ? FontWeight.bold : FontWeight.normal,
-                                ),
-                              ),
-                            ),
-                            DataCell(
-                              Text(
-                                postMatVal > 0 ? "₹ ${postMatVal.toStringAsFixed(2)}" : "-",
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: postMatVal > 0 ? Colors.purple.shade900 : Colors.grey.shade500,
-                                  fontWeight: postMatVal > 0 ? FontWeight.bold : FontWeight.normal,
-                                ),
-                              ),
+                              isEditing
+                                  ? SizedBox(
+                                      width: 75,
+                                      height: 32,
+                                      child: TextField(
+                                        controller: _editPostMatController,
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.purple.shade900),
+                                        decoration: InputDecoration(
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.purple.shade400)),
+                                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.purple.shade700, width: 1.5)),
+                                        ),
+                                      ),
+                                    )
+                                  : Text(
+                                      postMatVal > 0 ? "₹ ${postMatVal.toStringAsFixed(2)}" : "-",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: postMatVal > 0 ? Colors.purple.shade900 : Colors.grey.shade500,
+                                        fontWeight: postMatVal > 0 ? FontWeight.bold : FontWeight.normal,
+                                      ),
+                                    ),
                             ),
                             DataCell(
                               Builder(
                                 builder: (context) {
-                                  final isLatest = (latestPaymentId != null && p.id == latestPaymentId);
                                   final double bal;
-                                  if (isLatest) {
-                                    bal = remaining;
+                                  if (_reconciliation != null) {
+                                    bal = _reconciliation!.getBalanceForPayment(p.id);
                                   } else if (p.remainingBalance > 0.01) {
                                     bal = p.remainingBalance;
-                                  } else if (remaining <= 0.01 || isCompleted) {
-                                    bal = 0.0;
                                   } else {
-                                    // Running balance fallback for historical payments with 0.0 stored balance
-                                    final paidUpToP = allPayments
-                                        .where((item) => !item.createdAt.isAfter(p.createdAt))
-                                        .fold(0.0, (sum, item) => sum + item.paymentAmount);
-                                    final intUpToP = allPayments
-                                        .where((item) => !item.createdAt.isAfter(p.createdAt))
-                                        .fold(0.0, (sum, item) => sum + (item.effectiveLateFine + item.postMaturityInterest));
-                                    bal = (loanAmt + intUpToP - paidUpToP).clamp(0.0, double.infinity);
+                                    bal = 0.0;
                                   }
 
-                                  return Text(
-                                    "₹ ${bal.toStringAsFixed(2)}",
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: Color(0xFF1E1E1E),
-                                    ),
+                                  final issue = _reconciliation?.issues.where((i) => i.paymentId == p.id).firstOrNull;
+                                  final hasDiff = issue != null && issue.type == PaymentReconciliationIssueType.calculationMismatch;
+
+                                  return Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        "₹ ${bal.toStringAsFixed(2)}",
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF1E1E1E),
+                                        ),
+                                      ),
+                                      if (hasDiff) ...[
+                                        const SizedBox(width: 4),
+                                        Tooltip(
+                                          message: issue.description,
+                                          child: Icon(Icons.info_outline_rounded, size: 13, color: Colors.orange.shade800),
+                                        ),
+                                      ],
+                                    ],
                                   );
                                 },
                               ),
                             ),
                             DataCell(
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.shade50,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  p.paymentType,
-                                  style: TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue.shade900,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            DataCell(
-                              Text(
-                                roName,
-                                style: const TextStyle(fontSize: 11),
-                              ),
-                            ),
-                            DataCell(
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.check_circle_rounded,
-                                      size: 12, color: Colors.green.shade700),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    p.status,
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.green.shade800,
+                              isEditing
+                                  ? Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: Colors.blue.shade300),
+                                        borderRadius: BorderRadius.circular(4),
+                                        color: Colors.white,
+                                      ),
+                                      child: DropdownButton<String>(
+                                        value: ['Cash', 'Online', 'Bank Transfer', 'UPI', 'Cheque'].contains(_editPaymentType)
+                                            ? _editPaymentType
+                                            : 'Cash',
+                                        isDense: true,
+                                        underline: const SizedBox(),
+                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                                        items: ['Cash', 'Online', 'Bank Transfer', 'UPI', 'Cheque'].map((mode) {
+                                          return DropdownMenuItem(value: mode, child: Text(mode));
+                                        }).toList(),
+                                        onChanged: (val) {
+                                          if (val != null) setState(() => _editPaymentType = val);
+                                        },
+                                      ),
+                                    )
+                                  : Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        p.paymentType,
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blue.shade900,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              ),
                             ),
-                            if (isOnlyAdmin)
+                            DataCell(
+                              isEditing
+                                  ? SizedBox(
+                                      width: 85,
+                                      height: 32,
+                                      child: TextField(
+                                        controller: _editRoNameController,
+                                        style: const TextStyle(fontSize: 10.5),
+                                        decoration: InputDecoration(
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                                          hintText: "RO Name",
+                                          hintStyle: TextStyle(fontSize: 10, color: Colors.grey.shade400),
+                                        ),
+                                      ),
+                                    )
+                                  : Text(
+                                      roName,
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                            ),
+                            DataCell(
+                              isEditing
+                                  ? Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: Colors.green.shade300),
+                                        borderRadius: BorderRadius.circular(4),
+                                        color: Colors.white,
+                                      ),
+                                      child: DropdownButton<String>(
+                                        value: ['Success', 'Pending', 'Failed', 'Cancelled'].contains(_editStatus)
+                                            ? _editStatus
+                                            : 'Success',
+                                        isDense: true,
+                                        underline: const SizedBox(),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: _editStatus == 'Success' ? Colors.green.shade800 : Colors.red.shade800,
+                                        ),
+                                        items: ['Success', 'Pending', 'Failed', 'Cancelled'].map((st) {
+                                          return DropdownMenuItem(value: st, child: Text(st));
+                                        }).toList(),
+                                        onChanged: (val) {
+                                          if (val != null) setState(() => _editStatus = val);
+                                        },
+                                      ),
+                                    )
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.check_circle_rounded,
+                                            size: 12, color: Colors.green.shade700),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          p.status,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green.shade800,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                            if (canShowActionColumn)
                               DataCell(
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
-                                  tooltip: "Delete Payment Record",
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () => _confirmDeletePayment(p),
-                                ),
+                                isEditing
+                                    ? Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (_isSavingEdit)
+                                            const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1E7E34)),
+                                            )
+                                          else
+                                            IconButton(
+                                              icon: const Icon(Icons.check_circle_rounded, size: 20, color: Color(0xFF1E7E34)),
+                                              tooltip: "Save Row Changes",
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                              onPressed: () => _saveEditedRow(p),
+                                            ),
+                                          const SizedBox(width: 8),
+                                          IconButton(
+                                            icon: Icon(Icons.cancel_rounded, size: 20, color: Colors.grey.shade600),
+                                            tooltip: "Cancel Edit",
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                            onPressed: _cancelEditing,
+                                          ),
+                                        ],
+                                      )
+                                    : Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (isManager) ...[
+                                            IconButton(
+                                              icon: const Icon(Icons.edit_note_rounded, size: 20, color: Color(0xFF1976D2)),
+                                              tooltip: "Edit Payment Row (Manager Only)",
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                              onPressed: () => _startEditing(p),
+                                            ),
+                                            if (isOnlyAdmin) const SizedBox(width: 6),
+                                          ],
+                                          if (isOnlyAdmin)
+                                            IconButton(
+                                              icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
+                                              tooltip: "Delete Payment Record (Admin Only)",
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                              onPressed: () => _confirmDeletePayment(p),
+                                            ),
+                                        ],
+                                      ),
                               ),
                           ],
                         );

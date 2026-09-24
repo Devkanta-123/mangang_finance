@@ -337,6 +337,32 @@ class LoaneeProvider extends ChangeNotifier {
     }
   }
 
+  void handlePaymentUpdated({
+    required String customerId,
+    required String accountNumber,
+    required double newTotalPaid,
+    required double newRemainingBalance,
+  }) {
+    final cleanCust = customerId.trim().toLowerCase();
+    final cleanAcc = accountNumber.trim().toLowerCase();
+
+    for (int i = 0; i < _loanees.length; i++) {
+      final l = _loanees[i];
+      final matchCust = cleanCust.isNotEmpty && l.customerId.trim().toLowerCase() == cleanCust;
+      final matchAcc = cleanAcc.isNotEmpty && l.accountNumber.trim().toLowerCase() == cleanAcc;
+
+      if (matchCust || matchAcc) {
+        _loanees[i] = l.copyWith(
+          paidamount: newTotalPaid,
+          dueamount: newRemainingBalance,
+          status: newRemainingBalance <= 0 ? 'Closed' : (l.status == 'Closed' ? 'Active' : l.status),
+        );
+        notifyListeners();
+        break;
+      }
+    }
+  }
+
   // ==========================================
   // REALTIME POSTGRES CHANGES HANDLERS
   // ==========================================
