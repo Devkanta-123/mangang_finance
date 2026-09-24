@@ -574,6 +574,11 @@ class _RoCollectionSheetViewPageState
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
+        final authProvider =
+            Provider.of<AuthProvider>(context, listen: false);
+        final bool isOnlyAdmin = authProvider.activeRole == UserType.admin &&
+            (authProvider.currentUser == null ||
+                authProvider.currentUser?.userType == UserType.admin);
         final cp =
             Provider.of<CollectionSheetProvider>(context);
         final allPayments =
@@ -801,81 +806,84 @@ class _RoCollectionSheetViewPageState
                                         );
                                       },
                                     ),
-                                    const SizedBox(width: 8),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete_outline_rounded,
-                                          size: 18, color: Colors.red),
-                                      tooltip: 'Delete Payment',
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                      onPressed: () async {
-                                        final confirmed = await showDialog<bool>(
-                                          context: context,
-                                          builder: (dlgCtx) => AlertDialog(
-                                            shape: RoundedRectangleBorder(
-                                                borderRadius: BorderRadius.circular(16)),
-                                            title: const Row(
-                                              children: [
-                                                Icon(Icons.warning_amber_rounded,
-                                                    color: Colors.red, size: 24),
-                                                SizedBox(width: 8),
-                                                Text('Delete Payment Record?'),
+                                    if (isOnlyAdmin) ...[
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline_rounded,
+                                            size: 18, color: Colors.red),
+                                        tooltip: 'Delete Payment',
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        onPressed: () async {
+                                          if (!isOnlyAdmin) return;
+                                          final confirmed = await showDialog<bool>(
+                                            context: context,
+                                            builder: (dlgCtx) => AlertDialog(
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(16)),
+                                              title: const Row(
+                                                children: [
+                                                  Icon(Icons.warning_amber_rounded,
+                                                      color: Colors.red, size: 24),
+                                                  SizedBox(width: 8),
+                                                  Text('Delete Payment Record?'),
+                                                ],
+                                              ),
+                                              content: Text(
+                                                'Are you sure you want to delete this payment of ₹${p.paymentAmount.toStringAsFixed(2)} for ${entry.loaneeName}?',
+                                                style: const TextStyle(fontSize: 13),
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(dlgCtx, false),
+                                                  child: const Text('Cancel',
+                                                      style: TextStyle(color: Colors.grey)),
+                                                ),
+                                                ElevatedButton(
+                                                  style: ElevatedButton.styleFrom(
+                                                    backgroundColor: Colors.red.shade700,
+                                                    foregroundColor: Colors.white,
+                                                  ),
+                                                  onPressed: () => Navigator.pop(dlgCtx, true),
+                                                  child: const Text('Delete'),
+                                                ),
                                               ],
                                             ),
-                                            content: Text(
-                                              'Are you sure you want to delete this payment of ₹${p.paymentAmount.toStringAsFixed(2)} for ${entry.loaneeName}?',
-                                              style: const TextStyle(fontSize: 13),
-                                            ),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () => Navigator.pop(dlgCtx, false),
-                                                child: const Text('Cancel',
-                                                    style: TextStyle(color: Colors.grey)),
-                                              ),
-                                              ElevatedButton(
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.red.shade700,
-                                                  foregroundColor: Colors.white,
-                                                ),
-                                                onPressed: () => Navigator.pop(dlgCtx, true),
-                                                child: const Text('Delete'),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                        if (confirmed == true) {
-                                          final success = await collectionProvider.deleteCollectionPayment(p.id);
-                                          if (success) {
-                                            LoaneeProvider? loaneeProvider;
-                                            try {
-                                              loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
-                                            } catch (_) {}
-                                            final initialBal = entry.initialBalance;
-                                            final currentPaid = collectionProvider.getTotalPaidForCollection(entry.id);
-                                            final currentInterest = collectionProvider.getTotalInterestForCollection(entry.id);
-                                            final newBal = (initialBal + currentInterest - currentPaid).clamp(0.0, double.infinity);
+                                          );
+                                          if (confirmed == true) {
+                                            final success = await collectionProvider.deleteCollectionPayment(p.id);
+                                            if (success) {
+                                              LoaneeProvider? loaneeProvider;
+                                              try {
+                                                loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                                              } catch (_) {}
+                                              final initialBal = entry.initialBalance;
+                                              final currentPaid = collectionProvider.getTotalPaidForCollection(entry.id);
+                                              final currentInterest = collectionProvider.getTotalInterestForCollection(entry.id);
+                                              final newBal = (initialBal + currentInterest - currentPaid).clamp(0.0, double.infinity);
 
-                                            loaneeProvider?.handlePaymentDeleted(
-                                              customerId: entry.customerId,
-                                              accountNumber: entry.accountNumber,
-                                              deletedPaymentAmount: p.paymentAmount,
-                                              newRemainingBalance: newBal,
-                                            );
-
-                                            if (ctx.mounted) {
-                                              Navigator.pop(ctx);
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(
-                                                  content: Text('Payment of ₹${p.paymentAmount.toStringAsFixed(2)} deleted.'),
-                                                  backgroundColor: Colors.green.shade700,
-                                                  behavior: SnackBarBehavior.floating,
-                                                ),
+                                              loaneeProvider?.handlePaymentDeleted(
+                                                customerId: entry.customerId,
+                                                accountNumber: entry.accountNumber,
+                                                deletedPaymentAmount: p.paymentAmount,
+                                                newRemainingBalance: newBal,
                                               );
+
+                                              if (ctx.mounted) {
+                                                Navigator.pop(ctx);
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  SnackBar(
+                                                    content: Text('Payment of ₹${p.paymentAmount.toStringAsFixed(2)} deleted.'),
+                                                    backgroundColor: Colors.green.shade700,
+                                                    behavior: SnackBarBehavior.floating,
+                                                  ),
+                                                );
+                                              }
                                             }
                                           }
-                                        }
-                                      },
-                                    ),
+                                        },
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ],
@@ -4344,12 +4352,18 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
   }
 
   Future<void> _confirmDeletePayment(CollectionPaymentModel payment) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final bool isOnlyAdmin = authProvider.activeRole == UserType.admin &&
+        (authProvider.currentUser == null ||
+            authProvider.currentUser?.userType == UserType.admin);
+    if (!isOnlyAdmin) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Row(
-          children: [
+          children: [ 
             Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
             SizedBox(width: 8),
             Text("Delete Payment Record?"),
@@ -4419,6 +4433,10 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final bool isOnlyAdmin = authProvider.activeRole == UserType.admin &&
+        (authProvider.currentUser == null ||
+            authProvider.currentUser?.userType == UserType.admin);
     final entry = widget.entry;
     final loanee = widget.loaneeProvider?.getLoaneeForUser(
       customerId: entry.customerId,
@@ -4618,7 +4636,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 900),
+                    constraints: BoxConstraints(minWidth: isOnlyAdmin ? 900 : 820),
                     child: DataTable(
                       sortColumnIndex: 0,
                       sortAscending: _ascending,
@@ -4662,7 +4680,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                         const DataColumn(label: Text("Mode")),
                         const DataColumn(label: Text("Collected By")),
                         const DataColumn(label: Text("Status")),
-                        const DataColumn(label: Text("Action")),
+                        if (isOnlyAdmin) const DataColumn(label: Text("Action")),
                       ],
                       rows: _payments.map((p) {
                         final d = p.createdAt;
@@ -4792,15 +4810,16 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                 ],
                               ),
                             ),
-                            DataCell(
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
-                                tooltip: "Delete Payment Record",
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                onPressed: () => _confirmDeletePayment(p),
+                            if (isOnlyAdmin)
+                              DataCell(
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
+                                  tooltip: "Delete Payment Record",
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  onPressed: () => _confirmDeletePayment(p),
+                                ),
                               ),
-                            ),
                           ],
                         );
                       }).toList(),
