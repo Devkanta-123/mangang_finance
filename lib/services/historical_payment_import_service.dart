@@ -41,6 +41,30 @@ class HistoricalPaymentItem {
     this.paymentModel,
   }) : latePaymentFee = latePaymentFee > 0 ? latePaymentFee : interest;
 
+  HistoricalPaymentItem copyWith({
+    DateTime? paymentDate,
+    double? amount,
+    double? interest,
+    double? latePaymentFee,
+    double? postMaturityInterest,
+    String? roName,
+    bool? isDuplicate,
+    String? errorMessage,
+    CollectionPaymentModel? paymentModel,
+  }) {
+    return HistoricalPaymentItem(
+      paymentDate: paymentDate ?? this.paymentDate,
+      amount: amount ?? this.amount,
+      interest: interest ?? this.interest,
+      latePaymentFee: latePaymentFee ?? this.latePaymentFee,
+      postMaturityInterest: postMaturityInterest ?? this.postMaturityInterest,
+      roName: roName ?? this.roName,
+      isDuplicate: isDuplicate ?? this.isDuplicate,
+      errorMessage: errorMessage ?? this.errorMessage,
+      paymentModel: paymentModel ?? this.paymentModel,
+    );
+  }
+
   String get formattedDate {
     return "${paymentDate.day.toString().padLeft(2, "0")}/${paymentDate.month.toString().padLeft(2, "0")}/${paymentDate.year}";
   }
@@ -191,6 +215,53 @@ class HistoricalPaymentImportService {
 
   /// Excel epoch date: December 30, 1899 (for Windows Excel 1900 date system accounting for leap year bug)
   static final DateTime excelEpoch = DateTime(1899, 12, 30);
+
+  /// Checks whether a payment date corresponds to the loan maturity date or its monthly recurrence
+  /// (same day-of-month for each subsequent month on or after maturity date)
+  static bool isPostMaturityDateMatch(DateTime paymentDate, DateTime? maturityDate) {
+    if (maturityDate == null) return false;
+
+    final cleanPay = DateTime(paymentDate.year, paymentDate.month, paymentDate.day);
+    final cleanMat = DateTime(maturityDate.year, maturityDate.month, maturityDate.day);
+
+    if (cleanPay.isBefore(cleanMat)) return false;
+
+    // Check if cleanPay matches maturity date or any subsequent month
+    final int monthsDiff = (cleanPay.year - cleanMat.year) * 12 + (cleanPay.month - cleanMat.month);
+    if (monthsDiff < 0) return false;
+
+    final expectedDate = SettingsProvider.addMonths(cleanMat, monthsDiff);
+    return cleanPay.year == expectedDate.year &&
+        cleanPay.month == expectedDate.month &&
+        cleanPay.day == expectedDate.day;
+  }
+
+  /// Calculate the remaining balance of a loan prior to the imported batch of historical payments
+  static double calculateInitialRemainingBalance({
+    required LoaneeAccount? resolvedLoanee,
+    required RoCollectionEntry? resolvedCollectionEntry,
+    required RoCollectionEntry? newCollectionEntry,
+    required String targetCollectionId,
+    required List<CollectionPaymentModel> existingPayments,
+    double defaultBasePrincipal = 10000.0,
+  }) {
+    final double? resolvedLoanAmount = resolvedCollectionEntry?.loanAmount;
+    final double? newLoanAmount = newCollectionEntry?.loanAmount;
+
+    final double initialBal = (resolvedLoanee != null && resolvedLoanee.loanAmount > 0)
+        ? resolvedLoanee.loanAmount
+        : ((resolvedLoanAmount != null && resolvedLoanAmount > 0)
+            ? resolvedLoanAmount
+            : ((newLoanAmount != null && newLoanAmount > 0)
+                ? newLoanAmount
+                : (resolvedCollectionEntry?.initialBalance ?? (defaultBasePrincipal * 1.15))));
+
+    final priorPayments = existingPayments.where((p) => p.collectionId == targetCollectionId).toList();
+    final priorPaid = priorPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
+    final priorInterest = priorPayments.fold(0.0, (sum, p) => sum + (p.interest + p.postMaturityInterest + p.lateFine));
+
+    return (initialBal + priorInterest - priorPaid).clamp(0.0, double.infinity);
+  }
 
   /// Parse an Excel serial date number (e.g. 46204.0 -> 2026-07-01) or date string
   static DateTime? parseDateValue(dynamic rawValue) {
@@ -1707,6 +1778,16 @@ class HistoricalPaymentImportService {
           double runningTotalCollected = priorPaid;
           double runningCumulativeInterest = priorInterest;
 
+          final effectiveMaturity = row.resolvedLoanee?.effectiveMaturityDate ??
+              (row.resolvedCollectionEntry != null ? LoaneeAccount.calculateMaturityDate(row.resolvedCollectionEntry!.createdAt) : null);
+
+          final assessedMonthsInCommit = <String>{};
+          for (final p in collectionProvider.getPaymentsForCollection(targetEntryId)) {
+            if (p.postMaturityInterest > 0) {
+              assessedMonthsInCommit.add("${p.createdAt.year}-${p.createdAt.month}");
+            }
+          }
+
           debugPrint('======================================================================');
           debugPrint('=== [HISTORICAL PAYMENT IMPORT CALCULATION PIPELINE] ===');
           debugPrint('Loanee: ${row.rawLoaneeName} | Customer ID: ${row.rawCustomerId} | Account: ${row.rawAccountNumber}');
@@ -1726,24 +1807,43 @@ class HistoricalPaymentImportService {
               duplicateSkipped++;
               continue;
             }
-            if (p.errorMessage != null || (p.amount <= 0 && p.interest <= 0 && p.postMaturityInterest <= 0)) {
+            if (p.errorMessage != null) {
+              continue;
+            }
+
+            // Post-maturity fine calculation on basis of remaining balance before post-maturity date
+            double finalPostMat = p.postMaturityInterest;
+            final bool isPostMat = isPostMaturityDateMatch(p.paymentDate, effectiveMaturity);
+            final monthKey = "${p.paymentDate.year}-${p.paymentDate.month}";
+
+            if (isPostMat && !assessedMonthsInCommit.contains(monthKey) && runningBalance > 0) {
+              final calculated = double.parse((runningBalance * 0.07).toStringAsFixed(2));
+              if (calculated > 0) {
+                finalPostMat = calculated;
+              }
+              assessedMonthsInCommit.add(monthKey);
+            } else if (finalPostMat > 0) {
+              assessedMonthsInCommit.add(monthKey);
+            }
+
+            if (p.amount <= 0 && p.interest <= 0 && finalPostMat <= 0) {
               continue;
             }
 
             // Correct formula: Interest increases remaining amount, payment decreases it
             runningTotalCollected += p.amount;
-            runningCumulativeInterest += (p.interest + p.postMaturityInterest);
-            runningBalance = (runningBalance + p.interest + p.postMaturityInterest - p.amount).clamp(0.0, double.infinity);
+            runningCumulativeInterest += (p.interest + finalPostMat);
+            runningBalance = (runningBalance + p.interest + finalPostMat - p.amount).clamp(0.0, double.infinity);
             final newRemaining = runningBalance;
 
-            debugPrint('  Payment #$paymentIdx: Date=${p.formattedDate} | Payment Amount=₹${p.amount.toStringAsFixed(2)} | Interest=₹${p.interest.toStringAsFixed(2)} | Post Maturity=₹${p.postMaturityInterest.toStringAsFixed(2)} | Running Total Collected=₹${runningTotalCollected.toStringAsFixed(2)} | Running Remaining Balance=₹${newRemaining.toStringAsFixed(2)}');
+            debugPrint('  Payment #$paymentIdx: Date=${p.formattedDate} | Payment Amount=₹${p.amount.toStringAsFixed(2)} | Interest=₹${p.interest.toStringAsFixed(2)} | Post Maturity=₹${finalPostMat.toStringAsFixed(2)} | Running Total Collected=₹${runningTotalCollected.toStringAsFixed(2)} | Running Remaining Balance=₹${newRemaining.toStringAsFixed(2)}');
             paymentIdx++;
 
             String paymentRemarks;
-            if (p.postMaturityInterest > 0 && p.interest > 0) {
-              paymentRemarks = "Historical Excel Import (Daily/Weekly Late Fee: ₹${p.interest.toStringAsFixed(2)}, Post Maturity: ₹${p.postMaturityInterest.toStringAsFixed(2)})";
-            } else if (p.postMaturityInterest > 0) {
-              paymentRemarks = "Historical Excel Import (Post Maturity: ₹${p.postMaturityInterest.toStringAsFixed(2)})";
+            if (finalPostMat > 0 && p.interest > 0) {
+              paymentRemarks = "Historical Excel Import (Daily/Weekly Late Fee: ₹${p.interest.toStringAsFixed(2)}, Post Maturity: ₹${finalPostMat.toStringAsFixed(2)})";
+            } else if (finalPostMat > 0) {
+              paymentRemarks = "Historical Excel Import (Post Maturity: ₹${finalPostMat.toStringAsFixed(2)})";
             } else if (p.interest > 0) {
               paymentRemarks = "Historical Excel Import (Daily/Weekly Late Fee: ₹${p.interest.toStringAsFixed(2)})";
             } else {
@@ -1758,14 +1858,14 @@ class HistoricalPaymentImportService {
               paymentAmount: p.amount,
               interest: p.interest > 0 ? p.interest : (p.paymentModel?.interest ?? 0.0),
               lateFine: 0.0,
-              postMaturityInterest: p.postMaturityInterest > 0 ? p.postMaturityInterest : (p.paymentModel?.postMaturityInterest ?? 0.0),
+              postMaturityInterest: finalPostMat,
               remainingBalance: newRemaining,
               paymentType: "Cash",
               roName: p.roName,
               roRoute: row.rawRoute.isNotEmpty ? row.rawRoute : "Office",
               createdAt: p.paymentDate,
               status: "Success",
-              remarks: (p.paymentModel?.remarks?.isNotEmpty == true)
+              remarks: (p.paymentModel?.remarks?.isNotEmpty == true && !p.paymentModel!.remarks!.contains("Post Maturity"))
                   ? p.paymentModel!.remarks
                   : paymentRemarks,
             );
@@ -1780,14 +1880,14 @@ class HistoricalPaymentImportService {
               insertedPayments.add(paymentToSave);
               totalImported += p.amount;
               totalLateFeesImported += p.interest;
-              totalPostMatImported += p.postMaturityInterest;
-              totalInterestImported += (p.interest + p.postMaturityInterest);
+              totalPostMatImported += finalPostMat;
+              totalInterestImported += (p.interest + finalPostMat);
               rowAmountImported += p.amount;
             } else {
               failures.add(p.interest > 0 && p.amount == 0
                   ? "Failed to save daily/weekly late fee of ₹${p.interest.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}"
-                  : p.postMaturityInterest > 0 && p.amount == 0
-                      ? "Failed to save post maturity interest of ₹${p.postMaturityInterest.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}"
+                  : finalPostMat > 0 && p.amount == 0
+                      ? "Failed to save post maturity interest of ₹${finalPostMat.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}"
                       : "Failed to save payment of ₹${p.amount.toStringAsFixed(2)} on ${p.formattedDate} for ${row.rawLoaneeName}");
             }
           }

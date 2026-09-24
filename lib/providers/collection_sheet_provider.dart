@@ -498,6 +498,199 @@ class CollectionSheetProvider extends ChangeNotifier {
     return deletedCount;
   }
 
+  /// Synchronize and automatically insert monthly 7% Post-Maturity Fine records into 'ro_collection_payments'
+  /// triggered strictly on the day-of-month of the original maturity date for all applicable monthly cycles.
+  Future<List<CollectionPaymentModel>> syncAutoPostMaturityFinesForEntry({
+    required RoCollectionEntry entry,
+    required SettingsProvider settingsProvider,
+    double? loaneeLoanAmount,
+    LoaneeProvider? loaneeProvider,
+    DateTime? asOfDate,
+    bool saveToRemote = true,
+  }) async {
+    final now = asOfDate ?? DateTime.now();
+    final cleanToday = DateTime(now.year, now.month, now.day);
+
+    // 1. Resolve loanee and maturity date (Maturity Date is the strict source of truth)
+    LoaneeAccount? loanee;
+    if (loaneeProvider != null) {
+      loanee = loaneeProvider.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+    }
+
+    final DateTime effectiveMaturity = loanee?.effectiveMaturityDate ??
+        (loanee?.loanMaturityDate ?? LoaneeAccount.calculateMaturityDate(loanee?.loanSanctionDate ?? entry.createdAt));
+    final cleanMaturity = DateTime(effectiveMaturity.year, effectiveMaturity.month, effectiveMaturity.day);
+
+    // If today is strictly before maturity date, loan is not past maturity
+    if (cleanToday.isBefore(cleanMaturity)) {
+      return [];
+    }
+
+    // 2. Authoritative initial loan balance
+    final double? effectiveLoanAmount = loaneeLoanAmount ??
+        ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : entry.loanAmount);
+    final double initialLoan = (effectiveLoanAmount != null && effectiveLoanAmount > 0)
+        ? effectiveLoanAmount
+        : (entry.actualPrincipal ?? entry.initialBalance);
+
+    if (initialLoan <= 0) {
+      return [];
+    }
+
+    // 3. Existing payment records from ro_collection_payments
+    final cardPayments = getPaymentsForCollection(entry.id);
+
+    // Check if real transaction data exists in ro_collection_payments for this entry
+    final realTx = cardPayments.where((p) {
+      final s = p.status.toLowerCase().trim();
+      if (s == 'failed' || s == 'cancelled') return false;
+      final isAuto = p.id.startsWith('PAY-LATE-') ||
+          p.id.startsWith('PAY-POSTMAT-') ||
+          p.roId == 'SYS-AUTO' ||
+          (p.remarks != null && p.remarks!.contains('Auto assessed'));
+      return !isAuto && (p.paymentAmount > 0 || p.lateFine > 0 || p.interest > 0 || p.postMaturityInterest > 0);
+    }).toList();
+
+    // If there are no real payment records in ro_collection_payments for this entry
+    // (e.g. before Excel is uploaded or loan has empty transaction history),
+    // strictly do NOT auto-insert post-maturity fines into empty data!
+    if (realTx.isEmpty) {
+      // Clean up any orphan auto-assessed post-maturity records that were generated while data was empty
+      final orphanAutoPostMat = cardPayments.where((p) =>
+          p.id.startsWith('PAY-POSTMAT-') ||
+          (p.roId == 'SYS-AUTO' && p.postMaturityInterest > 0)
+      ).toList();
+
+      if (orphanAutoPostMat.isNotEmpty) {
+        for (final p in orphanAutoPostMat) {
+          _payments.removeWhere((item) => item.id == p.id);
+          if (saveToRemote && SupabaseService.instance.isInitialized) {
+            deleteCollectionPayment(p.id);
+          }
+        }
+        notifyListeners();
+      }
+      return [];
+    }
+
+    // 4. Candidate monthly cycle dates triggered strictly by maturity date's day-of-month
+    // Example: Maturity Date = 18/01/2026 -> 18/01/2026, 18/02/2026, ... 18/09/2026 (up to today)
+    final List<DateTime> candidateCycles = [];
+    for (int k = 0; k < 1200; k++) {
+      final cycleDate = SettingsProvider.addMonths(cleanMaturity, k);
+      final cleanCycleDate = DateTime(cycleDate.year, cycleDate.month, cycleDate.day);
+      if (cleanCycleDate.isAfter(cleanToday)) {
+        break; // Stop at future dates
+      }
+      candidateCycles.add(cleanCycleDate);
+    }
+
+    if (candidateCycles.isEmpty) {
+      return [];
+    }
+
+    // Combined chronological payment timeline tracking existing + newly created cycle events
+    final List<CollectionPaymentModel> newlyCreatedRecords = [];
+    final List<CollectionPaymentModel> workingTimeline = List<CollectionPaymentModel>.from(cardPayments);
+
+    for (final cycleDate in candidateCycles) {
+      final dateStr = '${cycleDate.year}${cycleDate.month.toString().padLeft(2, '0')}${cycleDate.day.toString().padLeft(2, '0')}';
+      final expectedRecordId = 'PAY-POSTMAT-${entry.id}-$dateStr';
+
+      // Duplicate Prevention Check:
+      // Check if a post-maturity event for this account and monthly cycle already exists
+      final bool alreadyAssessed = workingTimeline.any((p) {
+        final s = p.status.toLowerCase().trim();
+        if (s == 'failed' || s == 'cancelled') return false;
+
+        if (p.id == expectedRecordId) return true;
+
+        final sameYearMonth = p.createdAt.year == cycleDate.year && p.createdAt.month == cycleDate.month;
+        if (sameYearMonth) {
+          if (p.postMaturityInterest > 0) return true;
+          if (p.remarks != null && p.remarks!.contains('Post Maturity')) return true;
+        }
+        return false;
+      });
+
+      if (alreadyAssessed) {
+        continue;
+      }
+
+      // Eligible remaining balance immediately before this Post-Maturity event (strictly up to the day before)
+      final cycleStart = DateTime(cycleDate.year, cycleDate.month, cycleDate.day, 0, 0, 0);
+      final priorPayments = workingTimeline.where((p) {
+        final s = p.status.toLowerCase().trim();
+        if (s == 'failed' || s == 'cancelled') return false;
+        return p.createdAt.isBefore(cycleStart);
+      }).toList();
+
+      final double totalPaidBefore = priorPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
+      final double totalInterestBefore = priorPayments.fold(
+        0.0,
+        (sum, p) => sum + (p.effectiveLateFine + p.postMaturityInterest),
+      );
+
+      final double eligibleBalance = (initialLoan + totalInterestBefore - totalPaidBefore).clamp(0.0, double.infinity);
+
+      // If loan was already cleared before this monthly cycle, stop assessing future cycles
+      if (eligibleBalance <= 0.01) {
+        break;
+      }
+
+      // Fixed 7% calculation on eligible remaining balance
+      final double fineAmount = double.parse((eligibleBalance * 0.07).toStringAsFixed(2));
+      if (fineAmount <= 0) {
+        continue;
+      }
+
+      final double newRemaining = double.parse((eligibleBalance + fineAmount).toStringAsFixed(2));
+
+      final record = CollectionPaymentModel(
+        id: expectedRecordId,
+        collectionId: entry.id,
+        paymentAmount: 0.0,
+        lateFine: 0.0,
+        interest: 0.0,
+        postMaturityInterest: fineAmount,
+        remainingBalance: newRemaining,
+        paymentType: 'Post Maturity Fine',
+        roPasscode: '',
+        roName: 'System (Auto)',
+        roId: 'SYS-AUTO',
+        roRoute: entry.route,
+        createdAt: DateTime(cycleDate.year, cycleDate.month, cycleDate.day, 12, 0, 0),
+        status: 'Success',
+        remarks: 'Post Maturity Fine: ₹${fineAmount.toStringAsFixed(2)} (Auto assessed for 7% monthly overdue fine on balance ₹${eligibleBalance.toStringAsFixed(2)})',
+      );
+
+      newlyCreatedRecords.add(record);
+      workingTimeline.add(record);
+    }
+
+    if (newlyCreatedRecords.isNotEmpty) {
+      for (final rec in newlyCreatedRecords) {
+        if (!_payments.any((p) => p.id == rec.id)) {
+          _payments.insert(0, rec);
+        }
+      }
+
+      if (saveToRemote && SupabaseService.instance.isInitialized) {
+        await SupabaseService.instance.saveCollectionPaymentsBatch(newlyCreatedRecords);
+      }
+
+      notifyListeners();
+    }
+
+    return newlyCreatedRecords;
+  }
+
   /// Synchronize and automatically insert missing daily late fee records into 'ro_collection_payments'
   /// for completed missed collection days strictly before today (today is excluded).
   Future<List<CollectionPaymentModel>> syncAutoLateFeesForEntry({
@@ -508,6 +701,16 @@ class CollectionSheetProvider extends ChangeNotifier {
     DateTime? asOfDate,
     bool saveToRemote = true,
   }) async {
+    // 1. First sync monthly Post-Maturity fines so chronological balance and overdue charges are up to date
+    final List<CollectionPaymentModel> postMatRecords = await syncAutoPostMaturityFinesForEntry(
+      entry: entry,
+      settingsProvider: settingsProvider,
+      loaneeLoanAmount: loaneeLoanAmount,
+      loaneeProvider: loaneeProvider,
+      asOfDate: asOfDate,
+      saveToRemote: saveToRemote,
+    );
+
     final bool isDaily = entry.isDaily;
 
     final now = asOfDate ?? DateTime.now();
@@ -599,6 +802,8 @@ class CollectionSheetProvider extends ChangeNotifier {
     // We exclude auto-assessed records so that candidate evaluation starts from the last real/historical transaction
     final nonAutoTx = allSuccessful.where((p) {
       final isAuto = p.id.startsWith('PAY-LATE-') ||
+          p.id.startsWith('PAY-POSTMAT-') ||
+          p.roId == 'SYS-AUTO' ||
           (p.remarks != null && p.remarks!.contains('Auto assessed'));
       return !isAuto;
     }).toList();
@@ -794,6 +999,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       notifyListeners();
     }
 
+    newlyCreatedRecords.addAll(postMatRecords);
     return newlyCreatedRecords;
   }
 

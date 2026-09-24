@@ -332,6 +332,35 @@ class _RoCollectionSheetViewPageState
 
   // Popup Modal for View Details
   void _showViewDetailsModal(BuildContext context, RoCollectionEntry entry) async {
+    final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+    final sp = Provider.of<SettingsProvider>(context, listen: false);
+    LoaneeProvider? lp;
+    try {
+      lp = Provider.of<LoaneeProvider>(context, listen: false);
+    } catch (_) {}
+
+    try {
+      final loanee = lp?.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+      final effectiveLoanAmt = (entry.loanAmount != null && entry.loanAmount! > 0)
+          ? entry.loanAmount!
+          : ((loanee != null && loanee.loanAmount > 0)
+              ? loanee.loanAmount
+              : (entry.actualPrincipal ?? entry.initialBalance));
+
+      await cp.syncAutoLateFeesForEntry(
+        entry: entry,
+        settingsProvider: sp,
+        loaneeLoanAmount: effectiveLoanAmt,
+        loaneeProvider: lp,
+      );
+    } catch (_) {}
+
+    if (!context.mounted) return;
+
     final action = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
