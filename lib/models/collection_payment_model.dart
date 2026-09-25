@@ -86,6 +86,101 @@ class CollectionPaymentModel {
     return (roName != null && roName!.isNotEmpty) ? roName! : 'RO Officer';
   }
 
+  /// Checks if this payment transaction has hybrid collection modes
+  bool get isHybridPayment {
+    if (paymentType.contains(',')) return true;
+    if (paymentType.contains('-') && RegExp(r'\d').hasMatch(paymentType)) return true;
+    if ((paymentType.toLowerCase() == 'other' || paymentType.toLowerCase() == 'hybrid') &&
+        remarks != null &&
+        remarks!.contains('Hybrid Split:')) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Formats the payment mode to display modes with amounts if hybrid (e.g. "Cash-150, Gpay-150")
+  String get formattedPaymentMode {
+    if (!isHybridPayment) {
+      return paymentType;
+    }
+
+    // 1. If remarks has "Hybrid Split:", extract and format mode with amounts
+    if (remarks != null && remarks!.contains('Hybrid Split:')) {
+      final match = RegExp(r'Hybrid Split:\s*([^|]+)', caseSensitive: false).firstMatch(remarks!);
+      if (match != null) {
+        final splitStr = match.group(1)?.trim() ?? '';
+        final formatted = _formatHybridSplitModesString(splitStr);
+        if (formatted.isNotEmpty) {
+          return formatted;
+        }
+      }
+    }
+
+    // 2. If paymentType contains hyphen/colon/equal with digits
+    if (paymentType.contains('-') || paymentType.contains(':') || paymentType.contains('=')) {
+      if (RegExp(r'\d').hasMatch(paymentType)) {
+        return _formatHybridSplitModesString(paymentType);
+      }
+    }
+
+    // 3. Fallback to raw paymentType
+    return paymentType;
+  }
+
+  /// Extracts hybrid split breakdown text from payment remarks or paymentType if available
+  String? get hybridSplitBreakdown {
+    if (remarks != null && remarks!.contains('Hybrid Split:')) {
+      final match = RegExp(r'Hybrid Split:\s*([^|]+)', caseSensitive: false).firstMatch(remarks!);
+      if (match != null) {
+        return match.group(1)?.trim();
+      }
+    }
+    if (isHybridPayment) {
+      return formattedPaymentMode;
+    }
+    return null;
+  }
+
+  /// Helper to convert a hybrid string with amounts into "Mode-Amount, Mode-Amount"
+  static String _formatHybridSplitModesString(String raw) {
+    final parts = raw.split(',');
+    final formatted = <String>[];
+    for (final part in parts) {
+      final trimmed = part.trim();
+      if (trimmed.isEmpty) continue;
+
+      // Matches "Cash: ₹150.00" or "Cash=150" or "Cash: 150"
+      final match = RegExp(r'^([^:=]+)\s*[:=]\s*₹?\s*([\d,]+(?:\.\d+)?)$').firstMatch(trimmed);
+      if (match != null) {
+        final mode = match.group(1)!.trim();
+        final rawAmt = match.group(2)!.replaceAll(',', '');
+        final amt = double.tryParse(rawAmt);
+        final amtStr = (amt != null && amt % 1 == 0)
+            ? amt.toInt().toString()
+            : (amt != null ? amt.toStringAsFixed(2) : rawAmt);
+        formatted.add('$mode-$amtStr');
+        continue;
+      }
+
+      // Matches "Cash-150" or "Cash - 150" or "Cash-150.00"
+      final dashMatch = RegExp(r'^([A-Za-z\s]+)\s*-\s*₹?\s*([\d,]+(?:\.\d+)?)$').firstMatch(trimmed);
+      if (dashMatch != null) {
+        final mode = dashMatch.group(1)!.trim();
+        final rawAmt = dashMatch.group(2)!.replaceAll(',', '');
+        final amt = double.tryParse(rawAmt);
+        final amtStr = (amt != null && amt % 1 == 0)
+            ? amt.toInt().toString()
+            : (amt != null ? amt.toStringAsFixed(2) : rawAmt);
+        formatted.add('$mode-$amtStr');
+        continue;
+      }
+
+      formatted.add(trimmed);
+    }
+    return formatted.isNotEmpty ? formatted.join(', ') : raw;
+  }
+
+
   CollectionPaymentModel copyWith({
     String? id,
     String? collectionId,

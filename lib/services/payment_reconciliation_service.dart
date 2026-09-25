@@ -573,7 +573,7 @@ class PaymentReconciliationService {
           ..cellStyle = regularCellStyle;
 
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: currentRow))
-          ..value = TextCellValue(p.paymentType)
+          ..value = TextCellValue(p.formattedPaymentMode)
           ..cellStyle = regularCellStyle;
 
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: currentRow))

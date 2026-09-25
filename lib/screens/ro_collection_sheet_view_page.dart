@@ -20,46 +20,14 @@ import '../widgets/edit_loanee_dialog.dart';
 import '../widgets/pause_late_fine_dialog.dart';
 
 /// Checks if a payment transaction has hybrid collection modes
-bool _isHybridPayment(CollectionPaymentModel p) {
-  if (p.paymentType.contains(',')) return true;
-  if (p.remarks != null && p.remarks!.contains('Hybrid Split:')) return true;
-  return false;
-}
+bool _isHybridPayment(CollectionPaymentModel p) => p.isHybridPayment;
 
-/// Formats the payment mode to display comma-separated modes if hybrid
-String _formatPaymentModeDisplay(CollectionPaymentModel p) {
-  if (p.paymentType.contains(',')) {
-    return p.paymentType;
-  }
-  if ((p.paymentType == 'Other' || p.paymentType.toLowerCase() == 'hybrid') &&
-      p.remarks != null &&
-      p.remarks!.contains('Hybrid Split:')) {
-    final match = RegExp(r'Hybrid Split:\s*([^|]+)').firstMatch(p.remarks!);
-    if (match != null) {
-      final splitStr = match.group(1)?.trim() ?? '';
-      final modes = splitStr
-          .split(',')
-          .map((part) => part.split(':').first.trim())
-          .where((m) => m.isNotEmpty)
-          .toList();
-      if (modes.isNotEmpty) {
-        return modes.join(', ');
-      }
-    }
-  }
-  return p.paymentType;
-}
+/// Formats the payment mode to display modes with amounts if hybrid (e.g. "Cash-150, Gpay-150")
+String _formatPaymentModeDisplay(CollectionPaymentModel p) => p.formattedPaymentMode;
 
 /// Extracts hybrid split breakdown text from payment remarks if available
-String? _getHybridSplitBreakdown(CollectionPaymentModel p) {
-  if (p.remarks != null && p.remarks!.contains('Hybrid Split:')) {
-    final match = RegExp(r'Hybrid Split:\s*([^|]+)').firstMatch(p.remarks!);
-    if (match != null) {
-      return match.group(1)?.trim();
-    }
-  }
-  return null;
-}
+String? _getHybridSplitBreakdown(CollectionPaymentModel p) => p.hybridSplitBreakdown;
+
 
 class RoCollectionSheetViewPage extends StatefulWidget {
   final VoidCallback? onAddLoaneePressed;
@@ -4816,7 +4784,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       _editLateFeeController.text = p.effectiveLateFine.toStringAsFixed(2);
       _editPostMatController.text = p.postMaturityInterest.toStringAsFixed(2);
       _editRoNameController.text = p.roName ?? '';
-      _editPaymentType = p.paymentType;
+      _editPaymentType = _formatPaymentModeDisplay(p);
       _editStatus = p.status;
     });
   }
@@ -5691,19 +5659,31 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                       builder: (context) {
                                         final bool isHybrid = _isHybridPayment(p);
                                         final String displayMode = _formatPaymentModeDisplay(p);
-                                        return Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: isHybrid ? Colors.teal.shade50 : Colors.blue.shade50,
-                                            borderRadius: BorderRadius.circular(4),
-                                            border: isHybrid ? Border.all(color: Colors.teal.shade300) : null,
-                                          ),
-                                          child: Text(
-                                            displayMode,
-                                            style: TextStyle(
-                                              fontSize: 9.5,
-                                              fontWeight: FontWeight.bold,
-                                              color: isHybrid ? Colors.teal.shade900 : Colors.blue.shade900,
+                                        return Tooltip(
+                                          message: isHybrid ? 'Hybrid Mode: $displayMode' : displayMode,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: isHybrid ? Colors.teal.shade50 : Colors.blue.shade50,
+                                              borderRadius: BorderRadius.circular(4),
+                                              border: isHybrid ? Border.all(color: Colors.teal.shade300) : null,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (isHybrid) ...[
+                                                  Icon(Icons.call_split_rounded, size: 10, color: Colors.teal.shade800),
+                                                  const SizedBox(width: 3),
+                                                ],
+                                                Text(
+                                                  displayMode,
+                                                  style: TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: isHybrid ? Colors.teal.shade900 : Colors.blue.shade900,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         );
@@ -6523,7 +6503,11 @@ class __AddPaymentEntryModalContentState
 
     final bool isHybrid = _selectedPaymentType == 'Other' && _hybridEntries.isNotEmpty;
     final String paymentTypeToSave = isHybrid
-        ? _hybridEntries.map((e) => e.mode).join(', ')
+        ? _hybridEntries.map((e) {
+            final amt = double.tryParse(e.amountController.text.trim()) ?? 0.0;
+            final amtStr = amt % 1 == 0 ? amt.toInt().toString() : amt.toStringAsFixed(2);
+            return '${e.mode}-$amtStr';
+          }).join(', ')
         : _selectedPaymentType;
 
     final String hybridNote = isHybrid
