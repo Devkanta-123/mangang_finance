@@ -1951,6 +1951,37 @@ class SupabaseService {
     return false;
   }
 
+  /// Delete all collection payments for a collection ID in a single query
+  Future<bool> deleteAllPaymentsForCollection(String collectionId) async {
+    try {
+      final supaClient = client;
+      if (supaClient != null && collectionId.isNotEmpty) {
+        await supaClient.from('ro_collection_payments').delete().match({'collection_id': collectionId});
+        debugPrint('✅ Successfully deleted all payments for collection $collectionId');
+        return true;
+      }
+    } catch (e) {
+      debugPrint('❌ Error deleting all payments for collection $collectionId: $e');
+    }
+    return false;
+  }
+
+  /// Delete multiple collection payments by IDs in a single query
+  Future<bool> deleteCollectionPaymentsBatch(List<String> ids) async {
+    if (ids.isEmpty) return true;
+    try {
+      final supaClient = client;
+      if (supaClient != null) {
+        await supaClient.from('ro_collection_payments').delete().filter('id', 'in', ids);
+        debugPrint('✅ Successfully batch deleted ${ids.length} payments');
+        return true;
+      }
+    } catch (e) {
+      debugPrint('❌ Error batch deleting collection payments: $e');
+    }
+    return false;
+  }
+
   /// Fetch all Admin users directly from Supabase 'user_auth' table where user_type=admin
   Future<List<UserAuthRecord>?> fetchAdminUsers() async {
     try {

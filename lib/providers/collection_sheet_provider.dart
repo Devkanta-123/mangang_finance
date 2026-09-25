@@ -70,13 +70,10 @@ class CollectionSheetProvider extends ChangeNotifier {
       try {
         final remote = await SupabaseService.instance.fetchPaymentsForCollection(collectionId);
         if (remote != null) {
-          for (final p in remote) {
-            final idx = _payments.indexWhere((existing) => existing.id == p.id);
-            if (idx >= 0) {
-              _payments[idx] = p;
-            } else {
-              _payments.add(p);
-            }
+          _payments.removeWhere((p) => p.collectionId == collectionId);
+          _payments.addAll(remote);
+          if (remote.isEmpty) {
+            _dbTotalCollectedCache[collectionId] = 0.0;
           }
         }
       } catch (e) {
@@ -502,6 +499,29 @@ class CollectionSheetProvider extends ChangeNotifier {
     return true;
   }
 
+  /// Delete all collection payments for a collection ID (in memory and remote database in one operation)
+  Future<bool> deleteAllPaymentsForCollection(String collectionId) async {
+    _payments.removeWhere((p) => p.collectionId == collectionId);
+    _dbTotalCollectedCache[collectionId] = 0.0;
+    notifyListeners();
+    if (SupabaseService.instance.isInitialized) {
+      return await SupabaseService.instance.deleteAllPaymentsForCollection(collectionId);
+    }
+    return true;
+  }
+
+  /// Delete multiple collection payments by IDs in a single batch operation
+  Future<bool> deleteCollectionPaymentsBatch(List<String> paymentIds) async {
+    if (paymentIds.isEmpty) return true;
+    final idsSet = paymentIds.toSet();
+    _payments.removeWhere((p) => idsSet.contains(p.id));
+    notifyListeners();
+    if (SupabaseService.instance.isInitialized) {
+      return await SupabaseService.instance.deleteCollectionPaymentsBatch(paymentIds);
+    }
+    return true;
+  }
+
   /// Update an existing collection payment record in memory and Supabase
   Future<bool> updateCollectionPayment(CollectionPaymentModel updatedPayment) async {
     final idx = _payments.indexWhere((p) => p.id == updatedPayment.id);
@@ -538,20 +558,9 @@ class CollectionSheetProvider extends ChangeNotifier {
 
     if (toRemove.isEmpty) return 0;
 
-    int deletedCount = 0;
-    for (final p in toRemove) {
-      try {
-        final ok = await deleteCollectionPayment(p.id);
-        if (ok) deletedCount++;
-      } catch (e) {
-        debugPrint('⚠️ Error removing auto late fee record ${p.id}: $e');
-      }
-    }
-
-    if (deletedCount > 0) {
-      notifyListeners();
-    }
-    return deletedCount;
+    final ids = toRemove.map((p) => p.id).toList();
+    final ok = await deleteCollectionPaymentsBatch(ids);
+    return ok ? ids.length : 0;
   }
 
   /// Synchronize and automatically insert monthly 7% Post-Maturity Fine records into 'ro_collection_payments'
@@ -602,21 +611,10 @@ class CollectionSheetProvider extends ChangeNotifier {
     // 3. Existing payment records from ro_collection_payments
     final cardPayments = getPaymentsForCollection(entry.id);
 
-    // Check if real transaction data exists in ro_collection_payments for this entry
-    final realTx = cardPayments.where((p) {
-      final s = p.status.toLowerCase().trim();
-      if (s == 'failed' || s == 'cancelled') return false;
-      final isAuto = p.id.startsWith('PAY-LATE-') ||
-          p.id.startsWith('PAY-POSTMAT-') ||
-          p.roId == 'SYS-AUTO' ||
-          (p.remarks != null && p.remarks!.contains('Auto assessed'));
-      return !isAuto && (p.paymentAmount > 0 || p.lateFine > 0 || p.interest > 0 || p.postMaturityInterest > 0);
-    }).toList();
-
     // If there are no real payment records in ro_collection_payments for this entry
     // (e.g. before Excel is uploaded or loan has empty transaction history),
     // strictly do NOT auto-insert post-maturity fines into empty data!
-    if (realTx.isEmpty) {
+    if (!SettingsProvider.hasRealPayments(cardPayments)) {
       // Clean up any orphan auto-assessed post-maturity records that were generated while data was empty
       final orphanAutoPostMat = cardPayments.where((p) =>
           p.id.startsWith('PAY-POSTMAT-') ||
@@ -624,11 +622,10 @@ class CollectionSheetProvider extends ChangeNotifier {
       ).toList();
 
       if (orphanAutoPostMat.isNotEmpty) {
-        for (final p in orphanAutoPostMat) {
-          _payments.removeWhere((item) => item.id == p.id);
-          if (saveToRemote && SupabaseService.instance.isInitialized) {
-            deleteCollectionPayment(p.id);
-          }
+        final orphanIds = orphanAutoPostMat.map((p) => p.id).toList();
+        _payments.removeWhere((item) => orphanIds.contains(item.id));
+        if (saveToRemote && SupabaseService.instance.isInitialized) {
+          await SupabaseService.instance.deleteCollectionPaymentsBatch(orphanIds);
         }
         notifyListeners();
       }
@@ -757,6 +754,31 @@ class CollectionSheetProvider extends ChangeNotifier {
     DateTime? asOfDate,
     bool saveToRemote = true,
   }) async {
+    final cardPayments = getPaymentsForCollection(entry.id);
+
+    // If there are no real payment records in ro_collection_payments for this entry
+    // (e.g. before Excel is uploaded or when payment data was deleted/empty),
+    // strictly do NOT auto-insert late fee records or post-maturity records,
+    // and clean up any orphan records!
+    if (!SettingsProvider.hasRealPayments(cardPayments)) {
+      final orphanAuto = cardPayments.where((p) =>
+          p.id.startsWith('PAY-LATE-') ||
+          p.id.startsWith('PAY-POSTMAT-') ||
+          p.roId == 'SYS-AUTO' ||
+          (p.remarks != null && p.remarks!.contains('Auto assessed'))
+      ).toList();
+
+      if (orphanAuto.isNotEmpty) {
+        final orphanIds = orphanAuto.map((p) => p.id).toList();
+        _payments.removeWhere((item) => orphanIds.contains(item.id));
+        if (saveToRemote && SupabaseService.instance.isInitialized) {
+          await SupabaseService.instance.deleteCollectionPaymentsBatch(orphanIds);
+        }
+        notifyListeners();
+      }
+      return [];
+    }
+
     // 1. First sync monthly Post-Maturity fines so chronological balance and overdue charges are up to date
     final List<CollectionPaymentModel> postMatRecords = await syncAutoPostMaturityFinesForEntry(
       entry: entry,
@@ -772,6 +794,29 @@ class CollectionSheetProvider extends ChangeNotifier {
     final now = asOfDate ?? DateTime.now();
     final cleanToday = DateTime(now.year, now.month, now.day);
 
+    // 2. Identify real non-auto transaction in ro_collection_payments
+    final allSuccessful = cardPayments.where((p) {
+      final s = p.status.toLowerCase().trim();
+      final hasFeeOrPayment = p.paymentAmount > 0 ||
+          p.lateFine > 0 ||
+          p.interest > 0 ||
+          p.postMaturityInterest > 0;
+      return s != 'failed' && s != 'cancelled' && hasFeeOrPayment;
+    }).toList();
+
+    // We exclude auto-assessed records so that candidate evaluation starts from the last real/historical transaction
+    final nonAutoTx = allSuccessful.where((p) {
+      final isAuto = p.id.startsWith('PAY-LATE-') ||
+          p.id.startsWith('PAY-POSTMAT-') ||
+          p.roId == 'SYS-AUTO' ||
+          (p.remarks != null && p.remarks!.contains('Auto assessed'));
+      return !isAuto;
+    }).toList();
+
+    if (nonAutoTx.isEmpty) {
+      return [];
+    }
+
     // Resolve loanee if provider is supplied
     LoaneeAccount? loanee;
     if (loaneeProvider != null) {
@@ -786,7 +831,7 @@ class CollectionSheetProvider extends ChangeNotifier {
             ? loanee.loanAmount
             : entry.loanAmount);
 
-    // 2. Calculate late fine rate strictly as 3% of base installment (daily or weekly)
+    // 3. Calculate late fine rate strictly as 3% of base installment (daily or weekly)
     final double baseInstallment = entry.getCalculatedPayableAmount(
       loaneeLoanAmount: effectiveLoanAmount,
       configuredInterestRate: settingsProvider.investmentInterestRate,
@@ -799,7 +844,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       return [];
     }
 
-    // 3. Update any existing system auto records that have an outdated late fine rate (e.g. ₹3 instead of ₹15, or ₹25 instead of ₹19.50)
+    // 4. Update any existing system auto records that have an outdated late fine rate (e.g. ₹3 instead of ₹15, or ₹25 instead of ₹19.50)
     bool existingUpdated = false;
     for (int i = 0; i < _payments.length; i++) {
       final p = _payments[i];
@@ -824,8 +869,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       notifyListeners();
     }
 
-    // 4. Validate outstanding balance > 0 (loan not cleared)
-    final cardPayments = getPaymentsForCollection(entry.id);
+    // 5. Validate outstanding balance > 0 (loan not cleared)
     final totalCollected = cardPayments.fold(0.0, (sum, p) => sum + p.paymentAmount);
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
@@ -842,34 +886,6 @@ class CollectionSheetProvider extends ChangeNotifier {
     final bool isCleared = (initialLoan > 0 && currentRemainingBalance <= 0.01) ||
         (cardPayments.isNotEmpty && cardPayments.first.remainingBalance <= 0.01 && totalCollected > 0);
     if (isCleared) {
-      return [];
-    }
-
-    // 5. Identify latest relevant non-auto transaction in ro_collection_payments
-    final allSuccessful = cardPayments.where((p) {
-      final s = p.status.toLowerCase().trim();
-      final hasFeeOrPayment = p.paymentAmount > 0 ||
-          p.lateFine > 0 ||
-          p.interest > 0 ||
-          p.postMaturityInterest > 0;
-      return s != 'failed' && s != 'cancelled' && hasFeeOrPayment;
-    }).toList();
-
-    // We exclude auto-assessed records so that candidate evaluation starts from the last real/historical transaction
-    final nonAutoTx = allSuccessful.where((p) {
-      final isAuto = p.id.startsWith('PAY-LATE-') ||
-          p.id.startsWith('PAY-POSTMAT-') ||
-          p.roId == 'SYS-AUTO' ||
-          (p.remarks != null && p.remarks!.contains('Auto assessed'));
-      return !isAuto;
-    }).toList();
-
-    if (nonAutoTx.isNotEmpty) {
-      // Valid historical transactions found
-    } else {
-      // If there are no real payment records in ro_collection_payments for this entry
-      // (e.g. database table ro_collection_payments was cleared or loan has no transaction history),
-      // we must strictly NOT fabricate or auto-insert historical late fee records.
       return [];
     }
 

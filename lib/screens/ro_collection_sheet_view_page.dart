@@ -19,6 +19,48 @@ import '../widgets/edit_collection_entry_dialog.dart';
 import '../widgets/edit_loanee_dialog.dart';
 import '../widgets/pause_late_fine_dialog.dart';
 
+/// Checks if a payment transaction has hybrid collection modes
+bool _isHybridPayment(CollectionPaymentModel p) {
+  if (p.paymentType.contains(',')) return true;
+  if (p.remarks != null && p.remarks!.contains('Hybrid Split:')) return true;
+  return false;
+}
+
+/// Formats the payment mode to display comma-separated modes if hybrid
+String _formatPaymentModeDisplay(CollectionPaymentModel p) {
+  if (p.paymentType.contains(',')) {
+    return p.paymentType;
+  }
+  if ((p.paymentType == 'Other' || p.paymentType.toLowerCase() == 'hybrid') &&
+      p.remarks != null &&
+      p.remarks!.contains('Hybrid Split:')) {
+    final match = RegExp(r'Hybrid Split:\s*([^|]+)').firstMatch(p.remarks!);
+    if (match != null) {
+      final splitStr = match.group(1)?.trim() ?? '';
+      final modes = splitStr
+          .split(',')
+          .map((part) => part.split(':').first.trim())
+          .where((m) => m.isNotEmpty)
+          .toList();
+      if (modes.isNotEmpty) {
+        return modes.join(', ');
+      }
+    }
+  }
+  return p.paymentType;
+}
+
+/// Extracts hybrid split breakdown text from payment remarks if available
+String? _getHybridSplitBreakdown(CollectionPaymentModel p) {
+  if (p.remarks != null && p.remarks!.contains('Hybrid Split:')) {
+    final match = RegExp(r'Hybrid Split:\s*([^|]+)').firstMatch(p.remarks!);
+    if (match != null) {
+      return match.group(1)?.trim();
+    }
+  }
+  return null;
+}
+
 class RoCollectionSheetViewPage extends StatefulWidget {
   final VoidCallback? onAddLoaneePressed;
 
@@ -628,23 +670,176 @@ class _RoCollectionSheetViewPageState
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.history_rounded, color: Color(0xFF8B1A1A)),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Today\'s Payment Record (${entry.loaneeName})',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF8B1A1A),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.history_rounded, color: Color(0xFF8B1A1A)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Today\'s Payment Record (${entry.loaneeName})',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF8B1A1A),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
+                      ],
+                    ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isOnlyAdmin && payments.isNotEmpty) ...[
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red.shade700,
+                            side: BorderSide(color: Colors.red.shade300),
+                            backgroundColor: Colors.red.shade50.withValues(alpha: 0.5),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            minimumSize: const Size(0, 30),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          onPressed: () async {
+                            final double totalAmt = payments.fold(0.0, (acc, p) => acc + p.paymentAmount);
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (dlgCtx) => AlertDialog(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                title: const Row(
+                                  children: [
+                                    Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Delete All Today\'s Records?',
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Are you sure you want to delete ALL ${payments.length} payment records recorded today for ${entry.loaneeName}?',
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red.shade50,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.red.shade200),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Total Amount: ₹${totalAmt.toStringAsFixed(2)}',
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.red.shade900,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Transactions: ${payments.length} record(s)',
+                                            style: TextStyle(
+                                              fontSize: 11.5,
+                                              color: Colors.red.shade800,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          const Text(
+                                            '⚠️ This action is permanent and will revert the loanee\'s paid balance.',
+                                            style: TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.red,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(dlgCtx, false),
+                                    child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red.shade700,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    onPressed: () => Navigator.pop(dlgCtx, true),
+                                    icon: const Icon(Icons.delete_forever_rounded, size: 16),
+                                    label: const Text('Delete All', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                            );
+
+                            if (confirmed == true) {
+                              final paymentIds = payments.map((p) => p.id).toList();
+                              final ok = await cp.deleteCollectionPaymentsBatch(paymentIds);
+                              final deletedCount = ok ? paymentIds.length : 0;
+
+                              if (!context.mounted) return;
+                              LoaneeProvider? loaneeProvider;
+                              try {
+                                loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+                              } catch (_) {}
+                              final initialBal = entry.initialBalance;
+                              final currentPaid = cp.getTotalPaidForCollection(entry.id);
+                              final currentInterest = cp.getTotalInterestForCollection(entry.id);
+                              final newBal = (initialBal + currentInterest - currentPaid).clamp(0.0, double.infinity);
+
+                              loaneeProvider?.handlePaymentDeleted(
+                                customerId: entry.customerId,
+                                accountNumber: entry.accountNumber,
+                                deletedPaymentAmount: totalAmt,
+                                newRemainingBalance: newBal,
+                              );
+
+                              if (ctx.mounted) {
+                                Navigator.pop(ctx);
+                              }
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('✅ All $deletedCount payment records (₹${totalAmt.toStringAsFixed(2)}) deleted.'),
+                                    backgroundColor: Colors.green.shade700,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.delete_sweep_rounded, size: 16, color: Colors.red),
+                          label: Text(
+                            'Delete All (${payments.length})',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => Navigator.pop(ctx),
                       ),
                     ],
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
               ),
@@ -720,20 +915,36 @@ class _RoCollectionSheetViewPageState
                                           fontWeight: FontWeight.bold, fontSize: 15),
                                     ),
                                     const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue.shade50,
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        p.paymentType,
-                                        style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.blue.shade900),
-                                      ),
+                                    Builder(
+                                      builder: (context) {
+                                        final bool isHybrid = _isHybridPayment(p);
+                                        final String displayMode = _formatPaymentModeDisplay(p);
+                                        return Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: isHybrid ? Colors.teal.shade50 : Colors.blue.shade50,
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: isHybrid ? Border.all(color: Colors.teal.shade300) : null,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              if (isHybrid) ...[
+                                                Icon(Icons.call_split_rounded, size: 10, color: Colors.teal.shade800),
+                                                const SizedBox(width: 3),
+                                              ],
+                                              Text(
+                                                displayMode,
+                                                style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: isHybrid ? Colors.teal.shade900 : Colors.blue.shade900),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
                                     ),
                                     Builder(
                                       builder: (context) {
@@ -917,6 +1128,43 @@ class _RoCollectionSheetViewPageState
                                   ],
                                 ),
                               ],
+                            ),
+                            Builder(
+                              builder: (context) {
+                                final isHybrid = _isHybridPayment(p);
+                                final splitBreakdown = _getHybridSplitBreakdown(p);
+                                if (!isHybrid || splitBreakdown == null) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 6, bottom: 2),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.teal.shade50.withValues(alpha: 0.6),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: Colors.teal.shade200),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.pie_chart_outline_rounded, size: 12, color: Colors.teal.shade800),
+                                        const SizedBox(width: 5),
+                                        Flexible(
+                                          child: Text(
+                                            'Hybrid Split: $splitBreakdown',
+                                            style: TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.teal.shade900,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                             const SizedBox(height: 8),
                             // Officer Attribution Badge (Shows only officer real name, no passcode)
@@ -4335,6 +4583,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
   int _totalPages = 1;
   List<CollectionPaymentModel> _payments = [];
   bool _isLoading = true;
+  bool _isDeleting = false;
   bool _ascending = false; // Default newest first so latest payment appears at the top
   PaymentReconciliationResult? _reconciliation;
   bool _isExporting = false;
@@ -4370,7 +4619,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
   }
 
   void _onProviderChange() {
-    if (mounted) {
+    if (mounted && !_isDeleting) {
       _loadHistory();
     }
   }
@@ -4720,9 +4969,165 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
     );
 
     if (confirmed == true && mounted) {
-      final success = await widget.collectionProvider.deleteCollectionPayment(payment.id);
-      if (success) {
-        // Also update Loanee record in memory & provider
+      setState(() {
+        _isDeleting = true;
+        _isLoading = true;
+      });
+      try {
+        final success = await widget.collectionProvider.deleteCollectionPayment(payment.id);
+        if (success) {
+          // Also update Loanee record in memory & provider
+          final card = widget.entry;
+          final initialBal = card.initialBalance;
+          final currentPaid = widget.collectionProvider.getTotalPaidForCollection(card.id);
+          final currentInterest = widget.collectionProvider.getTotalInterestForCollection(card.id);
+          final newBal = (initialBal + currentInterest - currentPaid).clamp(0.0, double.infinity);
+
+          widget.loaneeProvider?.handlePaymentDeleted(
+            customerId: card.customerId,
+            accountNumber: card.accountNumber,
+            deletedPaymentAmount: payment.paymentAmount,
+            newRemainingBalance: newBal,
+          );
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text("Payment of ₹${payment.paymentAmount.toStringAsFixed(2)} deleted successfully."),
+                backgroundColor: Colors.green.shade700,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text("Failed to delete payment from database."),
+                backgroundColor: Colors.red.shade700,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        }
+      } finally {
+        if (mounted) {
+          _isDeleting = false;
+          await _loadHistory();
+        }
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteAllPayments() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final bool isOnlyAdmin = authProvider.activeRole == UserType.admin &&
+        (authProvider.currentUser == null ||
+            authProvider.currentUser?.userType == UserType.admin);
+    if (!isOnlyAdmin) return;
+
+    final allPayments = widget.collectionProvider.getPaymentsForCollection(widget.entry.id);
+    if (allPayments.isEmpty) return;
+
+    final double totalAmount = allPayments.fold(0.0, (acc, p) => acc + p.paymentAmount);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 26),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                "Delete All Transactions?",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Are you sure you want to delete ALL ${allPayments.length} payment records for ${widget.entry.loaneeName}?",
+              style: const TextStyle(fontSize: 13.5),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Total Amount: ₹${totalAmount.toStringAsFixed(2)}",
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Transactions: ${allPayments.length} record(s)",
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: Colors.red.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    "⚠️ This action is permanent and will revert the loanee's paid balance and collection status.",
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.red,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_forever_rounded, size: 16),
+            label: const Text(
+              "Delete All",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _isDeleting = true;
+        _isLoading = true;
+      });
+      try {
+        await widget.collectionProvider.deleteAllPaymentsForCollection(widget.entry.id);
+
         final card = widget.entry;
         final initialBal = card.initialBalance;
         final currentPaid = widget.collectionProvider.getTotalPaidForCollection(card.id);
@@ -4732,29 +5137,23 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
         widget.loaneeProvider?.handlePaymentDeleted(
           customerId: card.customerId,
           accountNumber: card.accountNumber,
-          deletedPaymentAmount: payment.paymentAmount,
+          deletedPaymentAmount: totalAmount,
           newRemainingBalance: newBal,
         );
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text("Payment of ₹${payment.paymentAmount.toStringAsFixed(2)} deleted successfully."),
+              content: Text("✅ All ${allPayments.length} payment records (₹${totalAmount.toStringAsFixed(2)}) deleted successfully."),
               backgroundColor: Colors.green.shade700,
               behavior: SnackBarBehavior.floating,
             ),
           );
-          _loadHistory();
         }
-      } else {
+      } finally {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text("Failed to delete payment from database."),
-              backgroundColor: Colors.red.shade700,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          _isDeleting = false;
+          await _loadHistory(page: 1);
         }
       }
     }
@@ -4869,6 +5268,25 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1E7E34)),
                         ),
                       ),
+                      if (isOnlyAdmin && _payments.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: _confirmDeleteAllPayments,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red.shade700,
+                            side: BorderSide(color: Colors.red.shade300),
+                            backgroundColor: Colors.red.shade50.withValues(alpha: 0.5),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            minimumSize: const Size(0, 32),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          icon: const Icon(Icons.delete_sweep_rounded, size: 16, color: Colors.red),
+                          label: Text(
+                            "Delete All (${_payments.length})",
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red),
+                          ),
+                        ),
+                      ],
                       const SizedBox(width: 8),
                       IconButton(
                         icon: const Icon(Icons.close_rounded, size: 20),
@@ -5246,35 +5664,50 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                         borderRadius: BorderRadius.circular(4),
                                         color: Colors.white,
                                       ),
-                                      child: DropdownButton<String>(
-                                        value: ['Cash', 'Online', 'Bank Transfer', 'UPI', 'Cheque'].contains(_editPaymentType)
-                                            ? _editPaymentType
-                                            : 'Cash',
-                                        isDense: true,
-                                        underline: const SizedBox(),
-                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
-                                        items: ['Cash', 'Online', 'Bank Transfer', 'UPI', 'Cheque'].map((mode) {
-                                          return DropdownMenuItem(value: mode, child: Text(mode));
-                                        }).toList(),
-                                        onChanged: (val) {
-                                          if (val != null) setState(() => _editPaymentType = val);
+                                      child: Builder(
+                                        builder: (context) {
+                                          final editModes = ['Cash', 'Online', 'Bank Transfer', 'UPI', 'Cheque', 'Gpay', 'Phonepay', 'Paytm'];
+                                          if (!editModes.contains(_editPaymentType)) {
+                                            editModes.add(_editPaymentType);
+                                          }
+                                          return DropdownButton<String>(
+                                            value: editModes.contains(_editPaymentType)
+                                                ? _editPaymentType
+                                                : editModes.first,
+                                            isDense: true,
+                                            underline: const SizedBox(),
+                                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                                            items: editModes.map((mode) {
+                                              return DropdownMenuItem(value: mode, child: Text(mode));
+                                            }).toList(),
+                                            onChanged: (val) {
+                                              if (val != null) setState(() => _editPaymentType = val);
+                                            },
+                                          );
                                         },
                                       ),
                                     )
-                                  : Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue.shade50,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        p.paymentType,
-                                        style: TextStyle(
-                                          fontSize: 9.5,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.blue.shade900,
-                                        ),
-                                      ),
+                                  : Builder(
+                                      builder: (context) {
+                                        final bool isHybrid = _isHybridPayment(p);
+                                        final String displayMode = _formatPaymentModeDisplay(p);
+                                        return Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: isHybrid ? Colors.teal.shade50 : Colors.blue.shade50,
+                                            borderRadius: BorderRadius.circular(4),
+                                            border: isHybrid ? Border.all(color: Colors.teal.shade300) : null,
+                                          ),
+                                          child: Text(
+                                            displayMode,
+                                            style: TextStyle(
+                                              fontSize: 9.5,
+                                              fontWeight: FontWeight.bold,
+                                              color: isHybrid ? Colors.teal.shade900 : Colors.blue.shade900,
+                                            ),
+                                          ),
+                                        );
+                                      },
                                     ),
                             ),
                             DataCell(
@@ -5495,6 +5928,21 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
 }
 
 
+/// Represents a single mode & amount entry within a hybrid collection payment
+class _HybridPaymentRowEntry {
+  String mode;
+  final TextEditingController amountController;
+
+  _HybridPaymentRowEntry({
+    required this.mode,
+    required this.amountController,
+  });
+
+  void dispose() {
+    amountController.dispose();
+  }
+}
+
 /// Modal Content Component for Add Payment Entry Form Modal
 class _AddPaymentEntryModalContent extends StatefulWidget {
   final RoCollectionEntry entry;
@@ -5530,6 +5978,79 @@ class __AddPaymentEntryModalContentState
     'Phonepay',
     'Other',
   ];
+
+  static const List<String> _hybridAvailableModes = [
+    'Cash',
+    'Gpay',
+    'Phonepay',
+    'Paytm',
+    'Bank Transfer',
+    'Cheque',
+  ];
+
+  final List<_HybridPaymentRowEntry> _hybridEntries = [];
+
+  void _initHybridEntries() {
+    _disposeHybridEntries();
+    // Default initial hybrid modes: Cash and Gpay as requested ("partial in gpay with cash")
+    final cashEntry = _HybridPaymentRowEntry(
+      mode: 'Cash',
+      amountController: TextEditingController(),
+    );
+    final gpayEntry = _HybridPaymentRowEntry(
+      mode: 'Gpay',
+      amountController: TextEditingController(),
+    );
+    cashEntry.amountController.addListener(_onHybridAmountChanged);
+    gpayEntry.amountController.addListener(_onHybridAmountChanged);
+    _hybridEntries.addAll([cashEntry, gpayEntry]);
+  }
+
+  void _onHybridAmountChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _addHybridRow() {
+    setState(() {
+      final usedModes = _hybridEntries.map((e) => e.mode).toSet();
+      String nextMode = _hybridAvailableModes.firstWhere(
+        (m) => !usedModes.contains(m),
+        orElse: () => 'Cash',
+      );
+      final newEntry = _HybridPaymentRowEntry(
+        mode: nextMode,
+        amountController: TextEditingController(),
+      );
+      newEntry.amountController.addListener(_onHybridAmountChanged);
+      _hybridEntries.add(newEntry);
+    });
+  }
+
+  void _removeHybridRow(int index) {
+    if (_hybridEntries.length <= 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Hybrid payment mode requires at least 2 payment modes.'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      final removed = _hybridEntries.removeAt(index);
+      removed.amountController.removeListener(_onHybridAmountChanged);
+      removed.dispose();
+    });
+  }
+
+  void _disposeHybridEntries() {
+    for (var entry in _hybridEntries) {
+      entry.amountController.removeListener(_onHybridAmountChanged);
+      entry.dispose();
+    }
+    _hybridEntries.clear();
+  }
 
   @override
   void initState() {
@@ -5635,6 +6156,7 @@ class __AddPaymentEntryModalContentState
 
   @override
   void dispose() {
+    _disposeHybridEntries();
     _paymentAmountController.removeListener(_updateRemainingBalanceDisplay);
     _lateFineController.removeListener(_updateRemainingBalanceDisplay);
     _remainingBalanceController.dispose();
@@ -5817,6 +6339,64 @@ class __AddPaymentEntryModalContentState
       return;
     }
 
+    final paymentAmount =
+        double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
+    if (paymentAmount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Please enter a valid Payment Amount.'),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    // Hybrid collection validation: all dynamic hybrid amounts must sum to payment amount
+    if (_selectedPaymentType == 'Other') {
+      if (_hybridEntries.length < 2) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Hybrid collection mode requires at least 2 payment modes.'),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      double hybridTotal = 0.0;
+      for (int i = 0; i < _hybridEntries.length; i++) {
+        final entry = _hybridEntries[i];
+        final amt = double.tryParse(entry.amountController.text.trim());
+        if (amt == null || amt <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Please enter a valid positive amount for mode: ${entry.mode}.'),
+              backgroundColor: Colors.red.shade700,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return;
+        }
+        hybridTotal += amt;
+      }
+
+      final double diff = (hybridTotal - paymentAmount).abs();
+      if (diff > 0.01) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Validation failed: Total of hybrid modes (₹${hybridTotal.toStringAsFixed(2)}) must equal Payment Amount (₹${paymentAmount.toStringAsFixed(2)}). Difference: ₹${diff.toStringAsFixed(2)}',
+            ),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+    }
+
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
     final holidayToday = settingsProvider.getHolidayForDate(DateTime.now());
     if (holidayToday != null) {
@@ -5897,8 +6477,6 @@ class __AddPaymentEntryModalContentState
             ? 'Cross-Route: Collected by $realRoName (Assigned to $roAssignedRoute) for ${widget.entry.route}'
             : null);
 
-    final paymentAmount =
-        double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
     final lateFine =
         double.tryParse(_lateFineController.text.trim()) ?? 0.0;
 
@@ -5943,9 +6521,23 @@ class __AddPaymentEntryModalContentState
         ? ' | Partial Payment: ₹${paymentAmount.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)} base (Unpaid: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Charge: ₹${partialPaymentCharge.toStringAsFixed(2)}, Balance Impact: ₹${(unpaidBaseAmount + partialPaymentCharge).toStringAsFixed(2)})'
         : '';
 
+    final bool isHybrid = _selectedPaymentType == 'Other' && _hybridEntries.isNotEmpty;
+    final String paymentTypeToSave = isHybrid
+        ? _hybridEntries.map((e) => e.mode).join(', ')
+        : _selectedPaymentType;
+
+    final String hybridNote = isHybrid
+        ? ' | Hybrid Split: ${_hybridEntries.map((e) {
+            final amt = double.tryParse(e.amountController.text.trim()) ?? 0.0;
+            return '${e.mode}: ₹${amt.toStringAsFixed(2)}';
+          }).join(', ')}'
+        : '';
+
     final String? finalRemarks = remarks != null
-        ? '$remarks$lateFeeNote$partialPaymentNote'
-        : ((lateFeeNote + partialPaymentNote).isNotEmpty ? (lateFeeNote + partialPaymentNote).replaceFirst(' | ', '') : null);
+        ? '$remarks$lateFeeNote$partialPaymentNote$hybridNote'
+        : ((lateFeeNote + partialPaymentNote + hybridNote).isNotEmpty
+            ? (lateFeeNote + partialPaymentNote + hybridNote).replaceFirst(' | ', '')
+            : null);
 
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
@@ -5959,7 +6551,7 @@ class __AddPaymentEntryModalContentState
       remainingBalance: newRemainingBalance,
       lateFine: lateFine,
       interest: partialPaymentCharge,
-      paymentType: _selectedPaymentType,
+      paymentType: paymentTypeToSave,
       roPasscode: enteredPasscode,
       roName: realRoName,
       roId: realRoId,
@@ -6918,7 +7510,7 @@ class __AddPaymentEntryModalContentState
                           items: _paymentTypes.map((type) {
                             return DropdownMenuItem<String>(
                               value: type,
-                              child: Text(type,
+                              child: Text(type == 'Other' ? 'Other (Hybrid Split)' : type,
                                   style: const TextStyle(fontSize: 12)),
                             );
                           }).toList(),
@@ -6926,15 +7518,352 @@ class __AddPaymentEntryModalContentState
                             if (val != null) {
                               setState(() {
                                 _selectedPaymentType = val;
+                                if (val == 'Other' && _hybridEntries.isEmpty) {
+                                  _initHybridEntries();
+                                }
                               });
                             }
                           },
                         ),
+                        if (_selectedPaymentType != 'Other') ...[
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _selectedPaymentType = 'Other';
+                                  if (_hybridEntries.isEmpty) {
+                                    _initHybridEntries();
+                                  }
+                                });
+                              },
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.call_split_rounded,
+                                      size: 12, color: Colors.amber.shade900),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '+ Split / Other Mode',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.amber.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
                 ],
               ),
+
+              // Dynamic Hybrid Mode Rows Section
+              if (_selectedPaymentType == 'Other') ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.call_split_rounded,
+                                  size: 16, color: Colors.amber.shade900),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Hybrid Collection Modes',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.brown.shade900,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                onTap: _addHybridRow,
+                                borderRadius: BorderRadius.circular(6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.shade700,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.add, size: 14, color: Colors.white),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'Add Mode',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              InkWell(
+                                onTap: () {
+                                  setState(() {
+                                    _selectedPaymentType = 'Cash';
+                                    _disposeHybridEntries();
+                                  });
+                                },
+                                child: Text(
+                                  'Single Mode',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Split payment across multiple modes (e.g. partial in Gpay with Cash).',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Dynamic Hybrid Rows List
+                      ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _hybridEntries.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (ctx, i) {
+                          final item = _hybridEntries[i];
+                          return Row(
+                            children: [
+                              // Mode Selector
+                              Expanded(
+                                flex: 4,
+                                child: DropdownButtonFormField<String>(
+                                  value: _hybridAvailableModes.contains(item.mode)
+                                      ? item.mode
+                                      : _hybridAvailableModes.first,
+                                  isDense: true,
+                                  isExpanded: true,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.black87,
+                                      fontWeight: FontWeight.w600),
+                                  decoration: InputDecoration(
+                                    isDense: true,
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 8),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                          color: Colors.grey.shade300),
+                                    ),
+                                  ),
+                                  items: _hybridAvailableModes.map((m) {
+                                    return DropdownMenuItem<String>(
+                                      value: m,
+                                      child: Text(m,
+                                          style: const TextStyle(fontSize: 12)),
+                                    );
+                                  }).toList(),
+                                  onChanged: (val) {
+                                    if (val != null) {
+                                      setState(() {
+                                        item.mode = val;
+                                      });
+                                    }
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // Amount Input Field
+                              Expanded(
+                                flex: 5,
+                                child: TextFormField(
+                                  controller: item.amountController,
+                                  keyboardType: const TextInputType.numberWithOptions(
+                                      decimal: true),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                        RegExp(r'^\d+\.?\d{0,2}')),
+                                  ],
+                                  style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green.shade800),
+                                  decoration: InputDecoration(
+                                    isDense: true,
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                    hintText: '0.00',
+                                    prefixText: '₹ ',
+                                    prefixStyle: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.green.shade800),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 8),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                          color: Colors.grey.shade300),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                          color: Colors.green.shade700,
+                                          width: 1.5),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // Delete Icon
+                              if (_hybridEntries.length > 2) ...[
+                                const SizedBox(width: 4),
+                                IconButton(
+                                  icon: const Icon(
+                                      Icons.remove_circle_outline_rounded,
+                                      size: 20,
+                                      color: Colors.red),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  tooltip: 'Remove Mode',
+                                  onPressed: () => _removeHybridRow(i),
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      ),
+
+                      // Live Validation & Balance Indicator
+                      Builder(
+                        builder: (context) {
+                          final double targetAmt =
+                              double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
+                          final double currentSum = _hybridEntries.fold(
+                              0.0,
+                              (acc, e) =>
+                                  acc +
+                                  (double.tryParse(e.amountController.text.trim()) ?? 0.0));
+                          final double diff = targetAmt - currentSum;
+                          final bool isMatching =
+                              (diff.abs() < 0.01) && targetAmt > 0;
+
+                          return Container(
+                            margin: const EdgeInsets.only(top: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isMatching
+                                  ? Colors.green.shade50
+                                  : (diff.abs() > 0.01
+                                      ? Colors.orange.shade50
+                                      : Colors.grey.shade100),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isMatching
+                                    ? Colors.green.shade300
+                                    : (diff.abs() > 0.01
+                                        ? Colors.orange.shade300
+                                        : Colors.grey.shade300),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isMatching
+                                      ? Icons.check_circle_rounded
+                                      : Icons.info_outline_rounded,
+                                  size: 14,
+                                  color: isMatching
+                                      ? Colors.green.shade800
+                                      : Colors.orange.shade900,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    isMatching
+                                        ? 'Total matches Payment Amount: ₹${currentSum.toStringAsFixed(2)}'
+                                        : 'Hybrid Sum: ₹${currentSum.toStringAsFixed(2)} / Target: ₹${targetAmt.toStringAsFixed(2)} (Diff: ₹${diff.abs().toStringAsFixed(2)})',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: isMatching
+                                          ? Colors.green.shade800
+                                          : Colors.orange.shade900,
+                                    ),
+                                  ),
+                                ),
+                                if (!isMatching && diff > 0.01) ...[
+                                  InkWell(
+                                    onTap: () {
+                                      final last = _hybridEntries.last;
+                                      final currentLastVal = double.tryParse(
+                                              last.amountController.text.trim()) ??
+                                          0.0;
+                                      final newVal = (currentLastVal + diff)
+                                          .clamp(0.0, double.infinity);
+                                      last.amountController.text =
+                                          newVal.toStringAsFixed(2);
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.shade100,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        'Fill +₹${diff.toStringAsFixed(2)}',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.orange.shade900,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 12),
 

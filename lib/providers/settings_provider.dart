@@ -699,6 +699,20 @@ class SettingsProvider extends ChangeNotifier {
     }
   }
 
+  /// Checks if there are any valid, non-auto real historical payments in [payments]
+  /// (i.e. real payments uploaded from Excel or recorded by RO/Admin)
+  static bool hasRealPayments(List<CollectionPaymentModel> payments) {
+    return payments.any((p) {
+      final s = p.status.toLowerCase().trim();
+      if (s == 'failed' || s == 'cancelled') return false;
+      final isAuto = p.id.startsWith('PAY-LATE-') ||
+          p.id.startsWith('PAY-POSTMAT-') ||
+          p.roId == 'SYS-AUTO' ||
+          (p.remarks != null && p.remarks!.contains('Auto assessed'));
+      return !isAuto && (p.paymentAmount > 0 || p.lateFine > 0 || p.interest > 0 || p.postMaturityInterest > 0);
+    });
+  }
+
   /// Comprehensive Weekly Calculation Breakdown (₹650/week for 17.5 weeks)
   WeeklyBreakdown getWeeklyBreakdown({
     required RoCollectionEntry entry,
@@ -720,6 +734,26 @@ class SettingsProvider extends ChangeNotifier {
     final double weeklyInstallmentToUse = effectiveWeeklyInstallment > 0
         ? effectiveWeeklyInstallment
         : _weeklyInstallmentAmount;
+    final double weeklyRate = weeklyInstallmentToUse * (_lateFinePercentage / 100.0);
+    final double totalTenureAmount = weeklyInstallmentToUse * _weeklyTenureWeeks;
+
+    // Prior to Excel upload or when payment data is empty:
+    // Strictly do NOT fabricate or automate weekly overdue weeks or late fines!
+    final bool hasData = hasRealPayments(payments);
+    if (!hasData) {
+      return WeeklyBreakdown(
+        weeklyInstallment: weeklyInstallmentToUse,
+        tenureWeeks: _weeklyTenureWeeks,
+        totalTenureAmount: totalTenureAmount,
+        totalPaid: 0.0,
+        weeksPaid: 0,
+        expectedWeeks: 0,
+        lateWeeks: 0,
+        lateFineRate: weeklyRate,
+        totalCalculatedFine: 0.0,
+        unpaidAmount: 0.0,
+      );
+    }
 
     final double totalPaid = payments.fold(0.0, (sum, p) => sum + p.paymentAmount);
     final int weeksPaid = (weeklyInstallmentToUse > 0)
@@ -743,9 +777,7 @@ class SettingsProvider extends ChangeNotifier {
 
     final int lateWeeks = (expectedWeeks - weeksPaid - pausedWeeksCount).clamp(0, maxTenureWeeks);
     final double totalExpected = expectedWeeks * weeklyInstallmentToUse;
-    final double totalTenureAmount = weeklyInstallmentToUse * _weeklyTenureWeeks;
     final double totalUnpaid = (totalExpected - totalPaid).clamp(0.0, totalTenureAmount).toDouble();
-    final double weeklyRate = weeklyInstallmentToUse * (_lateFinePercentage / 100.0);
     // Apply late fine percentage (3% of base installment) to each overdue week
     final double calculatedFine = double.parse((lateWeeks * weeklyRate).toStringAsFixed(2));
 
@@ -899,6 +931,12 @@ class SettingsProvider extends ChangeNotifier {
     required List<CollectionPaymentModel> payments,
     DateTime? asOfDate,
   }) {
+    // If there are no real payment records in ro_collection_payments (e.g. before Excel upload),
+    // strictly return 0 late units for both Daily and Weekly!
+    if (!hasRealPayments(payments)) {
+      return 0;
+    }
+
     final now = asOfDate ?? DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
@@ -1011,6 +1049,12 @@ class SettingsProvider extends ChangeNotifier {
     double? loaneeLoanAmount,
     DateTime? sanctionDate,
   }) {
+    // If there are no real payment records in ro_collection_payments (e.g. before Excel upload),
+    // strictly return 0.0 late fine!
+    if (!hasRealPayments(payments)) {
+      return 0.0;
+    }
+
     final type = entry.collectionType.toLowerCase().trim();
     final isDaily = type == 'daily';
     final double baseInstallment = entry.getCalculatedPayableAmount(
@@ -1255,6 +1299,36 @@ class SettingsProvider extends ChangeNotifier {
     final effectiveSanctionDate = sanctionDate ?? entry.createdAt;
     final effectiveMaturityDate = maturityDate ?? LoaneeAccount.calculateMaturityDate(effectiveSanctionDate);
     final double effectiveLoanAmount = entry.getCalculatedLoanAmount(loaneeLoanAmount: loaneeLoanAmount);
+    final double fineRate = baseInstallment * (_lateFinePercentage / 100.0);
+
+    // If there are no real payment records in ro_collection_payments (e.g. before Excel upload or when payment data was deleted/empty),
+    // strictly return standard base installment with 0 late units, 0 late fine, and 0 overdue missed amount!
+    if (!hasRealPayments(payments)) {
+      final double currentInstallment = baseInstallment;
+      final double totalPayable = currentInstallment;
+      final double grandTotal = currentInstallment;
+
+      return CollectionLatePayableBreakdown(
+        baseInstallment: baseInstallment,
+        lateUnits: 0,
+        isDaily: isDaily,
+        frequencyLabel: freq,
+        overdueMissedAmount: 0.0,
+        currentInstallment: currentInstallment,
+        totalPayableAmount: totalPayable,
+        lateFineRate: fineRate,
+        calculatedLateFine: 0.0,
+        grandTotalWithPenalty: grandTotal,
+        explanation: 'On Time: Scheduled ${isDaily ? "daily" : "weekly"} installment = ₹${currentInstallment.toStringAsFixed(2)} (Standard rate). Late Payment Fee: ₹0.00.',
+        shortSummary: '₹${currentInstallment.toStringAsFixed(0)} / $freq',
+        previousUnpaidLateFee: 0.0,
+        currentIntervalLateFine: 0.0,
+        effectiveLoanAmount: effectiveLoanAmount,
+        totalOutstandingDue: initialLoan > 0 ? initialLoan : remainingBalance,
+        carriedForwardExplanation: null,
+        postMaturityBreakdown: null,
+      );
+    }
 
     final postMaturity = getPostMaturityBreakdown(
       sanctionDate: effectiveSanctionDate,
@@ -1271,7 +1345,6 @@ class SettingsProvider extends ChangeNotifier {
         (sortedPayments.isNotEmpty && sortedPayments.first.remainingBalance <= 0 && totalPaid > 0);
 
     final int lateUnits;
-    final double fineRate = baseInstallment * (_lateFinePercentage / 100.0);
     final double currentIntervalFine;
     final double previousUnpaidFee;
     final double calculatedFine;
@@ -1389,7 +1462,7 @@ class SettingsProvider extends ChangeNotifier {
   }) {
     final type = entry.collectionType.toLowerCase().trim();
     final isDaily = type == 'daily';
-    final hasPayments = payments.isNotEmpty;
+    final hasPayments = hasRealPayments(payments);
     final totalPaid = payments.fold(0.0, (sum, p) => sum + p.paymentAmount);
 
     final sortedPayments = List<CollectionPaymentModel>.from(payments)
@@ -1414,7 +1487,7 @@ class SettingsProvider extends ChangeNotifier {
       final fineRate = payableBreakdown.lateFineRate;
       final String explanation = hasPayments
           ? 'Payment data found in ro_collection_payments (${payments.length} payments, last on ${formatDate(lastPaymentDate!)}). $overdueDays overdue days: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Today\'s ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${payableBreakdown.currentIntervalLateFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid fee carried forward from previous missed collection)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}'
-          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. $overdueDays overdue days: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Today\'s ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${payableBreakdown.currentIntervalLateFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid fee carried forward from previous missed collection)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}';
+          : 'No payment record found in ro_collection_payments (Excel not yet uploaded). Late fee: ₹0.00.';
 
       return LoaneeLateFineStatus(
         collectionId: entry.id,
@@ -1451,7 +1524,7 @@ class SettingsProvider extends ChangeNotifier {
 
       final String explanation = hasPayments
           ? 'Payment data found in ro_collection_payments (₹${breakdown.totalPaid.toStringAsFixed(2)} paid across ${payments.length} transactions, covering ${breakdown.weeksPaid}/${breakdown.expectedWeeks} expected weeks). ${breakdown.lateWeeks} overdue weeks: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Current ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid fee carried forward from previous missed collection)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}'
-          : 'No payment record found in ro_collection_payments table since account creation on ${formatDate(entry.createdAt)}. ${breakdown.lateWeeks} overdue weeks: Missed amount ₹${payableBreakdown.overdueMissedAmount.toStringAsFixed(2)} + Current ₹${payableBreakdown.currentInstallment.toStringAsFixed(2)} = ₹${payableBreakdown.totalPayableAmount.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${breakdown.totalCalculatedFine.toStringAsFixed(2)} penalty.${payableBreakdown.previousUnpaidLateFee > 0 ? " (includes ₹${payableBreakdown.previousUnpaidLateFee.toStringAsFixed(2)} unpaid fee carried forward from previous missed collection)" : ""}${postMaturity != null && postMaturity.isPastMaturity ? " (⚠️ Past maturity: overdue interest applied on balance)" : ""}';
+          : 'No payment record found in ro_collection_payments (Excel not yet uploaded). Late fee: ₹0.00.';
 
       return LoaneeLateFineStatus(
         collectionId: entry.id,
@@ -1494,7 +1567,6 @@ class SettingsProvider extends ChangeNotifier {
     if (entries.isEmpty) {
       // Fallback if loanee exists in loanee_accounts table but collection entry is not created yet
       final now = asOfDate ?? DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
       final startDate = fallbackStartDate ?? now;
       final baseAmt = baseDailyAmount;
       final double remainingBalance = fallbackDueAmount > 0 ? fallbackDueAmount : fallbackLoanAmount;
@@ -1524,17 +1596,12 @@ class SettingsProvider extends ChangeNotifier {
         explanation = '⚠️ PAST MATURITY: ${postMaturity.explanation}';
         shortSummary = '₹${totalPayable.toStringAsFixed(0)} (Matured${postMaturity.overdueMonths > 0 ? " ${postMaturity.overdueMonths}M" : ""})';
       } else {
-        daysDiff = calculateDailyLateDays(
-          baseDate: startDate,
-          asOfDate: today,
-          hasPreviousPayment: false,
-          holidays: holidayDates,
-        );
-        fine = daysDiff > 0 ? (daysDiff * fineRate) : 0.0;
-        overdueMissed = daysDiff * baseAmt;
-        totalPayable = overdueMissed + baseAmt;
-        explanation = 'Calculated from registration date ${formatDate(startDate)}: $daysDiff days late missed amount ₹${overdueMissed.toStringAsFixed(2)} + Today ₹${baseAmt.toStringAsFixed(2)} = ₹${totalPayable.toStringAsFixed(2)} payable. Late fee assessed for missed collection: ₹${fine.toStringAsFixed(2)}.';
-        shortSummary = '₹${totalPayable.toStringAsFixed(0)} ($daysDiff days late + today)';
+        daysDiff = 0;
+        fine = 0.0;
+        overdueMissed = 0.0;
+        totalPayable = baseAmt;
+        explanation = 'Registration date ${formatDate(startDate)}: Excel payment data not yet uploaded. Scheduled installment: ₹${baseAmt.toStringAsFixed(2)}. Late fee: ₹0.00.';
+        shortSummary = '₹${totalPayable.toStringAsFixed(0)} / Day';
       }
 
       final fallbackBreakdown = CollectionLatePayableBreakdown(
