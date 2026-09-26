@@ -10,6 +10,7 @@ import 'settings_provider.dart';
 import '../models/loanee_model.dart';
 import 'loanee_provider.dart';
 import '../services/payment_reconciliation_service.dart';
+import '../models/missing_payment_model.dart';
 
 class CollectionSheetProvider extends ChangeNotifier {
   // Routes Master List - Pulled directly from Supabase table route_master
@@ -20,6 +21,9 @@ class CollectionSheetProvider extends ChangeNotifier {
 
   // Dedicated Payment Records - Individual payments in ro_collection_payments
   final List<CollectionPaymentModel> _payments = [];
+
+  // Dedicated Missing Payment Records - Missing payment logs in missing_payment_records (MISSING != PAYMENT)
+  final List<MissingPaymentRecord> _missingRecords = [];
 
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
@@ -32,6 +36,7 @@ class CollectionSheetProvider extends ChangeNotifier {
   List<RouteModel> get routes => List.unmodifiable(_routes);
   List<RoCollectionEntry> get collectionEntries => List.unmodifiable(_collectionEntries);
   List<CollectionPaymentModel> get payments => List.unmodifiable(_payments);
+  List<MissingPaymentRecord> get missingRecords => List.unmodifiable(_missingRecords);
 
   /// Check if a route is the Master Head Office Route
   static bool isOfficeRoute(String? route) {
@@ -62,6 +67,39 @@ class CollectionSheetProvider extends ChangeNotifier {
     final list = _payments.where((p) => p.collectionId == collectionId).toList();
     list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list;
+  }
+
+  /// Fetch all missing payment records for a collection card ID (sorted chronological ascending)
+  List<MissingPaymentRecord> getMissingRecordsForCollection(String collectionId) {
+    final list = _missingRecords.where((m) => m.collectionId == collectionId).toList();
+    list.sort((a, b) => a.missedDate.compareTo(b.missedDate));
+    return list;
+  }
+
+  /// Total sum of missing pay for a collection card
+  double getTotalMissingPayForCollection(String collectionId) {
+    return _missingRecords
+        .where((m) => m.collectionId == collectionId)
+        .fold(0.0, (sum, m) => sum + m.missingPay);
+  }
+
+  /// Total sum of missing fine / balance for a collection card
+  double getTotalMissingBalanceForCollection(String collectionId) {
+    return _missingRecords
+        .where((m) => m.collectionId == collectionId)
+        .fold(0.0, (sum, m) => sum + m.missingBalance);
+  }
+
+  /// Count of missing records for a collection card
+  int getTotalMissingCountForCollection(String collectionId) {
+    return _missingRecords.where((m) => m.collectionId == collectionId).length;
+  }
+
+  /// Total sum of partial day payments recorded in missing logs for a collection card
+  double getTotalDayPaymentForCollection(String collectionId) {
+    return _missingRecords
+        .where((m) => m.collectionId == collectionId)
+        .fold(0.0, (sum, m) => sum + m.dayPayment);
   }
 
   /// Ensures all payments for a specific collection card ID are loaded from Supabase into memory
@@ -745,9 +783,10 @@ class CollectionSheetProvider extends ChangeNotifier {
     return newlyCreatedRecords;
   }
 
-  /// Synchronize and automatically insert missing daily late fee records into 'ro_collection_payments'
-  /// for completed missed collection days strictly before today (today is excluded).
-  Future<List<CollectionPaymentModel>> syncAutoLateFeesForEntry({
+  /// Synchronize and automatically insert missing payment log records into 'missing_payment_records'
+  /// for completed missed collection days/weeks strictly before today (today is excluded).
+  /// Architecture Rule: MISSING != PAYMENT. Missing records are NOT stored in ro_collection_payments.
+  Future<List<MissingPaymentRecord>> syncAutoLateFeesForEntry({
     required RoCollectionEntry entry,
     required SettingsProvider settingsProvider,
     double? loaneeLoanAmount,
@@ -760,7 +799,7 @@ class CollectionSheetProvider extends ChangeNotifier {
 
     // If there are no real payment records in ro_collection_payments for this entry
     // (e.g. before Excel is uploaded or when payment data was deleted/empty),
-    // strictly do NOT auto-insert late fee records or post-maturity records,
+    // strictly do NOT auto-insert missing records or post-maturity records,
     // and clean up any orphan records!
     if (!SettingsProvider.hasRealPayments(cardPayments)) {
       final orphanAuto = cardPayments.where((p) =>
@@ -782,7 +821,7 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
 
     // 1. First sync monthly Post-Maturity fines so chronological balance and overdue charges are up to date
-    final List<CollectionPaymentModel> postMatRecords = await syncAutoPostMaturityFinesForEntry(
+    await syncAutoPostMaturityFinesForEntry(
       entry: entry,
       settingsProvider: settingsProvider,
       loaneeLoanAmount: loaneeLoanAmount,
@@ -847,28 +886,23 @@ class CollectionSheetProvider extends ChangeNotifier {
       return [];
     }
 
-    // 4. Update any existing system auto records that have an outdated late fine rate (e.g. ₹3 instead of ₹15, or ₹25 instead of ₹19.50)
-    bool existingUpdated = false;
-    for (int i = 0; i < _payments.length; i++) {
-      final p = _payments[i];
-      if (p.collectionId == entry.id) {
-        final isAuto = p.id.startsWith('PAY-LATE-') ||
-            (p.remarks != null && p.remarks!.contains('Auto assessed')) ||
-            p.roId == 'SYS-AUTO';
-        if (isAuto && (p.lateFine - fineRate).abs() > 0.009) {
-          final updated = p.copyWith(
-            lateFine: fineRate,
-            remarks: '${isDaily ? "Daily" : "Weekly"} Late Fee: ₹${fineRate.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(p.createdAt)})',
-          );
-          _payments[i] = updated;
-          existingUpdated = true;
-          if (saveToRemote && SupabaseService.instance.isInitialized) {
-            await SupabaseService.instance.saveCollectionPayment(updated);
-          }
-        }
+    // 4. Clean up any legacy PAY-LATE fake payment records from ro_collection_payments
+    // (Migrating to missing_payment_records architecture: MISSING != PAYMENT)
+    final legacyPayLate = cardPayments.where((p) {
+      final isAutoLate = (p.id.startsWith('PAY-LATE-') ||
+          (p.roId == 'SYS-AUTO' && p.paymentAmount == 0.0 && p.lateFine > 0)) &&
+          !p.id.startsWith('PAY-POSTMAT-') &&
+          p.paymentType != 'Post Maturity Fine';
+      return isAutoLate;
+    }).toList();
+
+    if (legacyPayLate.isNotEmpty) {
+      final legacyIds = legacyPayLate.map((p) => p.id).toSet();
+      _payments.removeWhere((item) => legacyIds.contains(item.id));
+      cardPayments.removeWhere((item) => legacyIds.contains(item.id));
+      if (saveToRemote && SupabaseService.instance.isInitialized) {
+        await SupabaseService.instance.deleteCollectionPaymentsBatch(legacyIds.toList());
       }
-    }
-    if (existingUpdated) {
       notifyListeners();
     }
 
@@ -1017,7 +1051,7 @@ class CollectionSheetProvider extends ChangeNotifier {
 
     final List<DateTime> alreadyAssessedDates = [];
     final List<DateTime> newLateDates = [];
-    final List<CollectionPaymentModel> newlyCreatedRecords = [];
+    final List<MissingPaymentRecord> newlyCreatedRecords = [];
 
     for (final candidate in candidateDates) {
       final paymentsOnDate = cardPayments.where((p) {
@@ -1029,41 +1063,57 @@ class CollectionSheetProvider extends ChangeNotifier {
             s != 'cancelled';
       }).toList();
 
-      // Check if borrower made payment on this date
-      final hasPayment = paymentsOnDate.any((p) => p.paymentAmount > 0);
-      if (hasPayment) {
+      final double dayPayment = paymentsOnDate.fold(0.0, (sum, p) => sum + p.paymentAmount);
+      // Check if borrower made full payment on this date
+      if (dayPayment >= baseInstallment) {
         continue;
       }
 
-      // Check if late fee record already exists for this exact date
-      final hasLateFee = paymentsOnDate.any((p) => p.lateFine > 0 || p.interest > 0);
-      if (hasLateFee) {
+      // Check if missing payment record already exists for this exact date
+      final alreadyAssessed = _missingRecords.any((m) =>
+          m.collectionId == entry.id &&
+          m.missedDate.year == candidate.year &&
+          m.missedDate.month == candidate.month &&
+          m.missedDate.day == candidate.day);
+      if (alreadyAssessed) {
         alreadyAssessedDates.add(candidate);
         continue;
       }
 
-      // Candidate date is a completed missed day/week needing auto-insertion
+      // Candidate date is a completed missed day/week needing missing-record entry
       newLateDates.add(candidate);
 
-      final dateStr = '${candidate.year}${candidate.month.toString().padLeft(2, '0')}${candidate.day.toString().padLeft(2, '0')}';
-      final recordId = 'PAY-LATE-${entry.id}-$dateStr';
+      final double missingPay = double.parse((baseInstallment - dayPayment).clamp(0.0, double.infinity).toStringAsFixed(2));
+      final double missingFine = double.parse((missingPay * (settingsProvider.lateFinePercentage / 100.0)).toStringAsFixed(2));
+      final int daysPast = cleanToday.difference(candidate).inDays;
+      final int missingWeek = (daysPast ~/ 7).clamp(1, 52);
+      final double missingBalance = double.parse((missingFine * missingWeek).toStringAsFixed(2));
 
-      final record = CollectionPaymentModel(
+      final dateStr = '${candidate.year}${candidate.month.toString().padLeft(2, '0')}${candidate.day.toString().padLeft(2, '0')}';
+      final recordId = 'MISS-${entry.id}-$dateStr';
+
+      final record = MissingPaymentRecord(
         id: recordId,
+        accountId: entry.accountNumber,
         collectionId: entry.id,
-        paymentAmount: 0.0,
-        lateFine: fineRate,
-        interest: 0.0,
-        postMaturityInterest: 0.0,
-        remainingBalance: currentRemainingBalance,
-        paymentType: 'Late Fee',
-        roPasscode: '',
-        roName: 'System (Auto)',
-        roId: 'SYS-AUTO',
-        roRoute: entry.route,
+        loaneeId: loanee?.customerid ?? entry.customerId,
+        customerId: entry.customerId,
+        accountNo: entry.accountNumber,
+        loaneeName: entry.loaneeName,
+        mobileNo: entry.mobileNo,
+        route: entry.route,
+        collectionType: isDaily ? 'daily' : 'weekly',
+        missedDate: DateTime(candidate.year, candidate.month, candidate.day, 12, 0, 0),
+        dayPayment: dayPayment,
+        missingPay: missingPay,
+        missingFine: missingFine,
+        missingWeek: missingWeek,
+        missingBalance: missingBalance,
+        status: dayPayment > 0 ? 'partially_resolved' : 'missing',
+        source: 'system',
+        remarks: '${isDaily ? "Daily" : "Weekly"} Missing Payment: ₹${missingPay.toStringAsFixed(2)}, Fine: ₹${missingFine.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(candidate)})',
         createdAt: DateTime(candidate.year, candidate.month, candidate.day, 12, 0, 0),
-        status: 'Success',
-        remarks: '${isDaily ? "Daily" : "Weekly"} Late Fee: ₹${fineRate.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(candidate)})',
+        updatedAt: DateTime.now(),
       );
 
       newlyCreatedRecords.add(record);
@@ -1071,7 +1121,7 @@ class CollectionSheetProvider extends ChangeNotifier {
 
     // 6. Debug logging matching Requirement 19
     final StringBuffer logBuf = StringBuffer();
-    logBuf.writeln('=== [AUTOMATIC LATE PAYMENT FEE SYNCHRONIZATION (${isDaily ? "DAILY" : "WEEKLY"})] ===');
+    logBuf.writeln('=== [AUTOMATIC MISSING PAYMENT RECORD SYNCHRONIZATION (${isDaily ? "DAILY" : "WEEKLY"})] ===');
     logBuf.writeln('Loan / Collection ID: ${entry.id} | Account: ${entry.accountNumber}');
     logBuf.writeln('Loanee Name: ${entry.loaneeName}');
     logBuf.writeln('Base Installment: ₹${baseInstallment.toStringAsFixed(2)} | Late Fine Rate: ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% | ${isDaily ? "Daily" : "Weekly"} Late Fee: ₹${fineRate.toStringAsFixed(2)}');
@@ -1104,32 +1154,39 @@ class CollectionSheetProvider extends ChangeNotifier {
       }
     }
     if (newLateDates.isNotEmpty) {
-      logBuf.writeln('New Records:');
+      logBuf.writeln('New Missing Records:');
       for (final d in newLateDates) {
-        logBuf.writeln('  ${SettingsProvider.formatDate(d)} → ₹${fineRate.toStringAsFixed(2)}');
+        logBuf.writeln('  ${SettingsProvider.formatDate(d)} → Fine ₹${fineRate.toStringAsFixed(2)}');
       }
     } else {
-      logBuf.writeln('New Records: None (all candidate dates already exist or were satisfied)');
+      logBuf.writeln('New Missing Records: None (all candidate dates already exist or were satisfied)');
     }
     logBuf.writeln('====================================================');
     debugPrint(logBuf.toString());
 
-    // 7. Insert new records in-memory and save to Supabase
+    // 7. Insert new missing records in-memory and save to Supabase missing_payment_records table
     if (newlyCreatedRecords.isNotEmpty) {
       for (final rec in newlyCreatedRecords) {
-        if (!_payments.any((p) => p.id == rec.id || (p.collectionId == rec.collectionId && p.createdAt.year == rec.createdAt.year && p.createdAt.month == rec.createdAt.month && p.createdAt.day == rec.createdAt.day))) {
-          _payments.insert(0, rec);
+        final existingIdx = _missingRecords.indexWhere((m) =>
+            m.id == rec.id ||
+            (m.collectionId == rec.collectionId &&
+                m.missedDate.year == rec.missedDate.year &&
+                m.missedDate.month == rec.missedDate.month &&
+                m.missedDate.day == rec.missedDate.day));
+        if (existingIdx >= 0) {
+          _missingRecords[existingIdx] = rec;
+        } else {
+          _missingRecords.add(rec);
         }
       }
 
       if (saveToRemote && SupabaseService.instance.isInitialized) {
-        await SupabaseService.instance.saveCollectionPaymentsBatch(newlyCreatedRecords);
+        await SupabaseService.instance.saveMissingPaymentRecordsBatch(newlyCreatedRecords);
       }
 
       notifyListeners();
     }
 
-    newlyCreatedRecords.addAll(postMatRecords);
     return newlyCreatedRecords;
   }
 
@@ -1476,9 +1533,24 @@ class CollectionSheetProvider extends ChangeNotifier {
         for (var p in remotePayments) {
           final key = p.id.isNotEmpty ? p.id : '${p.collectionId}_${p.createdAt.toIso8601String()}';
           if (!seenPaymentIds.contains(key)) {
-            seenPaymentIds.add(key);
-            _payments.add(p);
+            // Keep Payment History clean: exclude legacy fake payment records
+            final isLegacyAutoLate = p.id.startsWith('PAY-LATE-') ||
+                (p.roId == 'SYS-AUTO' && p.paymentAmount == 0.0 && p.lateFine > 0 && p.paymentType != 'Post Maturity Fine');
+            if (!isLegacyAutoLate) {
+              seenPaymentIds.add(key);
+              _payments.add(p);
+            }
           }
+        }
+      }
+
+      final remoteMissing = await SupabaseService.instance.fetchMissingPaymentRecords();
+      final seenMissingIds = <String>{};
+      _missingRecords.clear();
+      for (var m in remoteMissing) {
+        if (m.id.isNotEmpty && !seenMissingIds.contains(m.id)) {
+          seenMissingIds.add(m.id);
+          _missingRecords.add(m);
         }
       }
     } catch (e) {

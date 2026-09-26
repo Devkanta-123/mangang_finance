@@ -12,6 +12,7 @@ import '../models/investment_model.dart';
 import '../models/notification_model.dart';
 import '../models/holiday_model.dart';
 import '../models/late_fine_pause_model.dart';
+import '../models/missing_payment_model.dart';
 import 'customer_id_service.dart';
 
 class SupabaseService {
@@ -1900,6 +1901,12 @@ class SupabaseService {
         final response = await query.order('created_at', ascending: ascending);
         final list = (response as List)
             .map((item) => CollectionPaymentModel.fromJson(Map<String, dynamic>.from(item)))
+            .where((p) {
+              // Rule 11: Payment History represents actual payments only. Exclude legacy PAY-LATE fake records.
+              final isLegacyPayLate = p.id.startsWith('PAY-LATE-') ||
+                  (p.roId == 'SYS-AUTO' && p.paymentAmount == 0.0 && p.lateFine > 0 && p.paymentType != 'Post Maturity Fine');
+              return !isLegacyPayLate;
+            })
             .toList();
 
         var filtered = list;
@@ -2712,6 +2719,124 @@ class SupabaseService {
     } catch (e) {
       debugPrint('⚠️ Error creating holiday notification: $e');
       return false;
+    }
+  }
+
+  // ==============================================================================
+  // MISSING PAYMENT RECORDS (MISSING != PAYMENT)
+  // Dedicated storage for automatic missing-payment logs
+  // ==============================================================================
+
+  /// Fetch all missing payment records with optional filters
+  Future<List<MissingPaymentRecord>> fetchMissingPaymentRecords({
+    String? collectionId,
+    String? customerId,
+    String? route,
+    String? collectionType,
+  }) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return [];
+
+      var query = supaClient.from('missing_payment_records').select('*');
+      if (collectionId != null && collectionId.isNotEmpty) {
+        query = query.eq('collection_id', collectionId);
+      }
+      if (customerId != null && customerId.isNotEmpty) {
+        query = query.eq('customer_id', customerId);
+      }
+      if (route != null && route.isNotEmpty) {
+        query = query.eq('route', route);
+      }
+      if (collectionType != null && collectionType.isNotEmpty) {
+        query = query.eq('collection_type', collectionType);
+      }
+
+      final response = await query.order('missed_date', ascending: true);
+      final List<dynamic> data = response as List<dynamic>;
+      return data.map((json) => MissingPaymentRecord.fromJson(json as Map<String, dynamic>)).toList();
+    } catch (e) {
+      debugPrint('ℹ️ Note on fetchMissingPaymentRecords (table may be pending creation): $e');
+      return [];
+    }
+  }
+
+  /// Save or update a single missing payment record
+  Future<bool> saveMissingPaymentRecord(MissingPaymentRecord record) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return false;
+
+      await supaClient.from('missing_payment_records').upsert(
+        record.toJson(),
+        onConflict: 'collection_id,missed_date,collection_type',
+      );
+      return true;
+    } catch (e) {
+      debugPrint('ℹ️ Note on saveMissingPaymentRecord: $e');
+      return false;
+    }
+  }
+
+  /// Batch save or update missing payment records
+  Future<bool> saveMissingPaymentRecordsBatch(List<MissingPaymentRecord> records) async {
+    if (records.isEmpty) return true;
+    try {
+      final supaClient = client;
+      if (supaClient == null) return false;
+
+      final payloads = records.map((r) => r.toJson()).toList();
+      await supaClient.from('missing_payment_records').upsert(
+        payloads,
+        onConflict: 'collection_id,missed_date,collection_type',
+      );
+      return true;
+    } catch (e) {
+      debugPrint('ℹ️ Note on saveMissingPaymentRecordsBatch: $e');
+      return false;
+    }
+  }
+
+  /// Delete missing payment records by IDs
+  Future<bool> deleteMissingPaymentRecordsBatch(List<String> ids) async {
+    if (ids.isEmpty) return true;
+    try {
+      final supaClient = client;
+      if (supaClient == null) return false;
+
+      await supaClient.from('missing_payment_records').delete().filter('id', 'in', ids);
+      return true;
+    } catch (e) {
+      debugPrint('⚠️ Error deleting missing payment records: $e');
+      return false;
+    }
+  }
+
+  /// Clean confirmed old PAY-LATE records from ro_collection_payments
+  /// Only cleans records that represent the old fake-payment mechanism
+  Future<int> cleanupOldPayLateFromRoCollectionPayments({List<String>? specificCollectionIds}) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return 0;
+
+      var query = supaClient
+          .from('ro_collection_payments')
+          .delete()
+          .like('id', 'PAY-LATE-%')
+          .eq('ro_id', 'SYS-AUTO')
+          .eq('payment_amount', 0.0);
+
+      if (specificCollectionIds != null && specificCollectionIds.isNotEmpty) {
+        query = query.filter('collection_id', 'in', specificCollectionIds);
+      }
+
+      final res = await query.select('id');
+      final deletedCount = (res as List<dynamic>).length;
+      debugPrint('✅ Cleaned up $deletedCount old PAY-LATE fake payment records from ro_collection_payments');
+      return deletedCount;
+    } catch (e) {
+      debugPrint('⚠️ Error cleaning old PAY-LATE records from ro_collection_payments: $e');
+      return 0;
     }
   }
 }

@@ -22,6 +22,7 @@ import 'screens/late_fines_page.dart';
 import 'screens/admin_users_list_page.dart';
 import 'screens/collection_performance_page.dart';
 import 'screens/holiday_management_page.dart';
+import 'screens/missing_manager_page.dart';
 import 'providers/auth_provider.dart';
 import 'providers/loanee_provider.dart';
 import 'providers/ro_provider.dart';
@@ -416,6 +417,8 @@ class _MainPageState extends State<MainPage> {
       ),
       // Index 14: Official Holiday Management (Admin only)
       const HolidayManagementPage(),
+      // Index 15: Missing Manager (Admin, Manager, and RO)
+      const MissingManagerPage(),
     ];
 
     // Access control protection: Only Admin and Manager can access index 13, Admin for 14
@@ -426,6 +429,9 @@ class _MainPageState extends State<MainPage> {
       effectiveIndex = 0;
     }
     if (effectiveIndex == 14 && authProvider.activeRole != UserType.admin) {
+      effectiveIndex = 0;
+    }
+    if (effectiveIndex == 15 && authProvider.activeRole == UserType.loanee) {
       effectiveIndex = 0;
     }
 
@@ -575,6 +581,10 @@ class _MainPageState extends State<MainPage> {
         return 'Admin User';
       case 13:
         return 'Collection Performance';
+      case 14:
+        return 'Official Holiday Management';
+      case 15:
+        return 'Missing Manager';
       default:
         return 'Mangang Finance';
     }

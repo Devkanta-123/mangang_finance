@@ -189,6 +189,12 @@ class AppDrawer extends StatelessWidget {
           subtitle: 'Table view with Route & Type filters',
         ),
         DrawerMenuItemData(
+          index: 15,
+          icon: Icons.assignment_late_rounded,
+          title: 'Missing Manager',
+          subtitle: 'Missing-payment logs & audit trail',
+        ),
+        DrawerMenuItemData(
           index: 7,
           icon: Icons.alt_route_rounded,
           title: 'Route Management',
@@ -275,6 +281,12 @@ class AppDrawer extends StatelessWidget {
           subtitle: 'View route sheets & payment ledgers',
         ),
         DrawerMenuItemData(
+          index: 15,
+          icon: Icons.assignment_late_rounded,
+          title: 'Missing Manager',
+          subtitle: 'Missing-payment logs & audit trail',
+        ),
+        DrawerMenuItemData(
           index: 7,
           icon: Icons.alt_route_rounded,
           title: 'Master Routes',
@@ -322,6 +334,12 @@ class AppDrawer extends StatelessWidget {
           icon: Icons.table_chart_rounded,
           title: 'Collection Sheet',
           subtitle: 'View routes & record payments',
+        ),
+        DrawerMenuItemData(
+          index: 15,
+          icon: Icons.assignment_late_rounded,
+          title: 'Missing Manager',
+          subtitle: 'View route missing payment logs',
         ),
         DrawerMenuItemData(
           index: 8,
