@@ -719,10 +719,12 @@ class SettingsProvider extends ChangeNotifier {
     required List<CollectionPaymentModel> payments,
     DateTime? asOfDate,
     double? loaneeLoanAmount,
+    DateTime? sanctionDate,
   }) {
     final now = asOfDate ?? DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final entryDate = DateTime(entry.createdAt.year, entry.createdAt.month, entry.createdAt.day);
+    final effectiveStart = sanctionDate ?? entry.createdAt;
+    final entryDate = DateTime(effectiveStart.year, effectiveStart.month, effectiveStart.day);
 
     final double effectiveWeeklyInstallment = entry.getCalculatedPayableAmount(
       loaneeLoanAmount: loaneeLoanAmount,
@@ -930,6 +932,7 @@ class SettingsProvider extends ChangeNotifier {
     required RoCollectionEntry entry,
     required List<CollectionPaymentModel> payments,
     DateTime? asOfDate,
+    DateTime? sanctionDate,
   }) {
     // If there are no real payment records in ro_collection_payments (e.g. before Excel upload),
     // strictly return 0 late units for both Daily and Weekly!
@@ -1018,6 +1021,7 @@ class SettingsProvider extends ChangeNotifier {
         entry: entry,
         payments: payments,
         asOfDate: asOfDate,
+        sanctionDate: sanctionDate,
       );
       return breakdown.lateWeeks;
     }
@@ -1070,6 +1074,7 @@ class SettingsProvider extends ChangeNotifier {
         entry: entry,
         payments: payments,
         asOfDate: asOfDate,
+        sanctionDate: sanctionDate,
       );
       final double rate = baseInstallment * (_lateFinePercentage / 100.0);
       final double currentIntervalFee = lateDays > 0 ? (lateDays * rate) : 0.0;
@@ -1086,6 +1091,7 @@ class SettingsProvider extends ChangeNotifier {
         payments: payments,
         asOfDate: asOfDate,
         loaneeLoanAmount: loaneeLoanAmount,
+        sanctionDate: sanctionDate,
       );
       final double previousUnpaid = calculatePreviousUnpaidLateFee(
         entry: entry,
@@ -1382,6 +1388,7 @@ class SettingsProvider extends ChangeNotifier {
               entry: entry,
               payments: payments,
               asOfDate: asOfDate,
+              sanctionDate: effectiveSanctionDate,
             )
           : 0;
 
@@ -1517,6 +1524,8 @@ class SettingsProvider extends ChangeNotifier {
         entry: entry,
         payments: payments,
         asOfDate: asOfDate,
+        loaneeLoanAmount: loaneeLoanAmount,
+        sanctionDate: sanctionDate,
       );
 
       final overdueEmi = breakdown.lateWeeks * breakdown.weeklyInstallment;

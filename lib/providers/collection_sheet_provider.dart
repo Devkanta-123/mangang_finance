@@ -571,6 +571,7 @@ class CollectionSheetProvider extends ChangeNotifier {
     double? loaneeLoanAmount,
     LoaneeProvider? loaneeProvider,
     DateTime? asOfDate,
+    DateTime? sanctionDate,
     bool saveToRemote = true,
   }) async {
     final now = asOfDate ?? DateTime.now();
@@ -587,7 +588,7 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
 
     final DateTime effectiveMaturity = loanee?.effectiveMaturityDate ??
-        (loanee?.loanMaturityDate ?? LoaneeAccount.calculateMaturityDate(loanee?.loanSanctionDate ?? entry.createdAt));
+        (loanee?.loanMaturityDate ?? LoaneeAccount.calculateMaturityDate(sanctionDate ?? loanee?.loanSanctionDate ?? entry.createdAt));
     final cleanMaturity = DateTime(effectiveMaturity.year, effectiveMaturity.month, effectiveMaturity.day);
 
     // If today is strictly before maturity date, loan is not past maturity
@@ -752,6 +753,7 @@ class CollectionSheetProvider extends ChangeNotifier {
     double? loaneeLoanAmount,
     LoaneeProvider? loaneeProvider,
     DateTime? asOfDate,
+    DateTime? sanctionDate,
     bool saveToRemote = true,
   }) async {
     final cardPayments = getPaymentsForCollection(entry.id);
@@ -786,6 +788,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       loaneeLoanAmount: loaneeLoanAmount,
       loaneeProvider: loaneeProvider,
       asOfDate: asOfDate,
+      sanctionDate: sanctionDate,
       saveToRemote: saveToRemote,
     );
 
@@ -892,54 +895,85 @@ class CollectionSheetProvider extends ChangeNotifier {
     final List<DateTime> candidateDates = [];
     final List<DateTime> skippedHolidays = [];
     final List<DateTime> skippedPausedDates = [];
-    DateTime cleanBaseDate;
+
+    // For both Daily and Weekly loans, late fine calculations must strictly start
+    // forward from the latest real transaction (e.g. from Excel upload or manual payment).
+    final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final baseDate = sorted.first.createdAt;
+    DateTime cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
+
+    final effectiveSanction = sanctionDate ?? loanee?.loanSanctionDate;
+    if (effectiveSanction != null) {
+      final cleanSanction = DateTime(effectiveSanction.year, effectiveSanction.month, effectiveSanction.day);
+      if (cleanSanction.isAfter(cleanBaseDate)) {
+        cleanBaseDate = cleanSanction;
+      }
+    }
+
+    // Clean up any existing auto-assessed PAY-LATE records generated on or before cleanBaseDate
+    // or on/after cleanToday (e.g. erroneous past entries generated before Excel upload)
+    final invalidPastAutoRecords = cardPayments.where((p) {
+      final isAutoLate = (p.id.startsWith('PAY-LATE-') ||
+          (p.roId == 'SYS-AUTO' && p.lateFine > 0) ||
+          (p.remarks != null && p.remarks!.contains('Auto assessed') && p.lateFine > 0)) &&
+          !p.id.startsWith('PAY-POSTMAT-') &&
+          p.paymentType != 'Post Maturity Fine';
+      if (!isAutoLate) return false;
+      final pDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
+      return !pDate.isAfter(cleanBaseDate) || !pDate.isBefore(cleanToday);
+    }).toList();
+
+    if (invalidPastAutoRecords.isNotEmpty) {
+      final invalidIds = invalidPastAutoRecords.map((p) => p.id).toSet();
+      _payments.removeWhere((item) => invalidIds.contains(item.id));
+      cardPayments.removeWhere((item) => invalidIds.contains(item.id));
+      if (saveToRemote && SupabaseService.instance.isInitialized) {
+        await SupabaseService.instance.deleteCollectionPaymentsBatch(invalidIds.toList());
+      }
+      notifyListeners();
+    }
 
     if (isDaily) {
-      final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      final baseDate = sorted.first.createdAt;
-      cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
-      if (!cleanToday.isAfter(cleanBaseDate)) {
-        return [];
-      }
+      if (cleanToday.isAfter(cleanBaseDate)) {
+        final firstCheckDate = cleanBaseDate.add(const Duration(days: 1));
+        DateTime current = firstCheckDate;
+        while (current.isBefore(cleanToday)) {
+          final isSunday = current.weekday == DateTime.sunday;
+          final isHoliday = settingsProvider.isHoliday(current);
+          final isPaused = settingsProvider.isLateFinePaused(entry.id, current, customerId: entry.customerId);
 
-      final firstCheckDate = cleanBaseDate.add(const Duration(days: 1));
-      DateTime current = firstCheckDate;
-      while (current.isBefore(cleanToday)) {
-        final isSunday = current.weekday == DateTime.sunday;
-        final isHoliday = settingsProvider.isHoliday(current);
-        final isPaused = settingsProvider.isLateFinePaused(entry.id, current, customerId: entry.customerId);
-
-        if (isHoliday) {
-          skippedHolidays.add(DateTime(current.year, current.month, current.day));
+          if (isHoliday) {
+            skippedHolidays.add(DateTime(current.year, current.month, current.day));
+          }
+          if (isPaused) {
+            skippedPausedDates.add(DateTime(current.year, current.month, current.day));
+          }
+          if (!isSunday && !isHoliday && !isPaused) {
+            candidateDates.add(DateTime(current.year, current.month, current.day));
+          }
+          current = current.add(const Duration(days: 1));
         }
-        if (isPaused) {
-          skippedPausedDates.add(DateTime(current.year, current.month, current.day));
-        }
-        if (!isSunday && !isHoliday && !isPaused) {
-          candidateDates.add(DateTime(current.year, current.month, current.day));
-        }
-        current = current.add(const Duration(days: 1));
       }
     } else {
       // Weekly scheme:
-      // Overdue weeks are calculated based on elapsed weeks from start vs weeks paid
-      final effectiveStartDate = loanee?.loanSanctionDate ?? entry.createdAt;
-      cleanBaseDate = DateTime(effectiveStartDate.year, effectiveStartDate.month, effectiveStartDate.day);
-      final int daysSinceStart = cleanToday.difference(cleanBaseDate).inDays;
-      final int weeksElapsed = daysSinceStart ~/ 7;
-      final int maxTenureWeeks = settingsProvider.weeklyTenureWeeks.ceil();
-      final int expectedWeeks = weeksElapsed.clamp(0, maxTenureWeeks);
+      // Overdue weeks are strictly evaluated forward from cleanBaseDate (after Excel file upload / latest real transaction)
+      if (cleanToday.isAfter(cleanBaseDate)) {
+        final int daysSinceBase = cleanToday.difference(cleanBaseDate).inDays;
+        final int weeksElapsedSinceBase = daysSinceBase ~/ 7;
+        final int maxTenureWeeks = settingsProvider.weeklyTenureWeeks.ceil();
 
-      final double weeklyInstallmentToUse = baseInstallment > 0
-          ? baseInstallment
-          : settingsProvider.weeklyInstallmentAmount;
-      final int weeksPaid = (weeklyInstallmentToUse > 0)
-          ? (totalCollected / weeklyInstallmentToUse).floor()
-          : 0;
+        final double weeklyInstallmentToUse = baseInstallment > 0
+            ? baseInstallment
+            : settingsProvider.weeklyInstallmentAmount;
+        final int weeksPaid = (weeklyInstallmentToUse > 0)
+            ? (totalCollected / weeklyInstallmentToUse).floor()
+            : 0;
 
-      if (expectedWeeks > weeksPaid) {
-        for (int w = weeksPaid + 1; w <= expectedWeeks; w++) {
+        final int remainingTenureWeeks = (maxTenureWeeks - weeksPaid).clamp(0, maxTenureWeeks);
+        final int weeksToAssess = weeksElapsedSinceBase.clamp(0, remainingTenureWeeks);
+
+        for (int w = 1; w <= weeksToAssess; w++) {
           final candidate = cleanBaseDate.add(Duration(days: w * 7));
           if (candidate.isBefore(cleanToday)) {
             final isPaused = settingsProvider.isLateFinePaused(entry.id, candidate, customerId: entry.customerId);
@@ -950,6 +984,30 @@ class CollectionSheetProvider extends ChangeNotifier {
             }
           }
         }
+      }
+
+      // Purge any orphan weekly auto-records that do not match the valid candidate dates
+      // (e.g. records created beyond remaining tenure or on paused weeks)
+      final candidateDateKeys = candidateDates.map((d) => '${d.year}-${d.month}-${d.day}').toSet();
+      final orphanWeeklyAuto = cardPayments.where((p) {
+        final isAutoLate = (p.id.startsWith('PAY-LATE-') ||
+            (p.roId == 'SYS-AUTO' && p.lateFine > 0) ||
+            (p.remarks != null && p.remarks!.contains('Auto assessed') && p.lateFine > 0)) &&
+            !p.id.startsWith('PAY-POSTMAT-') &&
+            p.paymentType != 'Post Maturity Fine';
+        if (!isAutoLate) return false;
+        final dKey = '${p.createdAt.year}-${p.createdAt.month}-${p.createdAt.day}';
+        return !candidateDateKeys.contains(dKey);
+      }).toList();
+
+      if (orphanWeeklyAuto.isNotEmpty) {
+        final orphanIds = orphanWeeklyAuto.map((p) => p.id).toSet();
+        _payments.removeWhere((item) => orphanIds.contains(item.id));
+        cardPayments.removeWhere((item) => orphanIds.contains(item.id));
+        if (saveToRemote && SupabaseService.instance.isInitialized) {
+          await SupabaseService.instance.deleteCollectionPaymentsBatch(orphanIds.toList());
+        }
+        notifyListeners();
       }
     }
 
@@ -971,8 +1029,8 @@ class CollectionSheetProvider extends ChangeNotifier {
             s != 'cancelled';
       }).toList();
 
-      // Check if borrower made payment on this date (only for daily loans)
-      final hasPayment = isDaily && paymentsOnDate.any((p) => p.paymentAmount > 0);
+      // Check if borrower made payment on this date
+      final hasPayment = paymentsOnDate.any((p) => p.paymentAmount > 0);
       if (hasPayment) {
         continue;
       }

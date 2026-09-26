@@ -347,22 +347,53 @@ class HistoricalPaymentImportService {
     return null;
   }
 
-  /// Parse numeric amount safely from dynamic cell value (e.g. 100, 100.0, "₹ 100", "100.00")
+  /// Parse numeric amount safely from dynamic cell value (e.g. 100, 100.0, "₹ 100", "100.00", "₹ ₹ 1,020.00")
   static double? parseNumericAmount(dynamic rawValue) {
     if (rawValue == null) return null;
     if (rawValue is num) return rawValue.toDouble();
 
     if (rawValue is IntCellValue) return rawValue.value.toDouble();
     if (rawValue is DoubleCellValue) return rawValue.value;
+    if (rawValue is Data) return parseNumericAmount(rawValue.value);
+
+    String str;
     if (rawValue is TextCellValue) {
-      final clean = rawValue.value.text?.replaceAll('₹', '').replaceAll(',', '').trim() ??
-          rawValue.value.toString().replaceAll('₹', '').replaceAll(',', '').trim();
-      return double.tryParse(clean);
+      str = rawValue.value.toString();
+    } else if (rawValue is FormulaCellValue) {
+      str = rawValue.formula;
+    } else {
+      str = rawValue.toString();
     }
 
-    final str = rawValue.toString().replaceAll('₹', '').replaceAll(',', '').trim();
-    if (str.isEmpty) return null;
-    return double.tryParse(str);
+    // Clean currency symbols, multiple ₹, Rs, INR, spaces, non-breaking spaces, zero-width spaces, and commas
+    str = str
+        .replaceAll('₹', '')
+        .replaceAll(RegExp(r'[Rr][Ss]\.?'), '')
+        .replaceAll(RegExp(r'[Ii][Nn][Rr]'), '')
+        .replaceAll('\u00A0', ' ')
+        .replaceAll('\u202F', ' ')
+        .replaceAll('\u200B', '')
+        .replaceAll('\uFEFF', '')
+        .replaceAll(',', '')
+        .trim();
+
+    // If formula begins with '=' (e.g. '=1020.00' or '= 1020')
+    if (str.startsWith('=')) {
+      str = str.substring(1).trim();
+    }
+
+    if (str.isEmpty || str == '-' || str == '—') return null;
+
+    final parsed = double.tryParse(str);
+    if (parsed != null) return parsed;
+
+    // Fallback: extract first valid floating point number from the string
+    final match = RegExp(r'[-+]?\d+(?:\.\d+)?').firstMatch(str);
+    if (match != null) {
+      return double.tryParse(match.group(0)!);
+    }
+
+    return null;
   }
 
   /// Extract cell string content cleanly
@@ -737,8 +768,12 @@ class HistoricalPaymentImportService {
 
         final pHeaderRow = rawRows[paymentHeaderIndex];
         for (int c = 0; c < pHeaderRow.length; c++) {
-          final hText = getCellString(pHeaderRow[c]).toLowerCase().replaceAll("_", " ").trim();
-          if (hText.contains("post maturity") || hText.contains("post mat") || hText.contains("overdue interest")) {
+          final hText = getCellString(pHeaderRow[c]).toLowerCase().replaceAll("_", " ").replaceAll("-", " ").trim();
+          if (hText.contains("post maturity") ||
+              hText.contains("post mat") ||
+              hText.contains("post mature") ||
+              hText.contains("overdue interest") ||
+              (hText.contains("maturity") && (hText.contains("fine") || hText.contains("interest") || hText.contains("fee")))) {
             postMaturityColIdx = c;
           } else if (hText.contains("late payment") || hText.contains("late fine") || hText.contains("late fee") || hText.contains("late int") || (hText.contains("late") && (hText.contains("fee") || hText.contains("fine") || hText.contains("interest")))) {
             lateFeeColIdx = c;
@@ -928,25 +963,27 @@ class HistoricalPaymentImportService {
             continue;
           }
 
-          final rawAmountCell = (amountColIdx != -1 && row.length > amountColIdx) ? row[amountColIdx]?.value : null;
+          final rawAmountCell = (amountColIdx != -1 && row.length > amountColIdx)
+              ? (row[amountColIdx]?.value ?? row[amountColIdx])
+              : null;
           final double? parsedAmount = parseNumericAmount(rawAmountCell);
 
           final rawLateFeeCell = (lateFeeColIdx != -1 && row.length > lateFeeColIdx)
-              ? row[lateFeeColIdx]?.value
+              ? (row[lateFeeColIdx]?.value ?? row[lateFeeColIdx])
               : null;
           final double parsedLateFee = (rawLateFeeCell != null)
               ? (parseNumericAmount(rawLateFeeCell) ?? 0.0)
               : 0.0;
 
           final rawPostMatCell = (postMaturityColIdx != -1 && row.length > postMaturityColIdx)
-              ? row[postMaturityColIdx]?.value
+              ? (row[postMaturityColIdx]?.value ?? row[postMaturityColIdx])
               : null;
           final double parsedPostMat = (rawPostMatCell != null)
               ? (parseNumericAmount(rawPostMatCell) ?? 0.0)
               : 0.0;
 
           final rawGenericIntCell = (genericInterestColIdx != -1 && row.length > genericInterestColIdx)
-              ? row[genericInterestColIdx]?.value
+              ? (row[genericInterestColIdx]?.value ?? row[genericInterestColIdx])
               : null;
           final double parsedGenericInt = (rawGenericIntCell != null)
               ? (parseNumericAmount(rawGenericIntCell) ?? 0.0)
@@ -1811,18 +1848,22 @@ class HistoricalPaymentImportService {
               continue;
             }
 
-            // Post-maturity fine calculation on basis of remaining balance before post-maturity date
+            // Post-maturity fine:
+            // If the Excel file already provided an explicit post-maturity amount (including decimals),
+            // strictly preserve and prioritize the exact amount from Excel!
             double finalPostMat = p.postMaturityInterest;
             final bool isPostMat = isPostMaturityDateMatch(p.paymentDate, effectiveMaturity);
             final monthKey = "${p.paymentDate.year}-${p.paymentDate.month}";
 
-            if (isPostMat && !assessedMonthsInCommit.contains(monthKey) && runningBalance > 0) {
+            if (finalPostMat > 0) {
+              // Priority 1: Exact amount from Excel file - do NOT overwrite!
+              assessedMonthsInCommit.add(monthKey);
+            } else if (isPostMat && !assessedMonthsInCommit.contains(monthKey) && runningBalance > 0) {
+              // Priority 2: Fallback calculation only if Excel row did NOT specify an amount
               final calculated = double.parse((runningBalance * 0.07).toStringAsFixed(2));
               if (calculated > 0) {
                 finalPostMat = calculated;
               }
-              assessedMonthsInCommit.add(monthKey);
-            } else if (finalPostMat > 0) {
               assessedMonthsInCommit.add(monthKey);
             }
 

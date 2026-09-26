@@ -695,14 +695,16 @@ class _HistoricalPaymentImportDialogState
                   }
 
                   final dupLabel = isDup ? " (Dup)" : "";
+                  String formatAmt(double val) =>
+                      val % 1 == 0 ? val.toInt().toString() : val.toStringAsFixed(2);
                   String interestLabel = "";
                   final lateFeeVal = p.latePaymentFee > 0 ? p.latePaymentFee : p.interest;
                   if (lateFeeVal > 0 && p.postMaturityInterest > 0) {
-                    interestLabel = " (+₹${lateFeeVal.toStringAsFixed(0)} late, +₹${p.postMaturityInterest.toStringAsFixed(0)} post-mat)";
+                    interestLabel = " (+₹${formatAmt(lateFeeVal)} late, +₹${formatAmt(p.postMaturityInterest)} post-mat)";
                   } else if (p.postMaturityInterest > 0) {
-                    interestLabel = " (+₹${p.postMaturityInterest.toStringAsFixed(0)} post-mat)";
+                    interestLabel = " (+₹${formatAmt(p.postMaturityInterest)} post-mat)";
                   } else if (lateFeeVal > 0) {
-                    interestLabel = " (+₹${lateFeeVal.toStringAsFixed(0)} late)";
+                    interestLabel = " (+₹${formatAmt(lateFeeVal)} late)";
                   }
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -712,7 +714,7 @@ class _HistoricalPaymentImportDialogState
                       border: Border.all(color: border),
                     ),
                     child: Text(
-                      "${p.formattedDate}: ₹${p.amount.toStringAsFixed(0)}$interestLabel$dupLabel",
+                      "${p.formattedDate}: ₹${formatAmt(p.amount)}$interestLabel$dupLabel",
                       style: TextStyle(
                         fontSize: 9.5,
                         fontWeight: FontWeight.bold,

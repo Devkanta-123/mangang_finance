@@ -367,6 +367,7 @@ class _RoCollectionSheetViewPageState
         settingsProvider: sp,
         loaneeLoanAmount: effectiveLoanAmt,
         loaneeProvider: lp,
+        sanctionDate: loanee?.loanSanctionDate,
       );
     } catch (_) {}
 
@@ -531,6 +532,7 @@ class _RoCollectionSheetViewPageState
         settingsProvider: sp,
         loaneeLoanAmount: effectiveLoanAmt,
         loaneeProvider: lp,
+        sanctionDate: loanee?.loanSanctionDate,
       );
     } catch (_) {}
 
@@ -601,6 +603,7 @@ class _RoCollectionSheetViewPageState
         settingsProvider: settingsProvider,
         loaneeLoanAmount: effectiveLoanAmt,
         loaneeProvider: loaneeProvider,
+        sanctionDate: loanee?.loanSanctionDate,
       );
     } catch (_) {}
 
@@ -932,7 +935,7 @@ class _RoCollectionSheetViewPageState
                                                   border: Border.all(color: Colors.orange.shade300),
                                                 ),
                                                 child: Text(
-                                                  'Late: +₹${lateFeeVal.toStringAsFixed(0)}',
+                                                  'Late: +₹${lateFeeVal % 1 == 0 ? lateFeeVal.toInt().toString() : lateFeeVal.toStringAsFixed(2)}',
                                                   style: TextStyle(
                                                     fontSize: 9.5,
                                                     fontWeight: FontWeight.bold,
@@ -951,7 +954,7 @@ class _RoCollectionSheetViewPageState
                                                   border: Border.all(color: Colors.purple.shade300),
                                                 ),
                                                 child: Text(
-                                                  'Post-Mat: +₹${postMatVal.toStringAsFixed(0)}',
+                                                  'Post-Mat: +₹${postMatVal % 1 == 0 ? postMatVal.toInt().toString() : postMatVal.toStringAsFixed(2)}',
                                                   style: TextStyle(
                                                     fontSize: 9.5,
                                                     fontWeight: FontWeight.bold,
@@ -980,7 +983,7 @@ class _RoCollectionSheetViewPageState
                                           crossAxisAlignment: CrossAxisAlignment.end,
                                           children: [
                                             Text(
-                                              'Bal: ₹${p.remainingBalance.toStringAsFixed(0)}',
+                                              'Bal: ₹${p.remainingBalance % 1 == 0 ? p.remainingBalance.toInt().toString() : p.remainingBalance.toStringAsFixed(2)}',
                                               style: TextStyle(
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.bold,
@@ -991,7 +994,7 @@ class _RoCollectionSheetViewPageState
                                               Padding(
                                                 padding: const EdgeInsets.only(top: 2),
                                                 child: Text(
-                                                  'Late: ₹${lateFeeVal.toStringAsFixed(0)}',
+                                                  'Late: ₹${lateFeeVal % 1 == 0 ? lateFeeVal.toInt().toString() : lateFeeVal.toStringAsFixed(2)}',
                                                   style: TextStyle(
                                                     fontSize: 10,
                                                     fontWeight: FontWeight.bold,
@@ -1003,7 +1006,7 @@ class _RoCollectionSheetViewPageState
                                               Padding(
                                                 padding: const EdgeInsets.only(top: 2),
                                                 child: Text(
-                                                  'Post-Mat: ₹${postMatVal.toStringAsFixed(0)}',
+                                                  'Post-Mat: ₹${postMatVal % 1 == 0 ? postMatVal.toInt().toString() : postMatVal.toStringAsFixed(2)}',
                                                   style: TextStyle(
                                                     fontSize: 10,
                                                     fontWeight: FontWeight.bold,
@@ -2637,8 +2640,10 @@ class _RoCollectionSheetViewPageState
                           final postMaturity = breakdown.postMaturityBreakdown;
 
                           if (postMaturity != null && postMaturity.isPastMaturity) {
+                            final pmVal = postMaturity.postMaturityInterestAmount;
+                            final pmStr = pmVal % 1 == 0 ? pmVal.toInt().toString() : pmVal.toStringAsFixed(2);
                             return Tooltip(
-                              message: "7% Overdue Interest post-maturity: ₹${postMaturity.postMaturityInterestAmount.toStringAsFixed(0)}",
+                              message: "7% Overdue Interest post-maturity: ₹$pmStr",
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                                 decoration: BoxDecoration(
@@ -2646,7 +2651,7 @@ class _RoCollectionSheetViewPageState
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
-                                  "+₹${postMaturity.postMaturityInterestAmount.toStringAsFixed(0)}",
+                                  "+₹$pmStr",
                                   style: const TextStyle(
                                     fontSize: 9,
                                     fontWeight: FontWeight.bold,
@@ -4525,6 +4530,7 @@ class _LoanPaymentHistoryDialog extends StatefulWidget {
         settingsProvider: settingsProvider,
         loaneeLoanAmount: effectiveLoanAmt,
         loaneeProvider: loaneeProvider,
+        sanctionDate: loanee?.loanSanctionDate,
       );
     } catch (_) {}
 
