@@ -919,31 +919,11 @@ class _RoCollectionSheetViewPageState
                                     ),
                                     Builder(
                                       builder: (context) {
-                                        final lateFeeVal = p.effectiveLateFine;
                                         final postMatVal = p.postMaturityInterest;
 
                                         return Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            if (lateFeeVal > 0) ...[
-                                              const SizedBox(width: 5),
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.orange.shade50,
-                                                  borderRadius: BorderRadius.circular(5),
-                                                  border: Border.all(color: Colors.orange.shade300),
-                                                ),
-                                                child: Text(
-                                                  'Late: +₹${lateFeeVal % 1 == 0 ? lateFeeVal.toInt().toString() : lateFeeVal.toStringAsFixed(2)}',
-                                                  style: TextStyle(
-                                                    fontSize: 9.5,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.orange.shade900,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
                                             if (postMatVal > 0) ...[
                                               const SizedBox(width: 5),
                                               Container(
@@ -1184,32 +1164,6 @@ class _RoCollectionSheetViewPageState
                                     ],
                                   ),
                                 ),
-                                if (p.lateFine > 0)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red.shade50,
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: Colors.red.shade200),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.timer_off_outlined,
-                                            size: 12, color: Colors.red.shade700),
-                                        const SizedBox(width: 3),
-                                        Text(
-                                          'Late Payment Fee: ₹${p.lateFine.toStringAsFixed(2)}',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.red.shade800,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
                               ],
                             ),
                             if (p.remarks != null && p.remarks!.isNotEmpty) ...[
@@ -4564,7 +4518,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
   String? _editingPaymentId;
   DateTime? _editDate;
   late TextEditingController _editAmountController;
-  late TextEditingController _editLateFeeController;
   late TextEditingController _editPostMatController;
   late TextEditingController _editRoNameController;
   String _editPaymentType = 'Cash';
@@ -4575,7 +4528,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
   void initState() {
     super.initState();
     _editAmountController = TextEditingController();
-    _editLateFeeController = TextEditingController();
     _editPostMatController = TextEditingController();
     _editRoNameController = TextEditingController();
     widget.collectionProvider.addListener(_onProviderChange);
@@ -4585,7 +4537,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
   @override
   void dispose() {
     _editAmountController.dispose();
-    _editLateFeeController.dispose();
     _editPostMatController.dispose();
     _editRoNameController.dispose();
     widget.collectionProvider.removeListener(_onProviderChange);
@@ -4787,7 +4738,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       _editingPaymentId = p.id;
       _editDate = p.createdAt;
       _editAmountController.text = p.paymentAmount.toStringAsFixed(2);
-      _editLateFeeController.text = p.effectiveLateFine.toStringAsFixed(2);
       _editPostMatController.text = p.postMaturityInterest.toStringAsFixed(2);
       _editRoNameController.text = p.roName ?? '';
       _editPaymentType = _formatPaymentModeDisplay(p);
@@ -4820,7 +4770,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       return;
     }
 
-    final double parsedLateFee = double.tryParse(_editLateFeeController.text.trim()) ?? 0.0;
     final double parsedPostMat = double.tryParse(_editPostMatController.text.trim()) ?? 0.0;
     final String roName = _editRoNameController.text.trim();
 
@@ -4830,7 +4779,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       final updatedPayment = original.copyWith(
         createdAt: _editDate ?? original.createdAt,
         paymentAmount: parsedAmount,
-        lateFine: parsedLateFee,
+        lateFine: 0.0,
         postMaturityInterest: parsedPostMat,
         paymentType: _editPaymentType,
         roName: roName.isNotEmpty ? roName : original.roName,
@@ -5323,12 +5272,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                       value: "₹${totalPaid.toStringAsFixed(2)}",
                       valueColor: Colors.green.shade800,
                     ),
-                    if (totalLateFees > 0)
-                      _buildMetricItem(
-                        label: "Daily/Wkly Late Fees",
-                        value: "₹${totalLateFees.toStringAsFixed(2)}",
-                        valueColor: Colors.orange.shade900,
-                      ),
                     if (totalPostMat > 0)
                       _buildMetricItem(
                         label: "Post Maturity Fine",
@@ -5389,7 +5332,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(minWidth: canShowActionColumn ? 960 : 820),
+                    constraints: BoxConstraints(minWidth: canShowActionColumn ? 880 : 740),
                     child: DataTable(
                       sortColumnIndex: 0,
                       sortAscending: _ascending,
@@ -5427,7 +5370,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                           },
                         ),
                         const DataColumn(label: Text("Amount")),
-                        const DataColumn(label: Text("Daily/Wkly Late Fee")),
                         const DataColumn(label: Text("Post Maturity Fine")),
                         const DataColumn(label: Text("Remaining Balance")),
                         const DataColumn(label: Text("Mode")),
@@ -5442,7 +5384,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                             "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
                         final roName = (p.roName?.isNotEmpty == true) ? p.roName! : "RO Officer";
 
-                        final lateFeeVal = p.effectiveLateFine;
                         final postMatVal = p.postMaturityInterest;
 
                         return DataRow(
@@ -5538,31 +5479,6 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                         fontSize: 11.5,
                                         fontWeight: FontWeight.bold,
                                         color: Colors.green,
-                                      ),
-                                    ),
-                            ),
-                            DataCell(
-                              isEditing
-                                  ? SizedBox(
-                                      width: 75,
-                                      height: 32,
-                                      child: TextField(
-                                        controller: _editLateFeeController,
-                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
-                                        decoration: InputDecoration(
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.orange.shade400)),
-                                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.orange.shade700, width: 1.5)),
-                                        ),
-                                      ),
-                                    )
-                                  : Text(
-                                      lateFeeVal > 0 ? "₹ ${lateFeeVal.toStringAsFixed(2)}" : "-",
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: lateFeeVal > 0 ? Colors.orange.shade900 : Colors.grey.shade500,
-                                        fontWeight: lateFeeVal > 0 ? FontWeight.bold : FontWeight.normal,
                                       ),
                                     ),
                             ),
@@ -5946,7 +5862,6 @@ class __AddPaymentEntryModalContentState
 
   late TextEditingController _remainingBalanceController;
   late TextEditingController _paymentAmountController;
-  late TextEditingController _lateFineController;
   late TextEditingController _roPasscodeController;
 
   double _currentDueBalance = 0.0;
@@ -6043,12 +5958,10 @@ class __AddPaymentEntryModalContentState
     super.initState();
     _remainingBalanceController = TextEditingController(text: '0.00');
     _paymentAmountController = TextEditingController();
-    _lateFineController = TextEditingController(text: '0.00');
     _roPasscodeController = TextEditingController();
     _selectedPaymentType = 'Cash';
 
     _paymentAmountController.addListener(_updateRemainingBalanceDisplay);
-    _lateFineController.addListener(_updateRemainingBalanceDisplay);
   }
 
   @override
@@ -6097,9 +6010,6 @@ class __AddPaymentEntryModalContentState
       if (_paymentAmountController.text.trim().isEmpty) {
         _paymentAmountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
       }
-      // Autofill late fee directly inside the late payment fees input field matching calculated late fine
-      final double autofillLateFee = breakdown.calculatedLateFine;
-      _lateFineController.text = autofillLateFee.toStringAsFixed(2);
       _updateRemainingBalanceDisplay();
     }
   }
@@ -6144,10 +6054,8 @@ class __AddPaymentEntryModalContentState
   void dispose() {
     _disposeHybridEntries();
     _paymentAmountController.removeListener(_updateRemainingBalanceDisplay);
-    _lateFineController.removeListener(_updateRemainingBalanceDisplay);
     _remainingBalanceController.dispose();
     _paymentAmountController.dispose();
-    _lateFineController.dispose();
     _roPasscodeController.dispose();
     super.dispose();
   }
@@ -6463,13 +6371,9 @@ class __AddPaymentEntryModalContentState
             ? 'Cross-Route: Collected by $realRoName (Assigned to $roAssignedRoute) for ${widget.entry.route}'
             : null);
 
-    final lateFine =
-        double.tryParse(_lateFineController.text.trim()) ?? 0.0;
-
     final breakdown = _payableBreakdown;
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
-    final double totalAssessedFee = (breakdown?.calculatedLateFine ?? 0.0);
     final double baseTarget = (breakdown?.isPastMaturity == true)
         ? breakdown!.totalPayableAmount
         : _currentDueBalance;
@@ -6490,18 +6394,11 @@ class __AddPaymentEntryModalContentState
       partialPaymentCharge = double.parse((unpaidBaseAmount * (finePct / 100.0)).toStringAsFixed(2));
     }
 
-    // Remaining balance: loan due balance - payment + partial payment charge (do not add late fine into total)
+    // Remaining balance: loan due balance - payment + partial payment charge
     final double effectiveTarget = baseTarget;
     final newRemainingBalance = (effectiveTarget >= paymentAmount)
         ? (effectiveTarget - paymentAmount + partialPaymentCharge)
         : 0.0;
-
-    final double unpaidCarried = (totalAssessedFee > lateFine)
-        ? (totalAssessedFee - lateFine)
-        : 0.0;
-    final String lateFeeNote = unpaidCarried > 0
-        ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed for missed collection, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
-        : (lateFine > 0 ? ' | Late Fee: ₹${lateFine.toStringAsFixed(2)} cleared' : '');
 
     final String partialPaymentNote = partialPaymentCharge > 0
         ? ' | Partial Payment: ₹${paymentAmount.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)} base (Unpaid: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Charge: ₹${partialPaymentCharge.toStringAsFixed(2)}, Balance Impact: ₹${(unpaidBaseAmount + partialPaymentCharge).toStringAsFixed(2)})'
@@ -6524,9 +6421,9 @@ class __AddPaymentEntryModalContentState
         : '';
 
     final String? finalRemarks = remarks != null
-        ? '$remarks$lateFeeNote$partialPaymentNote$hybridNote'
-        : ((lateFeeNote + partialPaymentNote + hybridNote).isNotEmpty
-            ? (lateFeeNote + partialPaymentNote + hybridNote).replaceFirst(' | ', '')
+        ? '$remarks$partialPaymentNote$hybridNote'
+        : ((partialPaymentNote + hybridNote).isNotEmpty
+            ? (partialPaymentNote + hybridNote).replaceFirst(' | ', '')
             : null);
 
     final messenger = ScaffoldMessenger.of(context);
@@ -6539,7 +6436,7 @@ class __AddPaymentEntryModalContentState
       collectionId: widget.entry.id,
       paymentAmount: paymentAmount,
       remainingBalance: newRemainingBalance,
-      lateFine: lateFine,
+      lateFine: 0.0,
       interest: partialPaymentCharge,
       paymentType: paymentTypeToSave,
       roPasscode: enteredPasscode,
@@ -7308,247 +7205,80 @@ class __AddPaymentEntryModalContentState
 
               const SizedBox(height: 12),
 
-              Builder(
-                builder: (context) {
-                  final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-                  final isLateFinePaused = settingsProvider.isLateFinePaused(
-                    widget.entry.id,
-                    DateTime.now(),
-                    customerId: widget.entry.customerId,
-                  );
-                  final pauseModel = settingsProvider.getLateFinePause(widget.entry.id, widget.entry.customerId);
-                  if (!isLateFinePaused || pauseModel == null) return const SizedBox.shrink();
-
-                  return Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.deepPurple.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.deepPurple.shade200),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.pause_circle_filled_rounded,
-                            size: 18, color: Colors.deepPurple.shade700),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Late Fine Auto-Calculation Paused',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.deepPurple.shade900,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Exempt: ${pauseModel.cleanFromDate.day}/${pauseModel.cleanFromDate.month}/${pauseModel.cleanFromDate.year} to ${pauseModel.cleanToDate.day}/${pauseModel.cleanToDate.month}/${pauseModel.cleanToDate.year} (${pauseModel.totalDays} days)${pauseModel.reason != null && pauseModel.reason!.isNotEmpty ? " • ${pauseModel.reason}" : ""}',
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  color: Colors.deepPurple.shade800,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (isAdmin) ...[
-                          const SizedBox(width: 6),
-                          InkWell(
-                            onTap: () {
-                              Navigator.pop(context, {'action': 'pause_late_fine'});
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.deepPurple.shade100,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                'Manage',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.deepPurple.shade900,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  );
-                },
-              ),
-
-              // Field 3: Late Fine & Field 4: PaymentType
-              Row(
+              // Field: Payment Type
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildFieldLabel('Late Payment Fee (₹)'),
-                        const SizedBox(height: 4),
-                        TextFormField(
-                          controller: _lateFineController,
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                                  decimal: true),
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                                RegExp(r'^\d+\.?\d{0,2}')),
-                          ],
-                          style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600),
-                          decoration: InputDecoration(
-                            isDense: true,
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
-                            hintText: '0.00',
-                            prefixText: '₹ ',
-                            prefixStyle: TextStyle(
-                                fontSize: 13,
-                                color: Colors.red.shade700),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 10),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(
-                                  color: Colors.grey.shade300),
-                            ),
-                          ),
-                        ),
-                        Builder(
-                          builder: (context) {
-                            final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
-                            final totalLateFeesEntry = cp.getTotalLatePaymentFeesForCollection(widget.entry.id);
-                            final double assessedFee = totalLateFeesEntry > 0
-                                ? totalLateFeesEntry
-                                : (_payableBreakdown?.calculatedLateFine ?? 0.0);
-
-                            if (assessedFee > 0) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const SizedBox(height: 4),
-                                  Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: InkWell(
-                                      onTap: () {
-                                        _lateFineController.text = '0.00';
-                                      },
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.orange.shade50,
-                                          borderRadius: BorderRadius.circular(4),
-                                          border: Border.all(color: Colors.orange.shade300),
-                                        ),
-                                        child: Text(
-                                          'Carry Forward (₹0.00)',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.orange.shade900,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  
-                                ],
-                              );
-                            }
-                            return const SizedBox.shrink();
-                          },
-                        ),
-                      ],
+                  _buildFieldLabel('Payment Type *'),
+                  const SizedBox(height: 4),
+                  DropdownButtonFormField<String>(
+                    value: _selectedPaymentType,
+                    isExpanded: true,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w600),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                            color: Colors.grey.shade300),
+                      ),
                     ),
+                    items: _paymentTypes.map((type) {
+                      return DropdownMenuItem<String>(
+                        value: type,
+                        child: Text(type == 'Other' ? 'Other (Hybrid Split)' : type,
+                            style: const TextStyle(fontSize: 12)),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() {
+                          _selectedPaymentType = val;
+                          if (val == 'Other' && _hybridEntries.isEmpty) {
+                            _initHybridEntries();
+                          }
+                        });
+                      }
+                    },
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildFieldLabel('Payment Type *'),
-                        const SizedBox(height: 4),
-                        DropdownButtonFormField<String>(
-                          value: _selectedPaymentType,
-                          isExpanded: true,
-                          style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.black87,
-                              fontWeight: FontWeight.w600),
-                          decoration: InputDecoration(
-                            isDense: true,
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 8),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(
-                                  color: Colors.grey.shade300),
-                            ),
-                          ),
-                          items: _paymentTypes.map((type) {
-                            return DropdownMenuItem<String>(
-                              value: type,
-                              child: Text(type == 'Other' ? 'Other (Hybrid Split)' : type,
-                                  style: const TextStyle(fontSize: 12)),
-                            );
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) {
-                              setState(() {
-                                _selectedPaymentType = val;
-                                if (val == 'Other' && _hybridEntries.isEmpty) {
-                                  _initHybridEntries();
-                                }
-                              });
+                  if (_selectedPaymentType != 'Other') ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: InkWell(
+                        onTap: () {
+                          setState(() {
+                            _selectedPaymentType = 'Other';
+                            if (_hybridEntries.isEmpty) {
+                              _initHybridEntries();
                             }
-                          },
-                        ),
-                        if (_selectedPaymentType != 'Other') ...[
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: InkWell(
-                              onTap: () {
-                                setState(() {
-                                  _selectedPaymentType = 'Other';
-                                  if (_hybridEntries.isEmpty) {
-                                    _initHybridEntries();
-                                  }
-                                });
-                              },
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.call_split_rounded,
-                                      size: 12, color: Colors.amber.shade900),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '+ Split / Other Mode',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.amber.shade900,
-                                    ),
-                                  ),
-                                ],
+                          });
+                        },
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.call_split_rounded,
+                                size: 12, color: Colors.amber.shade900),
+                            const SizedBox(width: 4),
+                            Text(
+                              '+ Split / Other Mode',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.amber.shade900,
                               ),
                             ),
-                          ),
-                        ],
-                      ],
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
 

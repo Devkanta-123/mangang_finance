@@ -28,8 +28,10 @@ class CollectionSheetProvider extends ChangeNotifier {
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
 
-  CollectionSheetProvider() {
-    fetchFromSupabase();
+  CollectionSheetProvider({bool autoFetch = true}) {
+    if (autoFetch) {
+      fetchFromSupabase();
+    }
   }
 
   // Getters
@@ -1558,6 +1560,13 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
 
     _isSyncing = false;
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  void setMissingRecordsForTest(List<MissingPaymentRecord> records) {
+    _missingRecords.clear();
+    _missingRecords.addAll(records);
     notifyListeners();
   }
 }

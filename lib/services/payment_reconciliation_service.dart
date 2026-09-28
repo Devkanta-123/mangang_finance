@@ -457,8 +457,8 @@ class PaymentReconciliationService {
         ['Account Number', entry.accountNumber, 'Route', '${entry.route} (${entry.collectionType})'],
         ['Sanction Date', loanee?.formattedSanctionDate ?? 'N/A', 'Maturity Date', loanee?.formattedMaturityDate ?? 'N/A'],
         ['Sanctioned Loan Amount', '₹ ${reconciliation.startingLoanAmount.toStringAsFixed(2)}', 'Current Status', entry.status],
-        ['Total Paid Amount', '₹ ${reconciliation.totalPaid.toStringAsFixed(2)}', 'Total Late Fees', '₹ ${reconciliation.totalLateFees.toStringAsFixed(2)}'],
-        ['Total Post-Maturity Fines', '₹ ${reconciliation.totalPostMaturityFines.toStringAsFixed(2)}', 'Final Remaining Balance', '₹ ${reconciliation.finalRemainingBalance.toStringAsFixed(2)}'],
+        ['Total Paid Amount', '₹ ${reconciliation.totalPaid.toStringAsFixed(2)}', 'Total Post-Maturity Fines', '₹ ${reconciliation.totalPostMaturityFines.toStringAsFixed(2)}'],
+        ['Final Remaining Balance', '₹ ${reconciliation.finalRemainingBalance.toStringAsFixed(2)}', '', ''],
       ];
 
       for (final pRow in profileFields) {
@@ -517,7 +517,6 @@ class PaymentReconciliationService {
         'Collected By',
         'Balance Before (₹)',
         'Amount Paid (₹)',
-        'Late Fee (₹)',
         'Post Maturity Fine (₹)',
         'Remaining Balance (₹)',
         'Audit Note / Remarks',
@@ -589,18 +588,14 @@ class PaymentReconciliationService {
           ..cellStyle = numberCellStyle;
 
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: currentRow))
-          ..value = DoubleCellValue(double.parse(entryItem.lateFee.toStringAsFixed(2)))
-          ..cellStyle = numberCellStyle;
-
-        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: currentRow))
           ..value = DoubleCellValue(double.parse(entryItem.postMaturityFine.toStringAsFixed(2)))
           ..cellStyle = numberCellStyle;
 
-        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: currentRow))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: currentRow))
           ..value = DoubleCellValue(double.parse(entryItem.balanceAfter.toStringAsFixed(2)))
           ..cellStyle = entryItem.hasDiscrepancy ? discrepancyCellStyle : numberCellStyle;
 
-        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 10, rowIndex: currentRow))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: currentRow))
           ..value = TextCellValue(note)
           ..cellStyle = regularCellStyle;
 
@@ -621,18 +616,14 @@ class PaymentReconciliationService {
         ..cellStyle = summaryRowStyle;
 
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: currentRow))
-        ..value = DoubleCellValue(double.parse(reconciliation.totalLateFees.toStringAsFixed(2)))
-        ..cellStyle = summaryRowStyle;
-
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: currentRow))
         ..value = DoubleCellValue(double.parse(reconciliation.totalPostMaturityFines.toStringAsFixed(2)))
         ..cellStyle = summaryRowStyle;
 
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: currentRow))
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: currentRow))
         ..value = DoubleCellValue(double.parse(reconciliation.finalRemainingBalance.toStringAsFixed(2)))
         ..cellStyle = summaryRowStyle;
 
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 10, rowIndex: currentRow))
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: currentRow))
         ..value = TextCellValue('Final Balance')
         ..cellStyle = summaryRowStyle;
 

@@ -24,12 +24,10 @@ class _TransactionPageState extends State<TransactionPage> {
   RoCollectionEntry? _selectedCard;
   CollectionLatePayableBreakdown? _selectedBreakdown;
   final TextEditingController _amountController = TextEditingController();
-  final TextEditingController _lateFineController = TextEditingController(text: '0.00');
   final TextEditingController _passcodeController = TextEditingController();
   String _selectedPaymentMode = 'Cash';
   String _selectedRouteFilter = 'All Routes';
   bool _isSubmitting = false;
-  String _lateFineFormulaText = '';
 
   final List<String> _paymentModes = [
     'Cash',
@@ -42,7 +40,6 @@ class _TransactionPageState extends State<TransactionPage> {
   @override
   void dispose() {
     _amountController.dispose();
-    _lateFineController.dispose();
     _passcodeController.dispose();
     super.dispose();
   }
@@ -131,7 +128,6 @@ class _TransactionPageState extends State<TransactionPage> {
             : null);
 
     final paymentAmount = double.tryParse(_amountController.text.trim()) ?? 0.0;
-    final lateFine = double.tryParse(_lateFineController.text.trim()) ?? 0.0;
     final currentBal = provider.getLatestRemainingBalance(_selectedCard!.id);
 
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
@@ -153,26 +149,20 @@ class _TransactionPageState extends State<TransactionPage> {
 
     final newRemainingBalance = (currentBal - paymentAmount + partialPaymentCharge).clamp(0.0, 999999.0);
 
-    final double totalAssessedFee = (_selectedBreakdown?.calculatedLateFine ?? 0.0);
-    final double unpaidCarried = (totalAssessedFee > lateFine) ? (totalAssessedFee - lateFine) : 0.0;
-    final String lateFeeNote = unpaidCarried > 0
-        ? ' | Late Fee: ₹${totalAssessedFee.toStringAsFixed(2)} assessed for missed collection, ₹${lateFine.toStringAsFixed(2)} cleared, ₹${unpaidCarried.toStringAsFixed(2)} carried forward'
-        : (lateFine > 0 ? ' | Late Fee: ₹${lateFine.toStringAsFixed(2)} cleared' : '');
-
     final String partialPaymentNote = partialPaymentCharge > 0
         ? ' | Partial Payment: ₹${paymentAmount.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)} base (Unpaid: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Charge: ₹${partialPaymentCharge.toStringAsFixed(2)}, Balance Impact: ₹${(unpaidBaseAmount + partialPaymentCharge).toStringAsFixed(2)})'
         : '';
 
     final finalRemarks = remarks != null
-        ? '$remarks$lateFeeNote$partialPaymentNote'
-        : ((lateFeeNote + partialPaymentNote).isNotEmpty ? (lateFeeNote + partialPaymentNote).replaceFirst(' | ', '') : null);
+        ? '$remarks$partialPaymentNote'
+        : (partialPaymentNote.isNotEmpty ? partialPaymentNote.replaceFirst(' | ', '') : null);
 
     final payment = CollectionPaymentModel(
       id: 'PAY-${DateTime.now().millisecondsSinceEpoch}',
       collectionId: _selectedCard!.id,
       paymentAmount: paymentAmount,
       remainingBalance: newRemainingBalance,
-      lateFine: lateFine,
+      lateFine: 0.0,
       interest: partialPaymentCharge,
       paymentType: _selectedPaymentMode,
       roPasscode: passCode,
@@ -200,7 +190,6 @@ class _TransactionPageState extends State<TransactionPage> {
 
         _amountController.clear();
         _passcodeController.clear();
-        _lateFineController.text = '0.00';
         _selectedCard = null;
         _selectedBreakdown = null;
 
@@ -263,7 +252,6 @@ class _TransactionPageState extends State<TransactionPage> {
     }
 
     final double totalPaidAmt = paymentsList.fold(0.0, (sum, p) => sum + p.paymentAmount);
-    final double totalLateFineAmt = paymentsList.fold(0.0, (sum, p) => sum + p.lateFine);
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
@@ -393,15 +381,6 @@ class _TransactionPageState extends State<TransactionPage> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: _buildStatItem(
-                                title: 'Late Fine Paid',
-                                value: '₹ ${totalLateFineAmt.toStringAsFixed(2)}',
-                                icon: Icons.warning_amber_rounded,
-                                color: Colors.orange.shade800,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _buildStatItem(
                                 title: 'Txn Count',
                                 value: '${paymentsList.length}',
                                 icon: Icons.receipt_long_rounded,
@@ -498,15 +477,8 @@ class _TransactionPageState extends State<TransactionPage> {
                                     );
                                     _selectedBreakdown = breakdown;
                                     _amountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
-                                    final double lateFeeToAutofill = breakdown.calculatedLateFine;
-                                    _lateFineController.text = lateFeeToAutofill.toStringAsFixed(2);
-                                    _lateFineFormulaText = (breakdown.carriedForwardExplanation?.isNotEmpty == true)
-                                        ? '${breakdown.explanation}\n• ${breakdown.carriedForwardExplanation}'
-                                        : breakdown.explanation;
                                   } else {
                                     _selectedBreakdown = null;
-                                    _lateFineFormulaText = '';
-                                    _lateFineController.text = '0.00';
                                     _amountController.clear();
                                   }
                                 });
@@ -650,86 +622,14 @@ class _TransactionPageState extends State<TransactionPage> {
                               ),
                             ],
                             const SizedBox(height: 12),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: TextFormField(
-                                    controller: _amountController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      labelText: 'PAYMENT AMOUNT (₹) *',
-                                      prefixIcon: Icon(Icons.currency_rupee, color: Color(0xFF8B1A1A), size: 18),
-                                    ),
-                                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      TextFormField(
-                                        controller: _lateFineController,
-                                        keyboardType: TextInputType.number,
-                                        decoration: const InputDecoration(
-                                          labelText: 'LATE FINE (₹)',
-                                          prefixIcon: Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
-                                        ),
-                                      ),
-                                      Builder(
-                                        builder: (context) {
-                                          final totalLateFeesCard = _selectedCard != null ? collectionProvider.getTotalLatePaymentFeesForCollection(_selectedCard!.id) : 0.0;
-                                          final double assessedFine = totalLateFeesCard > 0 ? totalLateFeesCard : (_selectedBreakdown?.calculatedLateFine ?? 0.0);
-                                          if (assessedFine > 0) {
-                                            return Padding(
-                                              padding: const EdgeInsets.only(top: 4),
-                                              child: Align(
-                                                alignment: Alignment.centerLeft,
-                                                child: InkWell(
-                                                  onTap: () {
-                                                    setState(() {
-                                                      _lateFineController.text = '0.00';
-                                                    });
-                                                  },
-                                                  child: Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.orange.shade50,
-                                                      borderRadius: BorderRadius.circular(4),
-                                                      border: Border.all(color: Colors.orange.shade300),
-                                                    ),
-                                                    child: Text(
-                                                      'Carry Forward (₹0.00)',
-                                                      style: TextStyle(
-                                                        fontSize: 10,
-                                                        fontWeight: FontWeight.bold,
-                                                        color: Colors.orange.shade900,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                          return const SizedBox.shrink();
-                                        },
-                                      ),
-                                      if (_lateFineFormulaText.isNotEmpty) ...[
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          _lateFineFormulaText,
-                                          style: TextStyle(
-                                            fontSize: 9.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.red.shade700,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ],
+                            TextFormField(
+                              controller: _amountController,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'PAYMENT AMOUNT (₹) *',
+                                prefixIcon: Icon(Icons.currency_rupee, color: Color(0xFF8B1A1A), size: 18),
+                              ),
+                              validator: (val) => (val == null || val.trim().isEmpty) ? 'Required' : null,
                             ),
                             Builder(
                               builder: (context) {
@@ -993,13 +893,13 @@ class _TransactionPageState extends State<TransactionPage> {
                                           color: Colors.green,
                                         ),
                                       ),
-                                      if (p.lateFine > 0)
+                                      if (p.postMaturityInterest > 0)
                                         Text(
-                                          'Fine: ₹${p.lateFine.toStringAsFixed(2)}',
+                                          'Post Mat: ₹${p.postMaturityInterest.toStringAsFixed(2)}',
                                           style: const TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
-                                            color: Colors.red,
+                                            color: Colors.purple,
                                           ),
                                         ),
                                       const SizedBox(height: 4),
@@ -1038,15 +938,15 @@ class _TransactionPageState extends State<TransactionPage> {
                                           color: Colors.orange.shade800,
                                         ),
                                       ),
-                                      if (p.lateFine > 0)
+                                      if (p.postMaturityInterest > 0)
                                         Padding(
                                           padding: const EdgeInsets.only(top: 2),
                                           child: Text(
-                                            'Late Fine: ₹ ${p.lateFine.toStringAsFixed(2)}',
+                                            'Post Maturity: ₹ ${p.postMaturityInterest.toStringAsFixed(2)}',
                                             style: TextStyle(
                                               fontSize: 10,
                                               fontWeight: FontWeight.bold,
-                                              color: Colors.red.shade700,
+                                              color: Colors.purple.shade700,
                                             ),
                                           ),
                                         ),

@@ -1,10 +1,11 @@
 // lib/screens/missing_manager_page.dart
+
 import 'dart:io';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+
 import 'package:excel/excel.dart' as xl;
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/missing_payment_model.dart';
@@ -14,11 +15,13 @@ import '../providers/auth_provider.dart';
 import '../providers/collection_sheet_provider.dart';
 import '../providers/loanee_provider.dart';
 import '../providers/settings_provider.dart';
-import '../services/supabase_service.dart';
 
 /// Missing Manager Page
-/// Visual Reference: Collection Sheet UI
-/// Purpose: ONLY for viewing/checking missing-payment logs. It is NOT a payment screen.
+///
+/// Purpose:
+/// - ONLY for viewing/checking missing-payment logs.
+/// - NOT a payment screen.
+/// - Visual reference: Collection Sheet UI.
 class MissingManagerPage extends StatefulWidget {
   const MissingManagerPage({super.key});
 
@@ -31,6 +34,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
   String _selectedType = 'All';
   String _searchQuery = '';
   bool _isTableView = true;
+
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -50,22 +54,27 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final collectionProvider = Provider.of<CollectionSheetProvider>(context);
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context);
+
     final settingsProvider = Provider.of<SettingsProvider>(context);
+
     final loaneeProvider = Provider.of<LoaneeProvider>(context);
+
     final authProvider = Provider.of<AuthProvider>(context);
 
-    final isRo = authProvider.activeRole == UserType.ro ||
+    final bool isRo =
+        authProvider.activeRole == UserType.ro ||
         authProvider.currentUser?.userType == UserType.ro;
-    final isAdmin = authProvider.activeRole == UserType.admin ||
-        authProvider.currentUser?.userType == UserType.admin;
 
-    // Available Routes
-    final availableRoutes = collectionProvider.routeNames;
+    final List<String> availableRoutes = collectionProvider.routeNames;
 
-    // If an RO is assigned to a specific route and no route is selected, default to it
+    // ------------------------------------------------------------
+    // Automatically select RO route.
+    // ------------------------------------------------------------
     if (isRo && _selectedRoute == null) {
       final userRoute = authProvider.currentUser?.accountName;
+
       if (userRoute != null && availableRoutes.contains(userRoute)) {
         _selectedRoute = userRoute;
       } else if (availableRoutes.isNotEmpty) {
@@ -73,59 +82,119 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       }
     }
 
-    // Filter collection entries by route
-    List<RoCollectionEntry> filteredEntries = collectionProvider.collectionEntries;
-    if (_selectedRoute != null && _selectedRoute!.isNotEmpty && _selectedRoute != 'All Routes') {
-      filteredEntries = filteredEntries
-          .where((e) => e.route.trim().toLowerCase() == _selectedRoute!.trim().toLowerCase())
-          .toList();
-    }
+    // ------------------------------------------------------------
+    // FILTER ENTRIES
+    // ------------------------------------------------------------
+    List<RoCollectionEntry> filteredEntries =
+        List<RoCollectionEntry>.from(
+      collectionProvider.collectionEntries,
+    );
 
-    // Filter by Collection Type (Daily, Weekly, Today, Mon, Tue...)
-    if (_selectedType != 'All') {
-      final st = _selectedType.toLowerCase().trim();
-      if (st == 'daily') {
-        filteredEntries = filteredEntries.where((e) => e.isDaily).toList();
-      } else if (st == 'weekly') {
-        filteredEntries = filteredEntries.where((e) => !e.isDaily).toList();
-      } else if (st == 'today') {
-        final todayWeekday = DateTime.now().weekday;
-        const weekdayNames = ['', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-        final dayStr = weekdayNames[todayWeekday];
-        filteredEntries = filteredEntries.where((e) {
-          final ct = e.collectionType.toLowerCase().trim();
-          return ct == 'daily' || ct == dayStr || ct == 'all';
-        }).toList();
-      } else {
-        filteredEntries = filteredEntries
-            .where((e) => e.collectionType.toLowerCase().trim() == st)
-            .toList();
-      }
-    }
+    // Route filter.
+    if (_selectedRoute != null &&
+        _selectedRoute!.isNotEmpty &&
+        _selectedRoute != 'All Routes') {
+      final selectedRouteLower =
+          _selectedRoute!.trim().toLowerCase();
 
-    // Filter by Search Query
-    if (_searchQuery.trim().isNotEmpty) {
-      final q = _searchQuery.toLowerCase().trim();
-      filteredEntries = filteredEntries.where((e) {
-        final matchName = e.loaneeName.toLowerCase().contains(q);
-        final matchCust = e.customerId.toLowerCase().contains(q);
-        final matchAcc = e.accountNumber.toLowerCase().contains(q);
-        final matchMob = e.mobileNo.toLowerCase().contains(q);
-        return matchName || matchCust || matchAcc || matchMob;
+      filteredEntries = filteredEntries.where((entry) {
+        return entry.route.trim().toLowerCase() == selectedRouteLower;
       }).toList();
     }
 
-    // Calculate aggregated missing metrics for the filtered set
+    // Collection type filter.
+    if (_selectedType != 'All') {
+      final selectedType =
+          _selectedType.toLowerCase().trim();
+
+      if (selectedType == 'daily') {
+        filteredEntries =
+            filteredEntries.where((entry) => entry.isDaily).toList();
+      } else if (selectedType == 'weekly') {
+        filteredEntries =
+            filteredEntries.where((entry) => !entry.isDaily).toList();
+      } else if (selectedType == 'today') {
+        final int todayWeekday = DateTime.now().weekday;
+
+        const weekdayNames = [
+          '',
+          'mon',
+          'tue',
+          'wed',
+          'thu',
+          'fri',
+          'sat',
+          'sun',
+        ];
+
+        final String dayString =
+            weekdayNames[todayWeekday];
+
+        filteredEntries = filteredEntries.where((entry) {
+          final collectionType =
+              entry.collectionType.toLowerCase().trim();
+
+          return collectionType == 'daily' ||
+              collectionType == dayString ||
+              collectionType == 'all';
+        }).toList();
+      } else {
+        filteredEntries = filteredEntries.where((entry) {
+          return entry.collectionType.toLowerCase().trim() ==
+              selectedType;
+        }).toList();
+      }
+    }
+
+    // Search filter.
+    if (_searchQuery.trim().isNotEmpty) {
+      final query = _searchQuery.toLowerCase().trim();
+
+      filteredEntries = filteredEntries.where((entry) {
+        final matchName =
+            entry.loaneeName.toLowerCase().contains(query);
+
+        final matchCustomerId =
+            entry.customerId.toLowerCase().contains(query);
+
+        final matchAccount =
+            entry.accountNumber.toLowerCase().contains(query);
+
+        final matchMobile =
+            entry.mobileNo.toLowerCase().contains(query);
+
+        return matchName ||
+            matchCustomerId ||
+            matchAccount ||
+            matchMobile;
+      }).toList();
+    }
+
+    // ------------------------------------------------------------
+    // SUMMARY
+    // ------------------------------------------------------------
     int totalMissingLoanees = 0;
     double totalMissingAmount = 0.0;
     double totalMissingBalance = 0.0;
 
     for (final entry in filteredEntries) {
-      final missingCount = collectionProvider.getTotalMissingCountForCollection(entry.id);
+      final missingCount =
+          collectionProvider.getTotalMissingCountForCollection(
+        entry.id,
+      );
+
       if (missingCount > 0) {
         totalMissingLoanees++;
-        totalMissingAmount += collectionProvider.getTotalMissingPayForCollection(entry.id);
-        totalMissingBalance += collectionProvider.getTotalMissingBalanceForCollection(entry.id);
+
+        totalMissingAmount +=
+            collectionProvider.getTotalMissingPayForCollection(
+          entry.id,
+        );
+
+        totalMissingBalance +=
+            collectionProvider.getTotalMissingBalanceForCollection(
+          entry.id,
+        );
       }
     }
 
@@ -140,27 +209,35 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. TOP HEADER BANNER (Consistent with Collection Sheet)
-              _buildTopHeader(collectionProvider, isRo),
+              _buildTopHeader(
+                collectionProvider,
+                isRo,
+              ),
 
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 2. ROUTE SELECTION CARDS
-                    _buildRouteSelectionCardsSection(collectionProvider, availableRoutes),
+                    _buildRouteSelectionCardsSection(
+                      collectionProvider,
+                      availableRoutes,
+                    ),
 
                     const SizedBox(height: 14),
 
-                    // 3. SELECTED ROUTE TITLE & COLLECTION TYPES
                     if (_selectedRoute != null) ...[
                       _buildSelectedRouteHeader(),
+
                       const SizedBox(height: 10),
+
                       _buildCollectionTypeFilterCards(),
+
                       const SizedBox(height: 14),
 
-                      // 4. DATA TABLE SECTION (OR NO ROUTE SELECTED)
                       _buildDataTableSection(
                         filteredEntries,
                         collectionProvider,
@@ -170,9 +247,8 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                         totalMissingAmount,
                         totalMissingBalance,
                       ),
-                    ] else ...[
+                    ] else
                       _buildNoRouteSelectedState(),
-                    ],
                   ],
                 ),
               ),
@@ -183,16 +259,28 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     );
   }
 
-  // ==========================================
-  // 1. TOP BANNER HEADER
-  // ==========================================
-  Widget _buildTopHeader(CollectionSheetProvider provider, bool isRo) {
+  // ============================================================
+  // TOP HEADER
+  // ============================================================
+
+  Widget _buildTopHeader(
+    CollectionSheetProvider provider,
+    bool isRo,
+  ) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      padding: const EdgeInsets.fromLTRB(
+        16,
+        14,
+        16,
+        16,
+      ),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFF1E1E1E), Color(0xFF2C2C2C)],
+          colors: [
+            Color(0xFF1E1E1E),
+            Color(0xFF2C2C2C),
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -201,111 +289,104 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
           bottomRight: Radius.circular(20),
         ),
       ),
-      child: LayoutBuilder(
-        builder: (context, headerConstraints) {
-          final isNarrow = headerConstraints.maxWidth < 560;
-          final titleWidget = Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(
-                  color: Colors.deepOrange.shade800,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.assignment_late_rounded,
-                  color: Colors.white,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Missing Manager",
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      "Route-mapped missing payment ledger & audit logs (MISSING ≠ PAYMENT)",
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        color: Colors.white70,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-
-          final actionsWidget = SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          Expanded(
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                if (_selectedRoute != null || _searchQuery.isNotEmpty) ...[
-                  IconButton(
-                    icon: const Icon(Icons.refresh_rounded, size: 16, color: Colors.amber),
-                    tooltip: "Reset Filters",
-                    onPressed: _resetFilters,
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: Colors.deepOrange.shade800,
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                ],
-                IconButton(
-                  icon: provider.isSyncing
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.sync_rounded, size: 18, color: Colors.white),
-                  tooltip: "Sync with Supabase",
-                  onPressed: () async {
-                    await provider.fetchFromSupabase();
-                  },
+                  child: const Icon(
+                    Icons.assignment_late_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+
+                const SizedBox(width: 10),
+
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Missing Manager',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'Route-mapped missing payment ledger & audit logs (MISSING ≠ PAYMENT)',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.white70,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          );
+          ),
 
-          if (isNarrow) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                titleWidget,
-                const SizedBox(height: 10),
-                actionsWidget,
-              ],
-            );
-          }
+          const SizedBox(width: 8),
 
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(child: titleWidget),
-              const SizedBox(width: 8),
-              actionsWidget,
+              if (_selectedRoute != null ||
+                  _searchQuery.isNotEmpty)
+                IconButton(
+                  icon: const Icon(
+                    Icons.refresh_rounded,
+                    size: 16,
+                    color: Colors.amber,
+                  ),
+                  tooltip: 'Reset Filters',
+                  onPressed: _resetFilters,
+                ),
+
+              IconButton(
+                icon: provider.isSyncing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.sync_rounded,
+                        size: 18,
+                        color: Colors.white,
+                      ),
+                tooltip: 'Sync with Supabase',
+                onPressed: () async {
+                  await provider.fetchFromSupabase();
+                },
+              ),
             ],
-          );
-        },
+          ),
+        ],
       ),
     );
   }
 
-  // ==========================================
-  // 2. ROUTE SELECTION CARDS
-  // ==========================================
+  // ============================================================
+  // ROUTE CARDS
+  // ============================================================
+
   Widget _buildRouteSelectionCardsSection(
     CollectionSheetProvider provider,
     List<String> availableRoutes,
@@ -315,10 +396,14 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       children: [
         const Row(
           children: [
-            Icon(Icons.alt_route_rounded, size: 15, color: Color(0xFF8B1A1A)),
+            Icon(
+              Icons.alt_route_rounded,
+              size: 15,
+              color: Color(0xFF8B1A1A),
+            ),
             SizedBox(width: 5),
             Text(
-              "ROUTE ZONES",
+              'ROUTE ZONES',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
@@ -328,14 +413,22 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
             ),
           ],
         ),
+
         const SizedBox(height: 8),
+
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
             children: availableRoutes.map((routeName) {
-              final isSelected = _selectedRoute == routeName;
+              final isSelected =
+                  _selectedRoute == routeName;
+
               final entryCount = provider.collectionEntries
-                  .where((e) => e.route.trim().toLowerCase() == routeName.trim().toLowerCase())
+                  .where(
+                    (entry) =>
+                        entry.route.trim().toLowerCase() ==
+                        routeName.trim().toLowerCase(),
+                  )
                   .length;
 
               return Padding(
@@ -348,23 +441,22 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                   },
                   borderRadius: BorderRadius.circular(10),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFF8B1A1A) : Colors.white,
-                      borderRadius: BorderRadius.circular(10),
+                      color: isSelected
+                          ? const Color(0xFF8B1A1A)
+                          : Colors.white,
+                      borderRadius:
+                          BorderRadius.circular(10),
                       border: Border.all(
-                        color: isSelected ? const Color(0xFF8B1A1A) : Colors.grey.shade300,
+                        color: isSelected
+                            ? const Color(0xFF8B1A1A)
+                            : Colors.grey.shade300,
                         width: 1.2,
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: isSelected
-                              ? const Color(0xFF8B1A1A).withValues(alpha: 0.25)
-                              : Colors.black.withValues(alpha: 0.03),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -372,32 +464,48 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                         Icon(
                           Icons.location_on_rounded,
                           size: 14,
-                          color: isSelected ? Colors.amber : Colors.grey.shade600,
+                          color: isSelected
+                              ? Colors.amber
+                              : Colors.grey.shade600,
                         ),
+
                         const SizedBox(width: 6),
+
                         Text(
                           routeName,
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: isSelected ? Colors.white : Colors.grey.shade800,
+                            color: isSelected
+                                ? Colors.white
+                                : Colors.grey.shade800,
                           ),
                         ),
+
                         const SizedBox(width: 6),
+
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          padding:
+                              const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1,
+                          ),
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? Colors.white.withValues(alpha: 0.2)
+                                ? Colors.white
+                                    .withValues(alpha: 0.2)
                                 : Colors.grey.shade200,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius:
+                                BorderRadius.circular(6),
                           ),
                           child: Text(
-                            "$entryCount",
+                            '$entryCount',
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: isSelected ? Colors.white : Colors.grey.shade700,
+                              color: isSelected
+                                  ? Colors.white
+                                  : Colors.grey.shade700,
                             ),
                           ),
                         ),
@@ -413,29 +521,37 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     );
   }
 
-  // ==========================================
-  // 3. SELECTED ROUTE HEADER & COLLECTION TYPE FILTER
-  // ==========================================
+  // ============================================================
+  // SELECTED ROUTE HEADER
+  // ============================================================
+
   Widget _buildSelectedRouteHeader() {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Row(
-          children: [
-            const Icon(Icons.location_city_rounded, size: 16, color: Color(0xFF8B1A1A)),
-            const SizedBox(width: 6),
-            Text(
-              "Route: ${_selectedRoute!}",
-              style: const TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF8B1A1A),
-              ),
-            ),
-          ],
+        const Icon(
+          Icons.location_city_rounded,
+          size: 16,
+          color: Color(0xFF8B1A1A),
         ),
+
+        const SizedBox(width: 6),
+
+        Expanded(
+          child: Text(
+            'Route: ${_selectedRoute!}',
+            style: const TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF8B1A1A),
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+
+        const SizedBox(width: 8),
+
         Text(
-          "Filter: $_selectedType",
+          'Filter: $_selectedType',
           style: TextStyle(
             fontSize: 11,
             color: Colors.grey.shade600,
@@ -446,36 +562,62 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     );
   }
 
+  // ============================================================
+  // COLLECTION TYPE FILTER
+  // ============================================================
+
   Widget _buildCollectionTypeFilterCards() {
-    final types = ['All', 'Today', 'Daily', 'Weekly', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    final types = [
+      'All',
+      'Today',
+      'Daily',
+      'Weekly',
+      'Mon',
+      'Tue',
+      'Wed',
+      'Thu',
+      'Fri',
+      'Sat',
+    ];
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
-        children: types.map((t) {
-          final isSelected = _selectedType == t;
+        children: types.map((type) {
+          final isSelected =
+              _selectedType == type;
+
           return Padding(
             padding: const EdgeInsets.only(right: 6),
             child: ChoiceChip(
-              label: Text(t),
+              label: Text(type),
               selected: isSelected,
               onSelected: (selected) {
                 if (selected) {
                   setState(() {
-                    _selectedType = t;
+                    _selectedType = type;
                   });
                 }
               },
               labelStyle: TextStyle(
                 fontSize: 11,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? Colors.white : Colors.grey.shade800,
+                fontWeight: isSelected
+                    ? FontWeight.bold
+                    : FontWeight.normal,
+                color: isSelected
+                    ? Colors.white
+                    : Colors.grey.shade800,
               ),
-              selectedColor: const Color(0xFF8B1A1A),
+              selectedColor:
+                  const Color(0xFF8B1A1A),
               backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius:
+                    BorderRadius.circular(8),
                 side: BorderSide(
-                  color: isSelected ? const Color(0xFF8B1A1A) : Colors.grey.shade300,
+                  color: isSelected
+                      ? const Color(0xFF8B1A1A)
+                      : Colors.grey.shade300,
                 ),
               ),
             ),
@@ -485,9 +627,10 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     );
   }
 
-  // ==========================================
-  // 4. NO ROUTE SELECTED STATE
-  // ==========================================
+  // ============================================================
+  // NO ROUTE
+  // ============================================================
+
   Widget _buildNoRouteSelectedState() {
     return Container(
       width: double.infinity,
@@ -495,14 +638,22 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
       ),
       child: Column(
         children: [
-          Icon(Icons.alt_route_rounded, size: 48, color: Colors.grey.shade400),
+          Icon(
+            Icons.alt_route_rounded,
+            size: 48,
+            color: Colors.grey.shade400,
+          ),
+
           const SizedBox(height: 12),
+
           Text(
-            "Select a Route Zone to Load Missing Payment Logs",
+            'Select a Route Zone to Load Missing Payment Logs',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
@@ -510,10 +661,15 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
             ),
             textAlign: TextAlign.center,
           ),
+
           const SizedBox(height: 6),
+
           Text(
-            "Click on any Route Zone card above to inspect loanee missing payments, fines, and balances.",
-            style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500),
+            'Click on any Route Zone card above to inspect loanee missing payments, fines, and balances.',
+            style: TextStyle(
+              fontSize: 11.5,
+              color: Colors.grey.shade500,
+            ),
             textAlign: TextAlign.center,
           ),
         ],
@@ -521,9 +677,10 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     );
   }
 
-  // ==========================================
-  // 5. DATA TABLE SECTION
-  // ==========================================
+  // ============================================================
+  // DATA TABLE SECTION
+  // ============================================================
+
   Widget _buildDataTableSection(
     List<RoCollectionEntry> entries,
     CollectionSheetProvider provider,
@@ -536,54 +693,80 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Controls Row: Search & View Toggle
+        // Search + view buttons.
         Row(
           children: [
             Expanded(
               child: TextField(
                 controller: _searchController,
-                onChanged: (val) {
+                onChanged: (value) {
                   setState(() {
-                    _searchQuery = val.trim();
+                    _searchQuery = value.trim();
                   });
                 },
                 decoration: InputDecoration(
-                  hintText: "Search loanee, ID, mobile, account...",
-                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 12),
-                  prefixIcon: const Icon(Icons.search, size: 18),
-                  suffixIcon: _searchQuery.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear, size: 16),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {
-                              _searchQuery = "";
-                            });
-                          },
-                        )
-                      : null,
+                  hintText:
+                      'Search loanee, ID, mobile, account...',
+                  hintStyle: TextStyle(
+                    color: Colors.grey.shade400,
+                    fontSize: 12,
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    size: 18,
+                  ),
+                  suffixIcon:
+                      _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(
+                                Icons.clear,
+                                size: 16,
+                              ),
+                              onPressed: () {
+                                _searchController.clear();
+
+                                setState(() {
+                                  _searchQuery = '';
+                                });
+                              },
+                            )
+                          : null,
                   filled: true,
                   fillColor: Colors.white,
                   isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  contentPadding:
+                      const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 12,
+                  ),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: Colors.grey.shade300),
+                    borderRadius:
+                        BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                      color: Colors.grey.shade300,
+                    ),
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: Colors.grey.shade300),
+                    borderRadius:
+                        BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                      color: Colors.grey.shade300,
+                    ),
                   ),
                 ),
               ),
             ),
+
             const SizedBox(width: 8),
-            // Toggle Table vs Cards
+
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.grey.shade300),
+                borderRadius:
+                    BorderRadius.circular(10),
+                border: Border.all(
+                  color: Colors.grey.shade300,
+                ),
               ),
               child: Row(
                 children: [
@@ -591,22 +774,27 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                     icon: Icon(
                       Icons.table_rows_rounded,
                       size: 18,
-                      color: _isTableView ? const Color(0xFF8B1A1A) : Colors.grey,
+                      color: _isTableView
+                          ? const Color(0xFF8B1A1A)
+                          : Colors.grey,
                     ),
-                    tooltip: "Table View",
+                    tooltip: 'Table View',
                     onPressed: () {
                       setState(() {
                         _isTableView = true;
                       });
                     },
                   ),
+
                   IconButton(
                     icon: Icon(
                       Icons.view_agenda_rounded,
                       size: 18,
-                      color: !_isTableView ? const Color(0xFF8B1A1A) : Colors.grey,
+                      color: !_isTableView
+                          ? const Color(0xFF8B1A1A)
+                          : Colors.grey,
                     ),
-                    tooltip: "Cards View",
+                    tooltip: 'Cards View',
                     onPressed: () {
                       setState(() {
                         _isTableView = false;
@@ -621,871 +809,1418 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
 
         const SizedBox(height: 10),
 
-        // Summary Statistics Bar (Template Style)
+        // Summary.
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.grey.shade200),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.02),
-                blurRadius: 4,
-              ),
-            ],
+            borderRadius:
+                BorderRadius.circular(10),
+            border: Border.all(
+              color: Colors.grey.shade200,
+            ),
           ),
-          child: LayoutBuilder(
-            builder: (ctx, constraints) {
-              return Wrap(
-                alignment: WrapAlignment.spaceBetween,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 12,
-                runSpacing: 6,
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment:
+                WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 6,
+            children: [
+              Text(
+                'Showing ${entries.length} Records in ${_selectedRoute!} '
+                '($totalMissingLoanees with Missing Logs)',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    "Showing ${entries.length} Records in ${_selectedRoute!} ($totalMissingLoanees with Missing Logs)",
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey.shade800,
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius:
+                          BorderRadius.circular(6),
+                      border: Border.all(
+                        color: Colors.orange.shade200,
+                      ),
+                    ),
+                    child: Text(
+                      'Total Missing: ₹${totalMissingAmount.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange.shade900,
+                      ),
                     ),
                   ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.shade50,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.orange.shade200),
-                        ),
-                        child: Text(
-                          "Total Missing: ₹${totalMissingAmount.toStringAsFixed(2)}",
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade900,
-                          ),
-                        ),
+
+                  const SizedBox(width: 8),
+
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius:
+                          BorderRadius.circular(6),
+                      border: Border.all(
+                        color: Colors.red.shade200,
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade50,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.red.shade200),
-                        ),
-                        child: Text(
-                          "Total Balance: ₹${totalMissingBalance.toStringAsFixed(2)}",
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.red.shade900,
-                          ),
-                        ),
+                    ),
+                    child: Text(
+                      'Total Balance: ₹${totalMissingBalance.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red.shade900,
                       ),
-                    ],
+                    ),
                   ),
                 ],
-              );
-            },
+              ),
+            ],
           ),
         ),
 
         const SizedBox(height: 12),
 
         if (entries.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey.shade200),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.search_off_rounded, size: 42, color: Colors.grey.shade400),
-                const SizedBox(height: 10),
-                Text(
-                  "No Entries Found in ${_selectedRoute!} ($_selectedType)",
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "Try clearing search filters or changing collection type.",
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
-                ),
-              ],
-            ),
-          )
+          _buildEmptyEntriesState()
         else if (_isTableView)
-          _buildDataTableWidget(entries, provider, settingsProvider, loaneeProvider)
+          _buildDataTableWidget(
+            entries,
+            provider,
+            settingsProvider,
+            loaneeProvider,
+          )
         else
-          _buildCardsListWidget(entries, provider, settingsProvider, loaneeProvider),
+          _buildCardsListWidget(
+            entries,
+            provider,
+            settingsProvider,
+            loaneeProvider,
+          ),
       ],
     );
   }
 
-  // ==========================================
-  // DATA TABLE WIDGET
-  // ==========================================
+  Widget _buildEmptyEntriesState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius:
+            BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.search_off_rounded,
+            size: 42,
+            color: Colors.grey.shade400,
+          ),
+
+          const SizedBox(height: 10),
+
+          Text(
+            'No Entries Found in $_selectedRoute ($_selectedType)',
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade700,
+            ),
+            textAlign: TextAlign.center,
+          ),
+
+          const SizedBox(height: 4),
+
+          Text(
+            'Try clearing search filters or changing collection type.',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey.shade500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // MAIN TABLE
+  //
+  // IMPORTANT:
+  // Every column has a fixed width.
+  // The table itself has a fixed minimum width.
+  // No FlexColumnWidth is used.
+  // ============================================================
+
   Widget _buildDataTableWidget(
     List<RoCollectionEntry> entries,
     CollectionSheetProvider provider,
     SettingsProvider settingsProvider,
     LoaneeProvider loaneeProvider,
   ) {
+    const double tableWidth = 1020;
+
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade300),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 6,
-          ),
-        ],
+        borderRadius:
+            BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.grey.shade300,
+        ),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius:
+            BorderRadius.circular(14),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 700),
-            child: DataTable(
-              headingRowColor: WidgetStateProperty.all(const Color(0xFF8B1A1A)),
-              headingTextStyle: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                fontSize: 11,
-              ),
-              dataRowMaxHeight: 52,
-              dataRowMinHeight: 44,
-              columnSpacing: 14,
-              horizontalMargin: 12,
-              columns: const [
-                DataColumn(label: Text("#")),
-                DataColumn(label: Text("Loanee Name")),
-                DataColumn(label: Text("Customer ID")),
-                DataColumn(label: Text("Account No")),
-                DataColumn(label: Text("Type")),
-                DataColumn(label: Text("Total Paid")),
-                DataColumn(label: Text("Missing Count")),
-                DataColumn(label: Text("Missing Amount")),
-                DataColumn(label: Text("Missing Balance")),
-                DataColumn(label: Text("Action")),
-              ],
-              rows: entries.asMap().entries.map((mapEntry) {
-                final idx = mapEntry.key + 1;
-                final entry = mapEntry.value;
-                final missingCount = provider.getTotalMissingCountForCollection(entry.id);
-                final missingAmount = provider.getTotalMissingPayForCollection(entry.id);
-                final missingBalance = provider.getTotalMissingBalanceForCollection(entry.id);
-                final totalPaid = provider.getTotalPaidForCollection(entry.id);
+          child: ExcludeSemantics(
+            child: SizedBox(
+              width: tableWidth,
+              child: Table(
+              defaultVerticalAlignment:
+                  TableCellVerticalAlignment.middle,
 
-                return DataRow(
-                  cells: [
-                    DataCell(Text("$idx", style: const TextStyle(fontSize: 11))),
-                    DataCell(
-                      InkWell(
-                        onTap: () => _openMissingDetails(entry),
-                        child: Text(
-                          entry.loaneeName,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF8B1A1A),
-                          ),
-                        ),
-                      ),
-                    ),
-                    DataCell(Text(entry.customerId, style: const TextStyle(fontSize: 11))),
-                    DataCell(Text(entry.accountNumber, style: const TextStyle(fontSize: 11))),
-                    DataCell(
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: entry.isDaily ? Colors.blue.shade50 : Colors.purple.shade50,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          entry.isDaily ? "Daily" : "Weekly",
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: entry.isDaily ? Colors.blue.shade800 : Colors.purple.shade800,
-                          ),
-                        ),
-                      ),
-                    ),
-                    DataCell(
-                      Text(
-                        "₹ ${totalPaid.toStringAsFixed(2)}",
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    DataCell(
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: missingCount > 0 ? Colors.red.shade50 : Colors.green.shade50,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          missingCount > 0 ? "$missingCount" : "0",
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: missingCount > 0 ? Colors.red.shade800 : Colors.green.shade800,
-                          ),
-                        ),
-                      ),
-                    ),
-                    DataCell(
-                      Text(
-                        missingAmount > 0 ? "₹ ${missingAmount.toStringAsFixed(2)}" : "—",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: missingAmount > 0 ? FontWeight.bold : FontWeight.normal,
-                          color: missingAmount > 0 ? Colors.orange.shade900 : Colors.grey.shade600,
-                        ),
-                      ),
-                    ),
-                    DataCell(
-                      Text(
-                        missingBalance > 0 ? "₹ ${missingBalance.toStringAsFixed(2)}" : "—",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: missingBalance > 0 ? FontWeight.bold : FontWeight.normal,
-                          color: missingBalance > 0 ? Colors.red.shade900 : Colors.grey.shade600,
-                        ),
-                      ),
-                    ),
-                    DataCell(
-                      ElevatedButton.icon(
-                        onPressed: () => _openMissingDetails(entry),
-                        icon: const Icon(Icons.receipt_long_rounded, size: 12),
-                        label: const Text("View Log", style: TextStyle(fontSize: 10)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF8B1A1A),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          minimumSize: const Size(60, 28),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                        ),
-                      ),
-                    ),
+              // FIX:
+              // Do NOT use FlexColumnWidth here.
+              // Every column gets a deterministic width.
+              columnWidths: const {
+                0: FixedColumnWidth(45),
+                1: FixedColumnWidth(160),
+                2: FixedColumnWidth(105),
+                3: FixedColumnWidth(115),
+                4: FixedColumnWidth(80),
+                5: FixedColumnWidth(105),
+                6: FixedColumnWidth(100),
+                7: FixedColumnWidth(105),
+                8: FixedColumnWidth(105),
+                9: FixedColumnWidth(100),
+              },
+
+              children: [
+                TableRow(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF8B1A1A),
+                  ),
+                  children: [
+                    _dataHeaderCell('#'),
+                    _dataHeaderCell('Loanee Name'),
+                    _dataHeaderCell('Customer ID'),
+                    _dataHeaderCell('Account No'),
+                    _dataHeaderCell('Type'),
+                    _dataHeaderCell('Total Paid'),
+                    _dataHeaderCell('Missing Count'),
+                    _dataHeaderCell('Missing Amount'),
+                    _dataHeaderCell('Missing Balance'),
+                    _dataHeaderCell('Action'),
                   ],
-                );
-              }).toList(),
+                ),
+
+                ...entries.asMap().entries.map(
+                  (mapEntry) {
+                    final int index =
+                        mapEntry.key + 1;
+
+                    final entry =
+                        mapEntry.value;
+
+                    final int missingCount =
+                        provider
+                            .getTotalMissingCountForCollection(
+                      entry.id,
+                    );
+
+                    final double missingAmount =
+                        provider
+                            .getTotalMissingPayForCollection(
+                      entry.id,
+                    );
+
+                    final double missingBalance =
+                        provider
+                            .getTotalMissingBalanceForCollection(
+                      entry.id,
+                    );
+
+                    final double totalPaid =
+                        provider
+                            .getTotalPaidForCollection(
+                      entry.id,
+                    );
+
+                    return TableRow(
+                      decoration: BoxDecoration(
+                        color: index.isEven
+                            ? Colors.white
+                            : Colors.grey.shade50,
+                      ),
+                      children: [
+                        _dataBodyCell(
+                          Text(
+                            '$index',
+                            style: const TextStyle(
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+
+                        _dataBodyCell(
+                          InkWell(
+                            onTap: () =>
+                                _openMissingDetails(
+                              entry,
+                            ),
+                            child: Text(
+                              entry.loaneeName,
+                              maxLines: 2,
+                              overflow:
+                                  TextOverflow.ellipsis,
+                              style:
+                                  const TextStyle(
+                                fontSize: 12,
+                                fontWeight:
+                                    FontWeight.bold,
+                                color:
+                                    Color(0xFF8B1A1A),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        _dataBodyCell(
+                          Text(
+                            entry.customerId,
+                            overflow:
+                                TextOverflow.ellipsis,
+                            style:
+                                const TextStyle(
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+
+                        _dataBodyCell(
+                          Text(
+                            entry.accountNumber,
+                            overflow:
+                                TextOverflow.ellipsis,
+                            style:
+                                const TextStyle(
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+
+                        _dataBodyCell(
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding:
+                                    const EdgeInsets
+                                        .symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration:
+                                    BoxDecoration(
+                                  color: entry.isDaily
+                                      ? Colors.blue.shade50
+                                      : Colors
+                                          .purple.shade50,
+                                  borderRadius:
+                                      BorderRadius
+                                          .circular(4),
+                                ),
+                                child: Text(
+                                  entry.isDaily
+                                      ? 'Daily'
+                                      : 'Weekly',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight:
+                                        FontWeight.bold,
+                                    color: entry.isDaily
+                                        ? Colors.blue
+                                            .shade800
+                                        : Colors.purple
+                                            .shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        _dataBodyCell(
+                          Text(
+                            '₹ ${totalPaid.toStringAsFixed(2)}',
+                            style:
+                                const TextStyle(
+                              fontSize: 11,
+                              fontWeight:
+                                  FontWeight.bold,
+                            ),
+                          ),
+                        ),
+
+                        _dataBodyCell(
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding:
+                                    const EdgeInsets
+                                        .symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration:
+                                    BoxDecoration(
+                                  color: missingCount >
+                                          0
+                                      ? Colors.red.shade50
+                                      : Colors.green
+                                          .shade50,
+                                  borderRadius:
+                                      BorderRadius
+                                          .circular(4),
+                                ),
+                                child: Text(
+                                  '$missingCount',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight:
+                                        FontWeight.bold,
+                                    color:
+                                        missingCount >
+                                                0
+                                            ? Colors.red
+                                                .shade800
+                                            : Colors.green
+                                                .shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        _dataBodyCell(
+                          Text(
+                            missingAmount > 0
+                                ? '₹ ${missingAmount.toStringAsFixed(2)}'
+                                : '—',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight:
+                                  missingAmount >
+                                          0
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                              color:
+                                  missingAmount >
+                                          0
+                                      ? Colors.orange
+                                          .shade900
+                                      : Colors.grey
+                                          .shade600,
+                            ),
+                          ),
+                        ),
+
+                        _dataBodyCell(
+                          Text(
+                            missingBalance > 0
+                                ? '₹ ${missingBalance.toStringAsFixed(2)}'
+                                : '—',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight:
+                                  missingBalance >
+                                          0
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                              color:
+                                  missingBalance >
+                                          0
+                                      ? Colors.red
+                                          .shade900
+                                      : Colors.grey
+                                          .shade600,
+                            ),
+                          ),
+                        ),
+
+                        _dataBodyCell(
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                height: 30,
+                                child:
+                                    ElevatedButton.icon(
+                                  onPressed: () =>
+                                      _openMissingDetails(
+                                    entry,
+                                  ),
+                                  icon: const Icon(
+                                    Icons
+                                        .receipt_long_rounded,
+                                    size: 12,
+                                  ),
+                                  label: const Text(
+                                    'View Log',
+                                    style:
+                                        TextStyle(
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                  style:
+                                      ElevatedButton
+                                          .styleFrom(
+                                    backgroundColor:
+                                        const Color(
+                                      0xFF8B1A1A,
+                                    ),
+                                    foregroundColor:
+                                        Colors.white,
+                                    padding:
+                                        const EdgeInsets
+                                            .symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    minimumSize:
+                                        const Size(
+                                      60,
+                                      28,
+                                    ),
+                                    shape:
+                                        RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius
+                                              .circular(
+                                        6,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ],
             ),
           ),
+        ),
+      ),
+    ),
+  );
+}
+
+  Widget _dataHeaderCell(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 12,
+      ),
+      child: Text(
+        text,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+          fontSize: 11,
         ),
       ),
     );
   }
 
-  // ==========================================
-  // CARDS LIST WIDGET
-  // ==========================================
+  Widget _dataBodyCell(Widget child) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 10,
+      ),
+      child: child,
+    );
+  }
+
+  // ============================================================
+  // CARDS VIEW
+  //
+  // IMPORTANT:
+  // No ListView inside the parent SingleChildScrollView.
+  // We use a Column instead.
+  // ============================================================
+
   Widget _buildCardsListWidget(
     List<RoCollectionEntry> entries,
     CollectionSheetProvider provider,
     SettingsProvider settingsProvider,
     LoaneeProvider loaneeProvider,
   ) {
-    return ListView.separated(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: entries.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (ctx, i) {
-        final entry = entries[i];
-        final missingCount = provider.getTotalMissingCountForCollection(entry.id);
-        final missingAmount = provider.getTotalMissingPayForCollection(entry.id);
-        final missingBalance = provider.getTotalMissingBalanceForCollection(entry.id);
-        final totalPaid = provider.getTotalPaidForCollection(entry.id);
-
-        return Card(
-          elevation: 1,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.grey.shade300),
+    return Column(
+      children: [
+        for (int i = 0; i < entries.length; i++) ...[
+          _buildSingleEntryCard(
+            entries[i],
+            provider,
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+
+          if (i != entries.length - 1)
+            const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSingleEntryCard(
+    RoCollectionEntry entry,
+    CollectionSheetProvider provider,
+  ) {
+    final missingCount =
+        provider.getTotalMissingCountForCollection(
+      entry.id,
+    );
+
+    final missingAmount =
+        provider.getTotalMissingPayForCollection(
+      entry.id,
+    );
+
+    final missingBalance =
+        provider.getTotalMissingBalanceForCollection(
+      entry.id,
+    );
+
+    final totalPaid =
+        provider.getTotalPaidForCollection(
+      entry.id,
+    );
+
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(12),
+        side: BorderSide(
+          color: Colors.grey.shade300,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            entry.loaneeName,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF8B1A1A),
-                            ),
-                          ),
-                          Text(
-                            "Cust ID: ${entry.customerId} • A/C: ${entry.accountNumber}",
-                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: entry.isDaily ? Colors.blue.shade50 : Colors.purple.shade50,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        entry.isDaily ? "Daily" : "Weekly",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: entry.isDaily ? Colors.blue.shade800 : Colors.purple.shade800,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.loaneeName,
+                        maxLines: 1,
+                        overflow:
+                            TextOverflow.ellipsis,
+                        style:
+                            const TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                              FontWeight.bold,
+                          color:
+                              Color(0xFF8B1A1A),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const Divider(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _buildStatPill("Total Paid", "₹ ${totalPaid.toStringAsFixed(0)}", Colors.green.shade800),
-                    _buildStatPill("Missing Count", "$missingCount", missingCount > 0 ? Colors.red.shade800 : Colors.grey.shade700),
-                    _buildStatPill("Missing Pay", "₹ ${missingAmount.toStringAsFixed(0)}", Colors.orange.shade900),
-                    _buildStatPill("Missing Balance", "₹ ${missingBalance.toStringAsFixed(1)}", Colors.red.shade900),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: ElevatedButton.icon(
-                    onPressed: () => _openMissingDetails(entry),
-                    icon: const Icon(Icons.receipt_long_rounded, size: 14),
-                    label: const Text("View Missing Log"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF8B1A1A),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+
+                      Text(
+                        'Cust ID: ${entry.customerId} • A/C: ${entry.accountNumber}',
+                        maxLines: 1,
+                        overflow:
+                            TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color:
+                              Colors.grey.shade600,
+                        ),
                       ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 8),
+
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: entry.isDaily
+                        ? Colors.blue.shade50
+                        : Colors.purple.shade50,
+                    borderRadius:
+                        BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    entry.isDaily
+                        ? 'Daily'
+                        : 'Weekly',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight:
+                          FontWeight.bold,
+                      color: entry.isDaily
+                          ? Colors.blue.shade800
+                          : Colors.purple.shade800,
                     ),
                   ),
                 ),
               ],
             ),
-          ),
-        );
-      },
+
+            const Divider(height: 16),
+
+            Wrap(
+              spacing: 16,
+              runSpacing: 8,
+              children: [
+                _buildStatPill(
+                  'Total Paid',
+                  '₹ ${totalPaid.toStringAsFixed(0)}',
+                  Colors.green.shade800,
+                ),
+                _buildStatPill(
+                  'Missing Count',
+                  '$missingCount',
+                  missingCount > 0
+                      ? Colors.red.shade800
+                      : Colors.grey.shade700,
+                ),
+                _buildStatPill(
+                  'Missing Pay',
+                  '₹ ${missingAmount.toStringAsFixed(0)}',
+                  Colors.orange.shade900,
+                ),
+                _buildStatPill(
+                  'Missing Balance',
+                  '₹ ${missingBalance.toStringAsFixed(1)}',
+                  Colors.red.shade900,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            Align(
+              alignment:
+                  Alignment.centerRight,
+              child: ElevatedButton.icon(
+                onPressed: () =>
+                    _openMissingDetails(entry),
+                icon: const Icon(
+                  Icons.receipt_long_rounded,
+                  size: 14,
+                ),
+                label: const Text(
+                  'View Missing Log',
+                ),
+                style:
+                    ElevatedButton.styleFrom(
+                  backgroundColor:
+                      const Color(0xFF8B1A1A),
+                  foregroundColor:
+                      Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 6,
+                  ),
+                  shape:
+                      RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildStatPill(String label, String value, Color color) {
+  Widget _buildStatPill(
+    String label,
+    String value,
+    Color color,
+  ) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600)),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 9.5,
+            color: Colors.grey.shade600,
+          ),
+        ),
+
         const SizedBox(height: 2),
-        Text(value, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: color)),
+
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
       ],
     );
   }
 
-  // ==========================================
-  // 6. OPEN DETAILED MISSING LOG DIALOG
-  // ==========================================
-  Future<void> _openMissingDetails(RoCollectionEntry entry) async {
-    final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
-    final sp = Provider.of<SettingsProvider>(context, listen: false);
-    final lp = Provider.of<LoaneeProvider>(context, listen: false);
+  // ============================================================
+  // OPEN MISSING DETAILS
+  // ============================================================
 
-    // Auto sync missing records on demand for this entry
+  Future<void> _openMissingDetails(
+    RoCollectionEntry entry,
+  ) async {
+    await _MissingDetailsDialog.show(
+      context,
+      entry,
+    );
+  }
+}
+
+// ============================================================================
+// MISSING DETAILS DIALOG (Payment History Modal style with pagination)
+// ============================================================================
+
+class _MissingDetailsDialog extends StatefulWidget {
+  final RoCollectionEntry entry;
+  final CollectionSheetProvider collectionProvider;
+  final LoaneeProvider? loaneeProvider;
+
+  const _MissingDetailsDialog({
+    required this.entry,
+    required this.collectionProvider,
+    this.loaneeProvider,
+  });
+
+  static Future<void> show(
+    BuildContext context,
+    RoCollectionEntry entry,
+  ) async {
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context, listen: false);
+    final settingsProvider =
+        Provider.of<SettingsProvider>(context, listen: false);
+    LoaneeProvider? loaneeProvider;
     try {
-      final loanee = lp.getLoaneeForUser(
+      loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    } catch (_) {}
+
+    try {
+      final loanee = loaneeProvider?.getLoaneeForUser(
         customerId: entry.customerId,
         mobileNo: entry.mobileNo,
         name: entry.loaneeName,
       );
-      final effectiveLoanAmt = (entry.loanAmount != null && entry.loanAmount! > 0)
-          ? entry.loanAmount!
-          : ((loanee != null && loanee.loanAmount > 0)
-              ? loanee.loanAmount
-              : (entry.actualPrincipal ?? entry.initialBalance));
 
-      await cp.syncAutoLateFeesForEntry(
+      final effectiveLoanAmount =
+          (entry.loanAmount != null && entry.loanAmount! > 0)
+              ? entry.loanAmount!
+              : ((loanee != null && loanee.loanAmount > 0)
+                  ? loanee.loanAmount
+                  : (entry.actualPrincipal ?? entry.initialBalance));
+
+      await collectionProvider.syncAutoLateFeesForEntry(
         entry: entry,
-        settingsProvider: sp,
-        loaneeLoanAmount: effectiveLoanAmt,
-        loaneeProvider: lp,
+        settingsProvider: settingsProvider,
+        loaneeLoanAmount: effectiveLoanAmount,
+        loaneeProvider: loaneeProvider,
         sanctionDate: loanee?.loanSanctionDate,
       );
     } catch (_) {}
 
-    if (!mounted) return;
+    if (!context.mounted) return;
 
-    await showModalBottomSheet<void>(
+    return showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _MissingDetailsModalSheet(entry: entry),
+      builder: (ctx) => _MissingDetailsDialog(
+        entry: entry,
+        collectionProvider: collectionProvider,
+        loaneeProvider: loaneeProvider,
+      ),
     );
   }
-}
-
-/// ==============================================================================
-/// MISSING DETAILS MODAL SHEET
-/// Built strictly to match the attached 'Missing Pament Details.xlsx' Excel template:
-/// Top: Customer ID, Account No., Mobile No.
-/// Summary: Total Pament, Total Missing, Total Missing Amount, Total Missing Balance
-/// Table: Date, Day Payment, Missing Pay, Missing find, Missing Week, Missing Balance
-/// Strict Rule: It is NOT a payment screen.
-/// ==============================================================================
-class _MissingDetailsModalSheet extends StatefulWidget {
-  final RoCollectionEntry entry;
-
-  const _MissingDetailsModalSheet({required this.entry});
 
   @override
-  State<_MissingDetailsModalSheet> createState() => _MissingDetailsModalSheetState();
+  State<_MissingDetailsDialog> createState() => _MissingDetailsDialogState();
 }
 
-class _MissingDetailsModalSheetState extends State<_MissingDetailsModalSheet> {
+class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
+  int _page = 1;
+  final int _pageSize = 5;
   bool _isExporting = false;
 
   @override
-  Widget build(BuildContext context) {
-    final collectionProvider = Provider.of<CollectionSheetProvider>(context);
-    final missingRecords = collectionProvider.getMissingRecordsForCollection(widget.entry.id);
-
-    final totalPayment = collectionProvider.getTotalPaidForCollection(widget.entry.id);
-    final totalMissing = missingRecords.length;
-    final totalMissingAmount = missingRecords.fold(0.0, (sum, m) => sum + m.missingPay);
-    final totalMissingBalance = missingRecords.fold(0.0, (sum, m) => sum + m.missingBalance);
-
-    final theme = Theme.of(context);
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.85,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (ctx, scrollController) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            children: [
-              // Sheet Handle
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-
-              // Header Bar
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.deepOrange.shade100,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  "MISSING LOG",
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.deepOrange.shade900,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  widget.entry.loaneeName,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF8B1A1A),
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            "Route: ${widget.entry.route} • Scheme: ${widget.entry.isDaily ? 'Daily' : 'Weekly'}",
-                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
-              ),
-
-              const Divider(height: 1),
-
-              // Scrollable Content
-              Expanded(
-                child: ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    // TOP LEVEL INFORMATION (Matches Excel Template Top Rows)
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildInfoRow("Coustomer ID", widget.entry.customerId),
-                          const SizedBox(height: 6),
-                          _buildInfoRow("Account No.", widget.entry.accountNumber),
-                          const SizedBox(height: 6),
-                          _buildInfoRow("Mobile No.", widget.entry.mobileNo.isNotEmpty ? widget.entry.mobileNo : "—"),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // 4 SUMMARY CARDS (Matches Row 4 & 5 of Excel Template)
-                    // B4: Total Pament, C4: Total Missing, D4: Total Missing Amount, E4: Total Missing Balance
-                    LayoutBuilder(
-                      builder: (ctx, constraints) {
-                        final isSmall = constraints.maxWidth < 450;
-                        return GridView.count(
-                          crossAxisCount: isSmall ? 2 : 4,
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 10,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          childAspectRatio: isSmall ? 1.8 : 1.5,
-                          children: [
-                            _buildTemplateStatCard(
-                              title: "Total Pament",
-                              value: "₹ ${totalPayment.toStringAsFixed(2)}",
-                              color: Colors.teal.shade700,
-                              bgColor: Colors.teal.shade50,
-                              borderColor: Colors.teal.shade200,
-                            ),
-                            _buildTemplateStatCard(
-                              title: "Total Missing",
-                              value: "$totalMissing",
-                              color: Colors.blueGrey.shade800,
-                              bgColor: Colors.blueGrey.shade50,
-                              borderColor: Colors.blueGrey.shade200,
-                            ),
-                            _buildTemplateStatCard(
-                              title: "Total Missing Amount",
-                              value: "₹ ${totalMissingAmount.toStringAsFixed(2)}",
-                              color: Colors.orange.shade800,
-                              bgColor: Colors.orange.shade50,
-                              borderColor: Colors.orange.shade200,
-                            ),
-                            _buildTemplateStatCard(
-                              title: "Total Missing Balance",
-                              value: "₹ ${totalMissingBalance.toStringAsFixed(2)}",
-                              color: Colors.red.shade800,
-                              bgColor: Colors.red.shade50,
-                              borderColor: Colors.red.shade200,
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    // TABLE SECTION HEADER
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          "Missing Payment Detail Log",
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF8B1A1A),
-                          ),
-                        ),
-                        if (missingRecords.isNotEmpty)
-                          ElevatedButton.icon(
-                            onPressed: _isExporting
-                                ? null
-                                : () => _exportToExcel(
-                                      entry: widget.entry,
-                                      records: missingRecords,
-                                      totalPayment: totalPayment,
-                                      totalMissing: totalMissing,
-                                      totalMissingAmount: totalMissingAmount,
-                                      totalMissingBalance: totalMissingBalance,
-                                    ),
-                            icon: _isExporting
-                                ? const SizedBox(
-                                    width: 12,
-                                    height: 12,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                  )
-                                : const Icon(Icons.download_rounded, size: 13),
-                            label: const Text("Export Template Excel", style: TextStyle(fontSize: 11)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF8B1A1A),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                          ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    // DETAILED TABLE (Matches Excel Template columns: Date, Day Payment, Missing Pay, Missing find, Missing Week, Missing Balance)
-                    if (missingRecords.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(28),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(Icons.check_circle_rounded, size: 36, color: Colors.green.shade600),
-                            const SizedBox(height: 8),
-                            const Text(
-                              "No Missing Payments Recorded",
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "This loanee has no pending missed payments in the missing payment logs.",
-                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(minWidth: 580),
-                              child: DataTable(
-                                headingRowColor: WidgetStateProperty.all(const Color(0xFF8B1A1A)),
-                                headingTextStyle: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                ),
-                                dataRowMaxHeight: 44,
-                                dataRowMinHeight: 38,
-                                columnSpacing: 14,
-                                horizontalMargin: 12,
-                                columns: const [
-                                  DataColumn(label: Text("Date")),
-                                  DataColumn(label: Text("Day Payment")),
-                                  DataColumn(label: Text("Missing Pay")),
-                                  DataColumn(label: Text("Missing find")),
-                                  DataColumn(label: Text("Missing Week")),
-                                  DataColumn(label: Text("Missing Balance")),
-                                  DataColumn(label: Text("Status")),
-                                ],
-                                rows: missingRecords.map((m) {
-                                  final dateStr =
-                                      '${m.missedDate.day.toString().padLeft(2, '0')}-${m.missedDate.month.toString().padLeft(2, '0')}-${m.missedDate.year}';
-                                  final dayPaymentStr = m.dayPayment > 0 ? "₹ ${m.dayPayment.toStringAsFixed(2)}" : "—";
-                                  final missingPayStr = "₹ ${m.missingPay.toStringAsFixed(2)}";
-                                  final missingFineStr = "₹ ${m.missingFine.toStringAsFixed(2)}";
-                                  final missingWeekStr = "${m.missingWeek}";
-                                  final missingBalanceStr = "₹ ${m.missingBalance.toStringAsFixed(2)}";
-
-                                  return DataRow(
-                                    cells: [
-                                      DataCell(Text(dateStr, style: const TextStyle(fontSize: 11))),
-                                      DataCell(Text(dayPaymentStr, style: const TextStyle(fontSize: 11))),
-                                      DataCell(
-                                        Text(
-                                          missingPayStr,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.orange.shade900,
-                                          ),
-                                        ),
-                                      ),
-                                      DataCell(Text(missingFineStr, style: const TextStyle(fontSize: 11))),
-                                      DataCell(Text(missingWeekStr, style: const TextStyle(fontSize: 11))),
-                                      DataCell(
-                                        Text(
-                                          missingBalanceStr,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.red.shade900,
-                                          ),
-                                        ),
-                                      ),
-                                      DataCell(
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: m.isResolved
-                                                ? Colors.green.shade50
-                                                : (m.isPartial ? Colors.amber.shade50 : Colors.red.shade50),
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            m.status.toUpperCase(),
-                                            style: TextStyle(
-                                              fontSize: 9.5,
-                                              fontWeight: FontWeight.bold,
-                                              color: m.isResolved
-                                                  ? Colors.green.shade800
-                                                  : (m.isPartial ? Colors.amber.shade900 : Colors.red.shade800),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+  void initState() {
+    super.initState();
+    widget.collectionProvider.addListener(_onProviderChange);
   }
 
-  Widget _buildInfoRow(String label, String value) {
-    return Row(
+  @override
+  void dispose() {
+    widget.collectionProvider.removeListener(_onProviderChange);
+    super.dispose();
+  }
+
+  void _onProviderChange() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Widget _buildMetricItem({
+    required String label,
+    required String value,
+    Color? valueColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          width: 110,
-          child: Text(
-            label,
-            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.grey.shade700),
-          ),
+        Text(
+          label,
+          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
         ),
-        const Text(": ", style: TextStyle(fontWeight: FontWeight.bold)),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1E1E1E)),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: valueColor ?? Colors.black87,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildTemplateStatCard({
-    required String title,
-    required String value,
-    required Color color,
-    required Color bgColor,
-    required Color borderColor,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: borderColor),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            title,
-            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: Colors.grey.shade700),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+  @override
+  Widget build(BuildContext context) {
+    final entry = widget.entry;
+    final cp = widget.collectionProvider;
+    final missingRecords = cp.getMissingRecordsForCollection(entry.id);
+    final totalPayment = cp.getTotalPaidForCollection(entry.id);
+    final totalCount = missingRecords.length;
+
+    final totalMissingAmount = missingRecords.fold<double>(
+      0.0,
+      (sum, record) => sum + record.missingPay,
+    );
+
+    final totalMissingBalance = missingRecords.fold<double>(
+      0.0,
+      (sum, record) => sum + record.missingBalance,
+    );
+
+    final loanee = widget.loaneeProvider?.getLoaneeForUser(
+      customerId: entry.customerId,
+      mobileNo: entry.mobileNo,
+      name: entry.loaneeName,
+    );
+
+    final totalLateFees = cp.getTotalLatePaymentFeesForCollection(entry.id);
+    final totalPostMat = cp.getTotalPostMaturityInterestForCollection(entry.id);
+    final totalInt = cp.getTotalInterestForCollection(entry.id);
+    final totalOverdueInterest = totalLateFees + totalPostMat;
+    final effectiveInt = totalOverdueInterest > 0 ? totalOverdueInterest : totalInt;
+    final loanAmt = (entry.loanAmount != null && entry.loanAmount! > 0)
+        ? entry.loanAmount!
+        : ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : (entry.actualPrincipal ?? entry.initialBalance));
+    final remaining = (loanAmt + effectiveInt - totalPayment).clamp(0.0, double.infinity);
+
+    // Pagination calculations
+    final int totalPages = totalCount == 0 ? 1 : ((totalCount + _pageSize - 1) ~/ _pageSize);
+    if (_page > totalPages && totalPages > 0) {
+      _page = totalPages;
+    }
+    final int startIndex = (_page - 1) * _pageSize;
+    final int endIndex = (startIndex + _pageSize).clamp(0, totalCount);
+    final pagedRecords = (startIndex < totalCount)
+        ? missingRecords.sublist(startIndex, endIndex)
+        : <MissingPaymentRecord>[];
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 900),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Dialog Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Icons.history_edu_rounded,
+                            color: Color(0xFF8B1A1A),
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "${entry.loaneeName} - Missing Payment Log",
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1E1E1E),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                "Account: ${entry.accountNumber} • ID: ${entry.customerId} • Route: ${entry.route} (${entry.isDaily ? 'Daily' : 'Weekly'})",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: (_isExporting || missingRecords.isEmpty)
+                            ? null
+                            : () => _exportToExcel(
+                                  entry: entry,
+                                  records: missingRecords,
+                                  totalPayment: totalPayment,
+                                  totalMissing: totalCount,
+                                  totalMissingAmount: totalMissingAmount,
+                                  totalMissingBalance: totalMissingBalance,
+                                ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF1E7E34),
+                          side: const BorderSide(color: Color(0xFF1E7E34)),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          minimumSize: const Size(0, 32),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: _isExporting
+                            ? const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Color(0xFF1E7E34),
+                                ),
+                              )
+                            : const Icon(Icons.table_view_rounded, size: 15, color: Color(0xFF1E7E34)),
+                        label: Text(
+                          _isExporting ? "Exporting..." : "Excel Export",
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E7E34),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 14),
+
+              // Loan Metrics Banner
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildMetricItem(
+                      label: "Loan Amount",
+                      value: "₹ ${loanAmt.toStringAsFixed(0)}",
+                    ),
+                    _buildMetricItem(
+                      label: "Sanction Date",
+                      value: loanee?.formattedSanctionDate ?? "N/A",
+                    ),
+                    _buildMetricItem(
+                      label: "Mobile No.",
+                      value: entry.mobileNo.isNotEmpty ? entry.mobileNo : "—",
+                    ),
+                    _buildMetricItem(
+                      label: "Total Missing",
+                      value: "$totalCount",
+                      valueColor: const Color(0xFF8B1A1A),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              // Payment History & Breakdown Banner
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B1A1A).withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.15)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildMetricItem(
+                      label: "Total Paid",
+                      value: "₹${totalPayment.toStringAsFixed(2)}",
+                      valueColor: Colors.green.shade800,
+                    ),
+                    _buildMetricItem(
+                      label: "Total Missing Pay",
+                      value: "₹${totalMissingAmount.toStringAsFixed(2)}",
+                      valueColor: Colors.orange.shade900,
+                    ),
+                    _buildMetricItem(
+                      label: "Total Missing Balance",
+                      value: "₹${totalMissingBalance.toStringAsFixed(2)}",
+                      valueColor: Colors.red.shade900,
+                    ),
+                    _buildMetricItem(
+                      label: "Remaining Loan",
+                      value: "₹${remaining.toStringAsFixed(2)}",
+                      valueColor: remaining > 0 ? Colors.red.shade900 : Colors.green.shade800,
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Payments Table
+              if (missingRecords.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 36),
+                  alignment: Alignment.center,
+                  child: Column(
+                    children: [
+                      Icon(Icons.history_toggle_off_rounded,
+                          size: 38, color: Colors.grey.shade400),
+                      const SizedBox(height: 8),
+                      Text(
+                        "No missing payment records recorded for this loan yet.",
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                ExcludeSemantics(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minWidth: 740),
+                      child: DataTable(
+                        headingRowColor:
+                            WidgetStateProperty.all(const Color(0xFF8B1A1A)),
+                        headingTextStyle: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          fontSize: 11,
+                        ),
+                        dataRowMaxHeight: 52,
+                        dataRowMinHeight: 40,
+                        columnSpacing: 14,
+                        horizontalMargin: 12,
+                        columns: const [
+                          DataColumn(label: Text("Date")),
+                          DataColumn(label: Text("Day Payment")),
+                          DataColumn(label: Text("Missing Pay")),
+                          DataColumn(label: Text("Missing Fine")),
+                          DataColumn(label: Text("Missing Week")),
+                          DataColumn(label: Text("Missing Balance")),
+                          DataColumn(label: Text("Status")),
+                        ],
+                        rows: pagedRecords.asMap().entries.map((mapEntry) {
+                          final int idx = mapEntry.key;
+                          final m = mapEntry.value;
+                          final dateString =
+                              '${m.missedDate.day.toString().padLeft(2, '0')}-'
+                              '${m.missedDate.month.toString().padLeft(2, '0')}-'
+                              '${m.missedDate.year}';
+                          final dayPayString = m.dayPayment > 0
+                              ? '₹ ${m.dayPayment.toStringAsFixed(2)}'
+                              : '—';
+                          final isResolved = m.isResolved;
+                          final isPartial = m.isPartial;
+
+                          return DataRow(
+                            color: WidgetStateProperty.resolveWith<Color?>((states) {
+                              return idx.isEven ? Colors.white : Colors.grey.shade50;
+                            }),
+                            cells: [
+                              DataCell(Text(
+                                dateString,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )),
+                              DataCell(Text(
+                                dayPayString,
+                                style: const TextStyle(fontSize: 11),
+                              )),
+                              DataCell(Text(
+                                '₹ ${m.missingPay.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange.shade900,
+                                ),
+                              )),
+                              DataCell(Text(
+                                '₹ ${m.missingFine.toStringAsFixed(2)}',
+                                style: const TextStyle(fontSize: 11),
+                              )),
+                              DataCell(Text(
+                                '${m.missingWeek}',
+                                style: const TextStyle(fontSize: 11),
+                              )),
+                              DataCell(Text(
+                                '₹ ${m.missingBalance.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red.shade900,
+                                ),
+                              )),
+                              DataCell(
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isResolved
+                                        ? Colors.green.shade50
+                                        : (isPartial
+                                            ? Colors.amber.shade50
+                                            : Colors.red.shade50),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: isResolved
+                                          ? Colors.green.shade300
+                                          : (isPartial
+                                              ? Colors.amber.shade300
+                                              : Colors.red.shade300),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        isResolved
+                                            ? Icons.check_circle_rounded
+                                            : (isPartial
+                                                ? Icons.hourglass_bottom_rounded
+                                                : Icons.pending_actions_rounded),
+                                        size: 11,
+                                        color: isResolved
+                                            ? Colors.green.shade700
+                                            : (isPartial
+                                                ? Colors.amber.shade900
+                                                : Colors.red.shade700),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        m.status.toUpperCase(),
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: isResolved
+                                              ? Colors.green.shade800
+                                              : (isPartial
+                                                  ? Colors.amber.shade900
+                                                  : Colors.red.shade800),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ),
+
+              const SizedBox(height: 14),
+
+              // Pagination Controls: [Previous] Page X of Y (N records) [Next]
+              if (totalPages > 0)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _page > 1
+                            ? const Color(0xFF8B1A1A)
+                            : Colors.grey.shade300,
+                        foregroundColor: _page > 1
+                            ? Colors.white
+                            : Colors.grey.shade600,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        elevation: 0,
+                      ),
+                      onPressed: _page > 1
+                          ? () => setState(() => _page--)
+                          : null,
+                      icon: const Icon(Icons.chevron_left_rounded, size: 16),
+                      label: const Text(
+                        "Previous",
+                        style: TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Text(
+                      "Page $_page of $totalPages ($totalCount records)",
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _page < totalPages
+                            ? const Color(0xFF8B1A1A)
+                            : Colors.grey.shade300,
+                        foregroundColor: _page < totalPages
+                            ? Colors.white
+                            : Colors.grey.shade600,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        elevation: 0,
+                      ),
+                      onPressed: _page < totalPages
+                          ? () => setState(() => _page++)
+                          : null,
+                      label: const Text(
+                        "Next",
+                        style: TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                      icon: const Icon(Icons.chevron_right_rounded, size: 16),
+                    ),
+                  ],
+                ),
+            ],
           ),
-          const SizedBox(height: 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: color),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  // ==========================================
-  // EXPORT TO EXCEL MATCHING THE TEMPLATE
-  // ==========================================
+  // ============================================================
+  // EXPORT TO EXCEL
+  // ============================================================
+
   Future<void> _exportToExcel({
     required RoCollectionEntry entry,
-    required List<MissingPaymentRecord> records,
+    required List<MissingPaymentRecord>
+        records,
     required double totalPayment,
     required int totalMissing,
     required double totalMissingAmount,
@@ -1496,74 +2231,354 @@ class _MissingDetailsModalSheetState extends State<_MissingDetailsModalSheet> {
     });
 
     try {
-      final excel = xl.Excel.createExcel();
-      final sheet = excel['Missing Payment Details'];
-      excel.setDefaultSheet('Missing Payment Details');
+      final excel =
+          xl.Excel.createExcel();
 
-      // Top Header
-      sheet.cell(xl.CellIndex.indexByString("A1")).value = xl.TextCellValue("Coustomer ID");
-      sheet.cell(xl.CellIndex.indexByString("B1")).value = xl.TextCellValue(entry.customerId);
+      final sheet =
+          excel['Missing Payment Details'];
 
-      sheet.cell(xl.CellIndex.indexByString("A2")).value = xl.TextCellValue("Account No.");
-      sheet.cell(xl.CellIndex.indexByString("B2")).value = xl.TextCellValue(entry.accountNumber);
+      excel.setDefaultSheet(
+        'Missing Payment Details',
+      );
 
-      sheet.cell(xl.CellIndex.indexByString("A3")).value = xl.TextCellValue("Mobile No.");
-      sheet.cell(xl.CellIndex.indexByString("B3")).value = xl.TextCellValue(entry.mobileNo);
+      // ----------------------------------------------------------
+      // HEADER INFORMATION
+      // ----------------------------------------------------------
 
-      // Summary Header (Row 4)
-      sheet.cell(xl.CellIndex.indexByString("B4")).value = xl.TextCellValue("Total Pament");
-      sheet.cell(xl.CellIndex.indexByString("C4")).value = xl.TextCellValue("Total Missing");
-      sheet.cell(xl.CellIndex.indexByString("D4")).value = xl.TextCellValue("Total Missing Amount");
-      sheet.cell(xl.CellIndex.indexByString("E4")).value = xl.TextCellValue("Total Missing Balance");
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'A1',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Customer ID',
+      );
 
-      // Summary Values (Row 5)
-      sheet.cell(xl.CellIndex.indexByString("B5")).value = xl.DoubleCellValue(totalPayment);
-      sheet.cell(xl.CellIndex.indexByString("C5")).value = xl.IntCellValue(totalMissing);
-      sheet.cell(xl.CellIndex.indexByString("D5")).value = xl.DoubleCellValue(totalMissingAmount);
-      sheet.cell(xl.CellIndex.indexByString("E5")).value = xl.DoubleCellValue(totalMissingBalance);
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'B1',
+            ),
+          )
+          .value = xl.TextCellValue(
+        entry.customerId,
+      );
 
-      // Table Header (Row 7)
-      sheet.cell(xl.CellIndex.indexByString("A7")).value = xl.TextCellValue("Date");
-      sheet.cell(xl.CellIndex.indexByString("B7")).value = xl.TextCellValue("Day Payment");
-      sheet.cell(xl.CellIndex.indexByString("C7")).value = xl.TextCellValue("Missing Pay");
-      sheet.cell(xl.CellIndex.indexByString("D7")).value = xl.TextCellValue("Missing find");
-      sheet.cell(xl.CellIndex.indexByString("E7")).value = xl.TextCellValue("Missing Week");
-      sheet.cell(xl.CellIndex.indexByString("F7")).value = xl.TextCellValue("Missing Balance");
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'A2',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Account No.',
+      );
 
-      // Data Rows (Row 8 onward)
-      int rowIdx = 8;
-      for (final m in records) {
-        final dateStr =
-            '${m.missedDate.day.toString().padLeft(2, '0')}-${m.missedDate.month.toString().padLeft(2, '0')}-${m.missedDate.year}';
-        sheet.cell(xl.CellIndex.indexByString("A$rowIdx")).value = xl.TextCellValue(dateStr);
-        if (m.dayPayment > 0) {
-          sheet.cell(xl.CellIndex.indexByString("B$rowIdx")).value = xl.DoubleCellValue(m.dayPayment);
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'B2',
+            ),
+          )
+          .value = xl.TextCellValue(
+        entry.accountNumber,
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'A3',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Mobile No.',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'B3',
+            ),
+          )
+          .value = xl.TextCellValue(
+        entry.mobileNo,
+      );
+
+      // ----------------------------------------------------------
+      // SUMMARY
+      // ----------------------------------------------------------
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'B4',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Total Payment',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'C4',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Total Missing',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'D4',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Total Missing Amount',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'E4',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Total Missing Balance',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'B5',
+            ),
+          )
+          .value = xl.DoubleCellValue(
+        totalPayment,
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'C5',
+            ),
+          )
+          .value = xl.IntCellValue(
+        totalMissing,
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'D5',
+            ),
+          )
+          .value = xl.DoubleCellValue(
+        totalMissingAmount,
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'E5',
+            ),
+          )
+          .value = xl.DoubleCellValue(
+        totalMissingBalance,
+      );
+
+      // ----------------------------------------------------------
+      // DETAIL TABLE HEADER
+      // ----------------------------------------------------------
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'A7',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Date',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'B7',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Day Payment',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'C7',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Missing Pay',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'D7',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Missing Fine',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'E7',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Missing Week',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'F7',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Missing Balance',
+      );
+
+      // ----------------------------------------------------------
+      // DETAIL ROWS
+      // ----------------------------------------------------------
+
+      int rowIndex = 8;
+
+      for (final record in records) {
+        final dateString =
+            '${record.missedDate.day.toString().padLeft(2, '0')}-'
+            '${record.missedDate.month.toString().padLeft(2, '0')}-'
+            '${record.missedDate.year}';
+
+        sheet
+            .cell(
+              xl.CellIndex.indexByString(
+                'A$rowIndex',
+              ),
+            )
+            .value = xl.TextCellValue(
+          dateString,
+        );
+
+        if (record.dayPayment > 0) {
+          sheet
+              .cell(
+                xl.CellIndex.indexByString(
+                  'B$rowIndex',
+                ),
+              )
+              .value =
+              xl.DoubleCellValue(
+            record.dayPayment,
+          );
         } else {
-          sheet.cell(xl.CellIndex.indexByString("B$rowIdx")).value = xl.TextCellValue("—");
+          sheet
+              .cell(
+                xl.CellIndex.indexByString(
+                  'B$rowIndex',
+                ),
+              )
+              .value = xl.TextCellValue(
+            '—',
+          );
         }
-        sheet.cell(xl.CellIndex.indexByString("C$rowIdx")).value = xl.DoubleCellValue(m.missingPay);
-        sheet.cell(xl.CellIndex.indexByString("D$rowIdx")).value = xl.DoubleCellValue(m.missingFine);
-        sheet.cell(xl.CellIndex.indexByString("E$rowIdx")).value = xl.IntCellValue(m.missingWeek);
-        sheet.cell(xl.CellIndex.indexByString("F$rowIdx")).value = xl.DoubleCellValue(m.missingBalance);
-        rowIdx++;
+
+        sheet
+            .cell(
+              xl.CellIndex.indexByString(
+                'C$rowIndex',
+              ),
+            )
+            .value = xl.DoubleCellValue(
+          record.missingPay,
+        );
+
+        sheet
+            .cell(
+              xl.CellIndex.indexByString(
+                'D$rowIndex',
+              ),
+            )
+            .value = xl.DoubleCellValue(
+          record.missingFine,
+        );
+
+        sheet
+            .cell(
+              xl.CellIndex.indexByString(
+                'E$rowIndex',
+              ),
+            )
+            .value = xl.IntCellValue(
+          record.missingWeek,
+        );
+
+        sheet
+            .cell(
+              xl.CellIndex.indexByString(
+                'F$rowIndex',
+              ),
+            )
+            .value = xl.DoubleCellValue(
+          record.missingBalance,
+        );
+
+        rowIndex++;
       }
 
+      // ----------------------------------------------------------
+      // SAVE + SHARE
+      // ----------------------------------------------------------
+
       final fileBytes = excel.save();
+
       if (fileBytes != null) {
-        final tempDir = await getTemporaryDirectory();
-        final fileName = 'Missing_Log_${entry.accountNumber}_${DateTime.now().millisecondsSinceEpoch}.xlsx';
-        final file = File('${tempDir.path}/$fileName');
-        await file.writeAsBytes(fileBytes);
+        final tempDirectory =
+            await getTemporaryDirectory();
+
+        final fileName =
+            'Missing_Log_${entry.accountNumber}_${DateTime.now().millisecondsSinceEpoch}.xlsx';
+
+        final file = File(
+          '${tempDirectory.path}/$fileName',
+        );
+
+        await file.writeAsBytes(
+          fileBytes,
+        );
 
         await Share.shareXFiles(
           [XFile(file.path)],
-          text: 'Mangang Finance - Missing Log for ${entry.loaneeName} (${entry.accountNumber})',
+          text:
+              'Mangang Finance - Missing Log for '
+              '${entry.loaneeName} '
+              '(${entry.accountNumber})',
         );
       }
-    } catch (e) {
+    } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error exporting missing log: $e')),
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error exporting missing log: $error',
+            ),
+          ),
         );
       }
     } finally {
