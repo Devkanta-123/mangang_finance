@@ -61,6 +61,7 @@ class MissingExcelCustomerSheetResult {
 
   final List<ParsedMissingExcelRecord> missingRows;
   final List<MissingPaymentRecord> generatedModelRecords;
+  final List<DateTime> duplicateDates;
   final List<String> warnings;
   final List<String> errors;
 
@@ -78,11 +79,12 @@ class MissingExcelCustomerSheetResult {
     this.latestPaidDateInSheet,
     required this.missingRows,
     required this.generatedModelRecords,
+    this.duplicateDates = const [],
     this.warnings = const [],
     this.errors = const [],
   });
 
-  bool get isValid => matchedEntry != null && errors.isEmpty && missingRows.isNotEmpty;
+  bool get isValid => matchedEntry != null && errors.isEmpty && (missingRows.isNotEmpty || duplicateDates.isNotEmpty);
   double get totalMissingAmount => missingRows.fold(0.0, (sum, r) => sum + r.missingPay);
   double get totalMissingBalance => missingRows.fold(0.0, (sum, r) => sum + r.missingBalance);
 }
@@ -181,6 +183,7 @@ class MissingRecordsExcelImportService {
         existingEntries: collectionProvider.collectionEntries,
         preselectedEntry: preselectedEntry,
         loaneeProvider: loaneeProvider,
+        collectionProvider: collectionProvider,
       );
 
       return result;
@@ -357,6 +360,7 @@ class MissingRecordsExcelImportService {
     required List<RoCollectionEntry> existingEntries,
     RoCollectionEntry? preselectedEntry,
     LoaneeProvider? loaneeProvider,
+    CollectionSheetProvider? collectionProvider,
   }) async {
     final List<MissingExcelCustomerSheetResult> parsedSheets = [];
     final List<String> fileErrors = [];
@@ -382,6 +386,7 @@ class MissingRecordsExcelImportService {
         existingEntries: existingEntries,
         preselectedEntry: preselectedEntry,
         loaneeProvider: loaneeProvider,
+        collectionProvider: collectionProvider,
       );
 
       if (sheetResult != null) {
@@ -407,6 +412,7 @@ class MissingRecordsExcelImportService {
     required List<RoCollectionEntry> existingEntries,
     RoCollectionEntry? preselectedEntry,
     LoaneeProvider? loaneeProvider,
+    CollectionSheetProvider? collectionProvider,
   }) {
     final List<String> warnings = [];
     final List<String> errors = [];
@@ -504,13 +510,14 @@ class MissingRecordsExcelImportService {
     final headerRow = sheet.rows[headerRowIndex];
     for (int c = 0; c < headerRow.length; c++) {
       final hText = extractCellText(headerRow[c]).toLowerCase().trim();
-      if (hText.contains('date')) {
+      if (hText.isEmpty) continue;
+      if (hText.contains('date') && !hText.contains('paid date') && !hText.contains('pay date')) {
         dateCol = c;
       } else if (hText.contains('day payment') || hText.contains('day pay') || (hText.contains('day') && hText.contains('payment'))) {
         dayPaymentCol = c;
-      } else if (hText.contains('missing pay') || hText.contains('missing amount')) {
+      } else if (hText.contains('missing pay') || hText.contains('missing amount') || hText == 'pay') {
         missingPayCol = c;
-      } else if (hText.contains('missing fine') || hText.contains('fine')) {
+      } else if (hText.contains('missing fine') || hText.contains('fine') || hText.contains('find')) {
         missingFineCol = c;
       } else if (hText.contains('missing week') || hText.contains('week')) {
         missingWeekCol = c;
@@ -524,12 +531,21 @@ class MissingRecordsExcelImportService {
       return null;
     }
 
-    // Default missing columns by position if headers were slightly off
-    if (dayPaymentCol == -1 && dateCol + 1 < headerRow.length) dayPaymentCol = dateCol + 1;
-    if (missingPayCol == -1 && dateCol + 2 < headerRow.length) missingPayCol = dateCol + 2;
-    if (missingFineCol == -1 && dateCol + 3 < headerRow.length) missingFineCol = dateCol + 3;
-    if (missingWeekCol == -1 && dateCol + 4 < headerRow.length) missingWeekCol = dateCol + 4;
-    if (missingBalanceCol == -1 && dateCol + 5 < headerRow.length) missingBalanceCol = dateCol + 5;
+    // Default missing columns by position ONLY if NO specific data columns were identified at all
+    // (legacy unlabelled format fallback where all columns were unlabeled)
+    final bool hasExplicitColumns = dayPaymentCol != -1 ||
+        missingPayCol != -1 ||
+        missingFineCol != -1 ||
+        missingWeekCol != -1 ||
+        missingBalanceCol != -1;
+
+    if (!hasExplicitColumns && headerRow.length >= 6) {
+      if (dayPaymentCol == -1 && dateCol + 1 < headerRow.length) dayPaymentCol = dateCol + 1;
+      if (missingPayCol == -1 && dateCol + 2 < headerRow.length) missingPayCol = dateCol + 2;
+      if (missingFineCol == -1 && dateCol + 3 < headerRow.length) missingFineCol = dateCol + 3;
+      if (missingWeekCol == -1 && dateCol + 4 < headerRow.length) missingWeekCol = dateCol + 4;
+      if (missingBalanceCol == -1 && dateCol + 5 < headerRow.length) missingBalanceCol = dateCol + 5;
+    }
 
     // 3. Resolve matching collection entry
     RoCollectionEntry? matchedEntry = preselectedEntry;
@@ -577,6 +593,17 @@ class MissingRecordsExcelImportService {
     DateTime? latestDateInSheet;
     DateTime? latestPaidDateInSheet;
 
+    final Set<String> existingDateKeys = {};
+    if (matchedEntry != null && collectionProvider != null) {
+      final existingForCard = collectionProvider.getMissingRecordsForCollection(matchedEntry.id);
+      for (final em in existingForCard) {
+        existingDateKeys.add('${em.missedDate.year}-${em.missedDate.month}-${em.missedDate.day}');
+      }
+    }
+
+    final Set<String> seenDatesInSheet = {};
+    final List<DateTime> duplicateDates = [];
+
     for (int r = headerRowIndex + 1; r < sheet.maxRows; r++) {
       final row = sheet.rows[r];
       if (row.isEmpty || dateCol >= row.length) continue;
@@ -595,15 +622,12 @@ class MissingRecordsExcelImportService {
       final dayPayment = (dayPaymentCol >= 0 && dayPaymentCol < row.length)
           ? (parseNumericAmount(row[dayPaymentCol]) ?? 0.0)
           : 0.0;
-      final missingPay = (missingPayCol >= 0 && missingPayCol < row.length)
+      double missingPay = (missingPayCol >= 0 && missingPayCol < row.length)
           ? (parseNumericAmount(row[missingPayCol]) ?? 0.0)
           : 0.0;
       final missingFine = (missingFineCol >= 0 && missingFineCol < row.length)
           ? (parseNumericAmount(row[missingFineCol]) ?? 0.0)
           : 0.0;
-      final int missingWeek = (missingWeekCol >= 0 && missingWeekCol < row.length)
-          ? (parseNumericAmount(row[missingWeekCol])?.toInt() ?? 0)
-          : 0;
       final missingBalance = (missingBalanceCol >= 0 && missingBalanceCol < row.length)
           ? (parseNumericAmount(row[missingBalanceCol]) ?? 0.0)
           : 0.0;
@@ -621,15 +645,40 @@ class MissingRecordsExcelImportService {
         continue;
       }
 
-      final int calcWeeks = missingWeek > 0
-          ? missingWeek
-          : MissingPaymentRecord.calculateWeeks(missedDate: dateVal);
+      // Check duplicate date: same date cannot be inserted
+      final dateKey = '${dateVal.year}-${dateVal.month}-${dateVal.day}';
+      if (existingDateKeys.contains(dateKey) || seenDatesInSheet.contains(dateKey)) {
+        duplicateDates.add(dateVal);
+        continue;
+      }
+      seenDatesInSheet.add(dateKey);
+
+      // If missingPay was removed from template, populate from loan payable amount or summary
+      if (missingPay <= 0.0) {
+        final entryPayable = matchedEntry?.payableAmount;
+        if (entryPayable != null && entryPayable > 0) {
+          missingPay = entryPayable;
+        } else if (totalMissingAmountInHeader != null &&
+            totalMissingInHeader != null &&
+            totalMissingInHeader > 0) {
+          missingPay = double.parse(
+            (totalMissingAmountInHeader / totalMissingInHeader).toStringAsFixed(2),
+          );
+        }
+      }
+
+      // As per user rule: for Excel upload, keep as 1-week gap (always 1 week)
+      const int calcWeeks = 1;
 
       final double calcBal = missingBalance > 0
           ? missingBalance
           : double.parse((missingFine * calcWeeks).toStringAsFixed(2));
 
       final String status = dayPayment > 0 ? 'partially_resolved' : 'missing';
+
+      final String rowRemarks = missingPay > 0
+          ? 'Imported from Excel: Missing Pay ₹${missingPay.toStringAsFixed(2)}, Fine ₹${missingFine.toStringAsFixed(2)}'
+          : 'Imported from Excel: Fine ₹${missingFine.toStringAsFixed(2)}';
 
       final parsedRow = ParsedMissingExcelRecord(
         rowIndex: r + 1,
@@ -667,7 +716,7 @@ class MissingRecordsExcelImportService {
           missingBalance: calcBal,
           status: status,
           source: 'excel_import',
-          remarks: 'Imported from Excel: Missing Pay ₹${missingPay.toStringAsFixed(2)}, Fine ₹${missingFine.toStringAsFixed(2)}',
+          remarks: rowRemarks,
           createdAt: DateTime(dateVal.year, dateVal.month, dateVal.day, 12, 0, 0),
           updatedAt: DateTime.now(),
         );
@@ -676,7 +725,16 @@ class MissingRecordsExcelImportService {
     }
 
     if (missingRows.isEmpty) {
-      warnings.add('No missing payment rows found in sheet "$sheetName".');
+      if (duplicateDates.isNotEmpty) {
+        warnings.add('All ${duplicateDates.length} missing row(s) in sheet "$sheetName" have dates that were already inserted.');
+      } else {
+        warnings.add('No missing payment rows found in sheet "$sheetName".');
+      }
+    }
+
+    if (duplicateDates.isNotEmpty) {
+      final dupStr = duplicateDates.map((d) => SettingsProvider.formatDate(d)).join(', ');
+      warnings.add('Skipped ${duplicateDates.length} duplicate date(s): $dupStr');
     }
 
     return MissingExcelCustomerSheetResult(
@@ -693,6 +751,7 @@ class MissingRecordsExcelImportService {
       latestPaidDateInSheet: latestPaidDateInSheet,
       missingRows: missingRows,
       generatedModelRecords: generatedModels,
+      duplicateDates: duplicateDates,
       warnings: warnings,
       errors: errors,
     );
@@ -723,9 +782,11 @@ class MissingRecordsExcelImportService {
       }
 
       // 2. Batch update in-memory _missingRecords in CollectionSheetProvider
-      collectionProvider.addMissingPaymentRecordsBatch(recordsToSave, notify: false);
-      totalImportedRecords += recordsToSave.length;
-      importedCollectionIds.add(entry.id);
+      if (recordsToSave.isNotEmpty) {
+        collectionProvider.addMissingPaymentRecordsBatch(recordsToSave, notify: false);
+        totalImportedRecords += recordsToSave.length;
+        importedCollectionIds.add(entry.id);
+      }
 
       // 3. Authorize automation and set Excel audit boundary date
       final auditDate = sheet.latestDateInSheet ?? sheet.latestPaidDateInSheet;
@@ -735,9 +796,18 @@ class MissingRecordsExcelImportService {
         notify: false,
       );
 
-      messages.add(
-        '${entry.loaneeName} (${entry.accountNumber}): Inserted ${recordsToSave.length} historical missing records.',
-      );
+      if (recordsToSave.isNotEmpty) {
+        messages.add(
+          '${entry.loaneeName} (${entry.accountNumber}): Inserted ${recordsToSave.length} historical missing records.',
+        );
+      }
+
+      if (sheet.duplicateDates.isNotEmpty) {
+        final dupStr = sheet.duplicateDates.map((d) => SettingsProvider.formatDate(d)).join(', ');
+        messages.add(
+          '${entry.loaneeName} (${entry.accountNumber}): Skipped ${sheet.duplicateDates.length} duplicate date(s) already recorded: $dupStr.',
+        );
+      }
     }
 
     // Single unified notification after all sheets are inserted

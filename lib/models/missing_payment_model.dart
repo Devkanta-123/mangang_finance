@@ -69,10 +69,10 @@ class MissingPaymentRecord {
 
   /// Calculates the number of missing weeks elapsed from missedDate to asOfDate.
   /// Rule:
-  /// - Days 1 to 7: 1 week (e.g. 7 days = 1 week)
-  /// - Days 8 to 14: 2 weeks (e.g. 10 days = 2 weeks)
-  /// - Days 15 to 21: 3 weeks
-  /// - Formula: (daysPast / 7.0).ceil().clamp(1, 52)
+  /// - Full 7-day interval per week elapsed (daysPast ~/ 7)
+  /// - Minimum 1 week (initial missing status)
+  /// - Example: From August 26, 2026 to September 29, 2026 = 34 days
+  ///   34 days = 4 weeks + 6 days => 4 weeks
   static int calculateWeeks({
     required DateTime missedDate,
     DateTime? asOfDate,
@@ -82,7 +82,8 @@ class MissingPaymentRecord {
     final cleanTarget = DateTime(targetDate.year, targetDate.month, targetDate.day);
     final int daysPast = cleanTarget.difference(cleanMissed).inDays;
     if (daysPast <= 0) return 1;
-    return (daysPast / 7.0).ceil().clamp(1, 52);
+    final int elapsedWeeks = daysPast ~/ 7;
+    return elapsedWeeks < 1 ? 1 : elapsedWeeks.clamp(1, 52);
   }
 
   Map<String, dynamic> toJson() {

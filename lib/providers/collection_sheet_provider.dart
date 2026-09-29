@@ -83,6 +83,20 @@ class CollectionSheetProvider extends ChangeNotifier {
   /// Fetch all missing payment records for a collection card ID (sorted chronological ascending)
   List<MissingPaymentRecord> getMissingRecordsForCollection(String collectionId) {
     final list = _missingRecords.where((m) => m.collectionId == collectionId).map((m) {
+      final bool isExcel = m.source.toLowerCase().trim() == 'excel_import' ||
+          m.source.toLowerCase().trim() == 'excel' ||
+          (m.remarks ?? '').toLowerCase().contains('excel');
+      if (isExcel) {
+        // Excel uploaded missing records must always remain 1 week (1-week gap) as per user rule
+        if (m.missingWeek != 1 || m.missingBalance != m.missingFine) {
+          return m.copyWith(
+            missingWeek: 1,
+            missingBalance: m.missingFine,
+          );
+        }
+        return m;
+      }
+
       if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
         final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate);
         final currentBalance = double.parse((m.missingFine * currentWeek).toStringAsFixed(2));
@@ -109,6 +123,12 @@ class CollectionSheetProvider extends ChangeNotifier {
   /// Total sum of missing fine / balance for a collection card
   double getTotalMissingBalanceForCollection(String collectionId, {DateTime? asOfDate}) {
     return _missingRecords.where((m) => m.collectionId == collectionId).fold(0.0, (sum, m) {
+      final bool isExcel = m.source.toLowerCase().trim() == 'excel_import' ||
+          m.source.toLowerCase().trim() == 'excel' ||
+          (m.remarks ?? '').toLowerCase().contains('excel');
+      if (isExcel) {
+        return sum + m.missingFine; // 1 week fine for excel upload
+      }
       if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
         final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate, asOfDate: asOfDate);
         return sum + double.parse((m.missingFine * currentWeek).toStringAsFixed(2));
@@ -171,7 +191,15 @@ class CollectionSheetProvider extends ChangeNotifier {
     return _excelAuditEndDates[collectionId];
   }
 
+  final Map<String, List<DateTime>> _lastAutoSkippedDuplicateDates = {};
+
+  /// Get list of duplicate candidate dates skipped during the last auto assessment for this collection entry
+  List<DateTime> getLastAutoSkippedDuplicateDates(String collectionId) {
+    return _lastAutoSkippedDuplicateDates[collectionId] ?? [];
+  }
+
   /// Add batch of missing payment records (from Excel import or system)
+  /// Checks duplication: same date cannot be inserted
   void addMissingPaymentRecordsBatch(List<MissingPaymentRecord> records, {bool notify = true}) {
     for (final rec in records) {
       final existingIdx = _missingRecords.indexWhere((m) =>
@@ -181,7 +209,8 @@ class CollectionSheetProvider extends ChangeNotifier {
               m.missedDate.month == rec.missedDate.month &&
               m.missedDate.day == rec.missedDate.day));
       if (existingIdx >= 0) {
-        _missingRecords[existingIdx] = rec;
+        // Same date cannot be inserted: skip duplicate!
+        continue;
       } else {
         _missingRecords.add(rec);
       }
@@ -1467,12 +1496,33 @@ class CollectionSheetProvider extends ChangeNotifier {
     logBuf.writeln('====================================================');
     debugPrint(logBuf.toString());
 
+    _lastAutoSkippedDuplicateDates[entry.id] = List.from(alreadyAssessedDates);
+
     final List<MissingPaymentRecord> recordsToPersist = List.from(newlyCreatedRecords);
 
     // Refresh week and balance for any active, unresolved missing records for this entry
     for (int i = 0; i < _missingRecords.length; i++) {
       final rec = _missingRecords[i];
       if (rec.collectionId == entry.id && !rec.isResolved && !rec.isPaused && rec.missingFine > 0) {
+        final bool isExcel = rec.source.toLowerCase().trim() == 'excel_import' ||
+            rec.source.toLowerCase().trim() == 'excel' ||
+            (rec.remarks ?? '').toLowerCase().contains('excel');
+        if (isExcel) {
+          // Excel uploaded missing records must always remain 1 week (1-week gap) as per user rule
+          if (rec.missingWeek != 1 || rec.missingBalance != rec.missingFine) {
+            final updated = rec.copyWith(
+              missingWeek: 1,
+              missingBalance: rec.missingFine,
+              updatedAt: DateTime.now(),
+            );
+            _missingRecords[i] = updated;
+            if (!recordsToPersist.any((r) => r.id == updated.id)) {
+              recordsToPersist.add(updated);
+            }
+          }
+          continue;
+        }
+
         final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: rec.missedDate, asOfDate: cleanToday);
         final currentBal = double.parse((rec.missingFine * currentWeek).toStringAsFixed(2));
         if (rec.missingWeek != currentWeek || rec.missingBalance != currentBal) {
@@ -1491,6 +1541,7 @@ class CollectionSheetProvider extends ChangeNotifier {
 
     // 7. Insert new missing records in-memory and save to Supabase missing_payment_records table
     if (recordsToPersist.isNotEmpty) {
+      final List<MissingPaymentRecord> finalPersistList = [];
       for (final rec in recordsToPersist) {
         final existingIdx = _missingRecords.indexWhere((m) =>
             m.id == rec.id ||
@@ -1499,14 +1550,20 @@ class CollectionSheetProvider extends ChangeNotifier {
                 m.missedDate.month == rec.missedDate.month &&
                 m.missedDate.day == rec.missedDate.day));
         if (existingIdx >= 0) {
+          if (newlyCreatedRecords.any((n) => n.id == rec.id)) {
+            // Same date can't insert: skip duplicate!
+            continue;
+          }
           _missingRecords[existingIdx] = rec;
+          finalPersistList.add(rec);
         } else {
           _missingRecords.add(rec);
+          finalPersistList.add(rec);
         }
       }
 
-      if (saveToRemote && SupabaseService.instance.isInitialized) {
-        await SupabaseService.instance.saveMissingPaymentRecordsBatch(recordsToPersist);
+      if (saveToRemote && SupabaseService.instance.isInitialized && finalPersistList.isNotEmpty) {
+        await SupabaseService.instance.saveMissingPaymentRecordsBatch(finalPersistList);
       }
 
       notifyListeners();
@@ -1876,7 +1933,17 @@ class CollectionSheetProvider extends ChangeNotifier {
       for (var m in remoteMissing) {
         if (m.id.isNotEmpty && !seenMissingIds.contains(m.id)) {
           seenMissingIds.add(m.id);
-          if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
+          final bool isExcel = m.source.toLowerCase().trim() == 'excel_import' ||
+              m.source.toLowerCase().trim() == 'excel' ||
+              (m.remarks ?? '').toLowerCase().contains('excel');
+          if (isExcel) {
+            if (m.missingWeek != 1 || m.missingBalance != m.missingFine) {
+              m = m.copyWith(
+                missingWeek: 1,
+                missingBalance: m.missingFine,
+              );
+            }
+          } else if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
             final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate, asOfDate: now);
             final currentBalance = double.parse((m.missingFine * currentWeek).toStringAsFixed(2));
             if (m.missingWeek != currentWeek || m.missingBalance != currentBalance) {

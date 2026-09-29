@@ -56,6 +56,34 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     });
   }
 
+  bool _hasPastMissingRecords(
+    CollectionSheetProvider provider,
+    RoCollectionEntry entry,
+  ) {
+    if (provider.isMissingAutomationAuthorized(
+      entry.id,
+      entry.accountNumber,
+      entry.customerId,
+    )) {
+      return true;
+    }
+    final records = provider.getMissingRecordsForCollection(entry.id);
+    return records.any((m) {
+      final src = m.source.toLowerCase().trim();
+      if (src == 'excel_import' ||
+          src == 'excel' ||
+          src == 'past' ||
+          src == 'excel_upload') {
+        return true;
+      }
+      final rem = (m.remarks ?? '').toLowerCase();
+      return rem.contains('excel') ||
+          rem.contains('imported') ||
+          rem.contains('historical') ||
+          rem.contains('past');
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final collectionProvider =
@@ -1116,6 +1144,11 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                     final bool isRunningAuto =
                         _runningAutoEntryIds.contains(entry.id);
 
+                    final bool hasPastData =
+                        _hasPastMissingRecords(provider, entry);
+
+                    final bool canStartAuto = hasPastData && !isRunningAuto;
+
                     final int missingCount =
                         provider
                             .getTotalMissingCountForCollection(
@@ -1406,41 +1439,64 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                                 const SizedBox(width: 6),
                                 SizedBox(
                                   height: 28,
-                                  child: ElevatedButton.icon(
-                                    onPressed: isRunningAuto
-                                        ? null
-                                        : () => _handleStartSystemAuto(entry),
-                                    icon: isRunningAuto
-                                        ? const SizedBox(
-                                            width: 12,
-                                            height: 12,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white,
+                                  child: Tooltip(
+                                    message: !hasPastData
+                                        ? 'System Auto disabled: Past missing records (Excel) must exist first'
+                                        : (isRunningAuto
+                                            ? 'Syncing...'
+                                            : 'Start Auto'),
+                                    child: ElevatedButton.icon(
+                                      onPressed: canStartAuto
+                                          ? () => _handleStartSystemAuto(entry)
+                                          : null,
+                                      icon: isRunningAuto
+                                          ? const SizedBox(
+                                              width: 12,
+                                              height: 12,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            )
+                                          : Icon(
+                                              Icons.bolt_rounded,
+                                              size: 13,
+                                              color: canStartAuto
+                                                  ? Colors.white
+                                                  : Colors.grey.shade600,
                                             ),
-                                          )
-                                        : const Icon(
-                                            Icons.bolt_rounded,
-                                            size: 13,
-                                          ),
-                                    label: Text(
-                                      isRunningAuto ? 'Syncing...' : 'Start Auto',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
+                                      label: Text(
+                                        isRunningAuto
+                                            ? 'Syncing...'
+                                            : 'Start Auto',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: canStartAuto
+                                              ? Colors.white
+                                              : Colors.grey.shade600,
+                                        ),
                                       ),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF1E7E34),
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 2,
-                                      ),
-                                      minimumSize: const Size(0, 28),
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(6),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: canStartAuto
+                                            ? const Color(0xFF1E7E34)
+                                            : Colors.grey.shade300,
+                                        foregroundColor: Colors.white,
+                                        disabledBackgroundColor:
+                                            Colors.grey.shade300,
+                                        disabledForegroundColor:
+                                            Colors.grey.shade600,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 2,
+                                        ),
+                                        minimumSize: const Size(0, 28),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -1543,6 +1599,10 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
         provider.getTotalPaidForCollection(
       entry.id,
     );
+
+    final bool hasPastData = _hasPastMissingRecords(provider, entry);
+    final bool isRunningAuto = _runningAutoEntryIds.contains(entry.id);
+    final bool canStartAuto = hasPastData && !isRunningAuto;
 
     return Card(
       elevation: 1,
@@ -1671,43 +1731,56 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                 children: [
                   SizedBox(
                     height: 32,
-                    child: ElevatedButton.icon(
-                      onPressed: _runningAutoEntryIds.contains(entry.id)
-                          ? null
-                          : () => _handleStartSystemAuto(entry),
-                      icon: _runningAutoEntryIds.contains(entry.id)
-                          ? const SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
+                    child: Tooltip(
+                      message: !hasPastData
+                          ? 'System Auto disabled: Past missing records (Excel) must exist first'
+                          : (isRunningAuto ? 'Syncing...' : 'Start Auto'),
+                      child: ElevatedButton.icon(
+                        onPressed: canStartAuto
+                            ? () => _handleStartSystemAuto(entry)
+                            : null,
+                        icon: isRunningAuto
+                            ? const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Icon(
+                                Icons.bolt_rounded,
+                                size: 14,
+                                color: canStartAuto
+                                    ? Colors.white
+                                    : Colors.grey.shade600,
                               ),
-                            )
-                          : const Icon(
-                              Icons.bolt_rounded,
-                              size: 14,
-                            ),
-                      label: Text(
-                        _runningAutoEntryIds.contains(entry.id)
-                            ? 'Syncing...'
-                            : 'Start Auto',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
+                        label: Text(
+                          isRunningAuto ? 'Syncing...' : 'Start Auto',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: canStartAuto
+                                ? Colors.white
+                                : Colors.grey.shade600,
+                          ),
                         ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1E7E34),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        minimumSize: const Size(0, 32),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: canStartAuto
+                              ? const Color(0xFF1E7E34)
+                              : Colors.grey.shade300,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: Colors.grey.shade300,
+                          disabledForegroundColor: Colors.grey.shade600,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
                       ),
                     ),
@@ -1853,12 +1926,19 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
         forceAuthorize: true,
       );
 
+      final skippedDups = collectionProvider.getLastAutoSkippedDuplicateDates(entry.id);
       if (mounted) {
+        String dupMsg = '';
+        if (skippedDups.isNotEmpty) {
+          final dupFormatted = skippedDups.map((d) => SettingsProvider.formatDate(d)).join(', ');
+          dupMsg = ' Skipped duplicate date(s): $dupFormatted.';
+        }
+
         if (newRecords.isNotEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'System auto complete: ${newRecords.length} new missing date record(s) inserted for ${entry.loaneeName}.',
+                'System auto complete: ${newRecords.length} new missing date record(s) inserted for ${entry.loaneeName}.$dupMsg',
               ),
               backgroundColor: Colors.green.shade800,
             ),
@@ -1867,7 +1947,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'System auto complete: Missing records for ${entry.loaneeName} are up to date.',
+                'System auto complete: Missing records for ${entry.loaneeName} are up to date.$dupMsg',
               ),
               backgroundColor: Colors.blue.shade800,
             ),
@@ -2132,21 +2212,28 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         forceAuthorize: true,
       );
 
+      final skippedDups = widget.collectionProvider.getLastAutoSkippedDuplicateDates(entry.id);
       if (mounted) {
+        String dupMsg = '';
+        if (skippedDups.isNotEmpty) {
+          final dupFormatted = skippedDups.map((d) => SettingsProvider.formatDate(d)).join(', ');
+          dupMsg = ' Skipped duplicate date(s): $dupFormatted.';
+        }
+
         if (newRecords.isNotEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'System auto complete: ${newRecords.length} new missing date record(s) inserted.',
+                'System auto complete: ${newRecords.length} new missing date record(s) inserted.$dupMsg',
               ),
               backgroundColor: Colors.green.shade800,
             ),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
-                'System auto check complete: Missing records are up to date.',
+                'System auto check complete: Missing records are up to date.$dupMsg',
               ),
               backgroundColor: Colors.blue,
             ),
@@ -2271,6 +2358,15 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         ? displayRecords.sublist(startIndex, endIndex)
         : <MissingPaymentRecord>[];
 
+    final bool hasPastData = excelCount > 0 ||
+        cp.isMissingAutomationAuthorized(
+          entry.id,
+          entry.accountNumber,
+          entry.customerId,
+        ) ||
+        missingRecords.any(_isExcelUpload);
+    final bool canStartAutoInDialog = hasPastData && !_isRunningAuto;
+
     // Determine overall status label & colors
     final String overallStatusLabel;
     final Color overallStatusBg;
@@ -2343,7 +2439,11 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                 runSpacing: 10,
                 children: [
                   ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 480),
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width < 560
+                          ? (MediaQuery.of(context).size.width - 72).clamp(200.0, 480.0)
+                          : 480,
+                    ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -2402,15 +2502,12 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                       color: overallStatusText,
                                     ),
                                     const SizedBox(width: 4),
-                                    Flexible(
-                                      child: Text(
-                                        overallStatusLabel,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: overallStatusText,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
+                                    Text(
+                                      overallStatusLabel,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: overallStatusText,
                                       ),
                                     ),
                                   ],
@@ -2473,35 +2570,53 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                           ),
                         ),
                       ),
-                      ElevatedButton.icon(
-                        onPressed: _isRunningAuto ? null : _runSystemAutoInDialog,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1E7E34),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
+                      Tooltip(
+                        message: !hasPastData
+                            ? 'System Auto disabled: Past missing records (Excel) must exist first'
+                            : (_isRunningAuto ? 'Running...' : 'Start System Auto'),
+                        child: ElevatedButton.icon(
+                          onPressed: canStartAutoInDialog ? _runSystemAutoInDialog : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: canStartAutoInDialog
+                                ? const Color(0xFF1E7E34)
+                                : Colors.grey.shade300,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.grey.shade300,
+                            disabledForegroundColor: Colors.grey.shade600,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            minimumSize: const Size(0, 32),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                           ),
-                          minimumSize: const Size(0, 32),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        icon: _isRunningAuto
-                            ? const SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
+                          icon: _isRunningAuto
+                              ? const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.bolt_rounded,
+                                  size: 14,
+                                  color: canStartAutoInDialog
+                                      ? Colors.white
+                                      : Colors.grey.shade600,
                                 ),
-                              )
-                            : const Icon(Icons.bolt_rounded, size: 14),
-                        label: Text(
-                          _isRunningAuto ? "Running..." : "Start System Auto",
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
+                          label: Text(
+                            _isRunningAuto ? "Running..." : "Start System Auto",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: canStartAutoInDialog
+                                  ? Colors.white
+                                  : Colors.grey.shade600,
+                            ),
                           ),
                         ),
                       ),
@@ -2594,14 +2709,9 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                       valueColor: Colors.orange.shade900,
                     ),
                     _buildMetricItem(
-                      label: "Total Missing Balance",
+                      label: "Total Missing Fine",
                       value: "₹${totalMissingBalance.toStringAsFixed(2)}",
                       valueColor: Colors.red.shade900,
-                    ),
-                    _buildMetricItem(
-                      label: "Remaining Loan",
-                      value: "₹${remaining.toStringAsFixed(2)}",
-                      valueColor: remaining > 0 ? Colors.red.shade900 : Colors.green.shade800,
                     ),
                   ],
                 ),
@@ -2792,20 +2902,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                         sortAscending: _sortAscending,
                         columns: [
                           DataColumn(
-                            label: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text("Date"),
-                                const SizedBox(width: 4),
-                                Icon(
-                                  _sortAscending
-                                      ? Icons.arrow_upward_rounded
-                                      : Icons.arrow_downward_rounded,
-                                  size: 13,
-                                  color: Colors.white,
-                                ),
-                              ],
-                            ),
+                            label: const Text("Date"),
                             tooltip: _sortAscending
                                 ? 'Click to Sort Date Descending'
                                 : 'Click to Sort Date Ascending',
@@ -2817,8 +2914,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                             },
                           ),
                           const DataColumn(label: Text("Paid Date")),
-                          const DataColumn(label: Text("Day Payment")),
-                          const DataColumn(label: Text("Missing Pay")),
+                          const DataColumn(label: Text("Basic Pay")),
                           const DataColumn(label: Text("Missing Fine")),
                           const DataColumn(label: Text("Missing Week")),
                           const DataColumn(label: Text("Missing Balance")),
@@ -2832,9 +2928,6 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                               '${m.missedDate.day.toString().padLeft(2, '0')}-'
                               '${m.missedDate.month.toString().padLeft(2, '0')}-'
                               '${m.missedDate.year}';
-                          final dayPayString = m.dayPayment > 0
-                              ? '₹ ${m.dayPayment.toStringAsFixed(2)}'
-                              : '—';
                           final isResolved = m.isResolved;
                           final isPartial = m.isPartial;
 
@@ -2884,10 +2977,6 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                         ),
                                       ),
                               ),
-                              DataCell(Text(
-                                dayPayString,
-                                style: const TextStyle(fontSize: 11),
-                              )),
                               DataCell(Text(
                                 '₹ ${m.missingPay.toStringAsFixed(2)}',
                                 style: TextStyle(
@@ -3267,7 +3356,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Day Payment',
+        'Basic Pay',
       );
 
       sheet
@@ -3277,7 +3366,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Missing Pay',
+        'Missing Fine',
       );
 
       sheet
@@ -3287,7 +3376,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Missing Fine',
+        'Missing Week',
       );
 
       sheet
@@ -3297,7 +3386,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Missing Week',
+        'Missing Balance',
       );
 
       sheet
@@ -3307,7 +3396,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Missing Balance',
+        'Status',
       );
 
       sheet
@@ -3317,7 +3406,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Status',
+        'Source',
       );
 
       // ----------------------------------------------------------
@@ -3358,33 +3447,10 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
           paidDateStr,
         );
 
-        if (record.dayPayment > 0) {
-          sheet
-              .cell(
-                xl.CellIndex.indexByString(
-                  'C$rowIndex',
-                ),
-              )
-              .value =
-              xl.DoubleCellValue(
-            record.dayPayment,
-          );
-        } else {
-          sheet
-              .cell(
-                xl.CellIndex.indexByString(
-                  'C$rowIndex',
-                ),
-              )
-              .value = xl.TextCellValue(
-            '—',
-          );
-        }
-
         sheet
             .cell(
               xl.CellIndex.indexByString(
-                'D$rowIndex',
+                'C$rowIndex',
               ),
             )
             .value = xl.DoubleCellValue(
@@ -3394,7 +3460,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         sheet
             .cell(
               xl.CellIndex.indexByString(
-                'E$rowIndex',
+                'D$rowIndex',
               ),
             )
             .value = xl.DoubleCellValue(
@@ -3404,7 +3470,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         sheet
             .cell(
               xl.CellIndex.indexByString(
-                'F$rowIndex',
+                'E$rowIndex',
               ),
             )
             .value = xl.IntCellValue(
@@ -3414,11 +3480,25 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         sheet
             .cell(
               xl.CellIndex.indexByString(
-                'G$rowIndex',
+                'F$rowIndex',
               ),
             )
             .value = xl.DoubleCellValue(
           record.missingBalance,
+        );
+
+        final sourceLabel = _isExcelUpload(record)
+            ? 'Excel Upload'
+            : (_isSystemAuto(record) ? 'System Auto' : 'Collection');
+
+        sheet
+            .cell(
+              xl.CellIndex.indexByString(
+                'G$rowIndex',
+              ),
+            )
+            .value = xl.TextCellValue(
+          statusLabel,
         );
 
         sheet
@@ -3428,7 +3508,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
               ),
             )
             .value = xl.TextCellValue(
-          statusLabel,
+          sourceLabel,
         );
 
         rowIndex++;

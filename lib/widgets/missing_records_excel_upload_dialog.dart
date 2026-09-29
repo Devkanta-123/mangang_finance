@@ -369,6 +369,34 @@ class _MissingRecordsExcelUploadDialogState
                 ],
               ),
             ),
+            if (sheet.duplicateDates.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.amber.shade400),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 16, color: Colors.amber.shade900),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Skipped ${sheet.duplicateDates.length} duplicate date(s) already recorded:\n${sheet.duplicateDates.map((d) => SettingsProvider.formatDate(d)).join(", ")}',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.amber.shade900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
 
             const Text(
@@ -391,7 +419,7 @@ class _MissingRecordsExcelUploadDialogState
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(
-                  width: 500,
+                  width: 460,
                   child: Column(
                     children: [
                       Container(
@@ -405,12 +433,11 @@ class _MissingRecordsExcelUploadDialogState
                         ),
                         child: const Row(
                           children: [
-                            SizedBox(width: 80, child: Text('Date', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
-                            SizedBox(width: 65, child: Text('Day Pay', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
-                            SizedBox(width: 70, child: Text('Miss Pay', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
-                            SizedBox(width: 60, child: Text('Fine', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
-                            SizedBox(width: 50, child: Text('Weeks', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
-                            SizedBox(width: 75, child: Text('Balance', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
+                            SizedBox(width: 85, child: Text('Date', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
+                            SizedBox(width: 80, child: Text('Basic Pay', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
+                            SizedBox(width: 70, child: Text('Fine', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
+                            SizedBox(width: 65, child: Text('Weeks', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
+                            SizedBox(width: 80, child: Text('Balance', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
                             SizedBox(width: 80, child: Text('Status', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold))),
                           ],
                         ),
@@ -427,19 +454,12 @@ class _MissingRecordsExcelUploadDialogState
                             color: idx.isEven ? Colors.white : Colors.grey.shade50,
                             child: Row(
                               children: [
-                                SizedBox(width: 80, child: Text(row.formattedDate, style: const TextStyle(fontSize: 10.5))),
+                                SizedBox(width: 85, child: Text(row.formattedDate, style: const TextStyle(fontSize: 10.5))),
+                                SizedBox(width: 80, child: Text('₹${row.missingPay.toStringAsFixed(0)}', style: const TextStyle(fontSize: 10.5))),
+                                SizedBox(width: 70, child: Text('₹${row.missingFine.toStringAsFixed(1)}', style: const TextStyle(fontSize: 10.5))),
+                                SizedBox(width: 65, child: Text('${row.missingWeek} wk', style: const TextStyle(fontSize: 10.5))),
                                 SizedBox(
-                                  width: 65,
-                                  child: Text(
-                                    row.dayPayment > 0 ? '₹${row.dayPayment.toStringAsFixed(0)}' : '—',
-                                    style: const TextStyle(fontSize: 10.5),
-                                  ),
-                                ),
-                                SizedBox(width: 70, child: Text('₹${row.missingPay.toStringAsFixed(0)}', style: const TextStyle(fontSize: 10.5))),
-                                SizedBox(width: 60, child: Text('₹${row.missingFine.toStringAsFixed(1)}', style: const TextStyle(fontSize: 10.5))),
-                                SizedBox(width: 50, child: Text('${row.missingWeek} wk', style: const TextStyle(fontSize: 10.5))),
-                                SizedBox(
-                                  width: 75,
+                                  width: 80,
                                   child: Text(
                                     '₹${row.missingBalance.toStringAsFixed(1)}',
                                     style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF8B1A1A)),
