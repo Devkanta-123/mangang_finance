@@ -116,8 +116,8 @@ class CollectionSheetProvider extends ChangeNotifier {
   /// Total sum of missing pay for a collection card (uncleared/unresolved only)
   double getTotalMissingPayForCollection(String collectionId) {
     return _missingRecords
-        .where((m) => m.collectionId == collectionId && !m.isResolved)
-        .fold(0.0, (sum, m) => sum + m.missingPay);
+        .where((m) => m.collectionId == collectionId && !m.isResolved && m.paidDate == null)
+        .fold(0.0, (sum, m) => sum + (m.missingPay > 0 ? m.missingPay : m.dayPayment));
   }
 
   /// Total sum of missing fine / balance for a collection card
@@ -139,7 +139,7 @@ class CollectionSheetProvider extends ChangeNotifier {
 
   /// Count of active uncleared missing records for a collection card
   int getTotalMissingCountForCollection(String collectionId) {
-    return _missingRecords.where((m) => m.collectionId == collectionId && !m.isResolved).length;
+    return _missingRecords.where((m) => m.collectionId == collectionId && !m.isResolved && m.paidDate == null).length;
   }
 
   /// Total sum of partial day payments recorded in missing logs for a collection card
@@ -339,15 +339,18 @@ class CollectionSheetProvider extends ChangeNotifier {
         ? double.parse((missingRecord.missingFine * resolvedWeek).toStringAsFixed(2))
         : missingRecord.missingBalance;
 
+    // Requirement: No need to make basic pay zero when paid, let it be the old amount.
+    final double preservedBasicPay = missingRecord.missingPay > 0
+        ? missingRecord.missingPay
+        : (amountPaidForMissing > 0 ? amountPaidForMissing : missingRecord.dayPayment);
+
     final updated = missingRecord.copyWith(
       status: isFullyCleared ? 'resolved' : 'partial paid',
       paidDate: cleanPaidDate,
       missingWeek: resolvedWeek,
       missingBalance: finalBalance,
       dayPayment: missingRecord.dayPayment + amountPaidForMissing,
-      missingPay: isFullyCleared
-          ? 0.0
-          : (missingRecord.missingPay - amountPaidForMissing).clamp(0.0, double.infinity),
+      missingPay: preservedBasicPay,
       remarks: 'Paid ₹${amountPaidForMissing.toStringAsFixed(2)} on $formattedPaidDate [PAID_DATE:${cleanPaidDate.toIso8601String()}]',
       updatedAt: DateTime.now(),
     );

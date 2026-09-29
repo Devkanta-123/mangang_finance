@@ -57,7 +57,9 @@ class MissingPaymentRecord {
   bool get isResolved =>
       status.toLowerCase().trim() == 'resolved' ||
       status.toLowerCase().trim() == 'cleared' ||
-      status.toLowerCase().trim() == 'paid';
+      status.toLowerCase().trim() == 'paid' ||
+      paidDate != null;
+  bool get isPaidOrLocked => isResolved || paidDate != null;
   bool get isPartial =>
       !isResolved &&
       (status.toLowerCase().trim() == 'partially_resolved' ||
@@ -153,6 +155,27 @@ class MissingPaymentRecord {
       }
     }
 
+    final double dayPaymentVal = parseNum(json['day_payment'] ?? json['dayPayment']);
+    double missingPayVal = parseNum(json['missing_pay'] ?? json['missingPay']);
+    final statusStr = json['status']?.toString() ?? 'missing';
+    final isPaidOrResolved = statusStr.toLowerCase().trim() == 'resolved' ||
+        statusStr.toLowerCase().trim() == 'cleared' ||
+        statusStr.toLowerCase().trim() == 'paid' ||
+        resolvedPaidDate != null;
+
+    // Requirement: Basic pay must NOT become zero when paid.
+    // If it was stored as 0 in older records, restore the old amount from dayPayment or remarks.
+    if (missingPayVal <= 0.0 && isPaidOrResolved) {
+      if (dayPaymentVal > 0.0) {
+        missingPayVal = dayPaymentVal;
+      } else if (rawRemarks != null) {
+        final payMatch = RegExp(r'(?:Missing Pay|Paid)\s*₹?\s*([0-9]+(?:\.[0-9]+)?)').firstMatch(rawRemarks);
+        if (payMatch != null) {
+          missingPayVal = double.tryParse(payMatch.group(1)!) ?? 0.0;
+        }
+      }
+    }
+
     return MissingPaymentRecord(
       id: json['id']?.toString() ?? '',
       accountId: json['account_id']?.toString() ?? json['accountId']?.toString(),
@@ -165,8 +188,8 @@ class MissingPaymentRecord {
       route: json['route']?.toString(),
       collectionType: json['collection_type']?.toString() ?? json['collectionType']?.toString() ?? 'daily',
       missedDate: parseDate(json['missed_date'] ?? json['missedDate']),
-      dayPayment: parseNum(json['day_payment'] ?? json['dayPayment']),
-      missingPay: parseNum(json['missing_pay'] ?? json['missingPay']),
+      dayPayment: dayPaymentVal,
+      missingPay: missingPayVal,
       missingFine: parseNum(json['missing_fine'] ?? json['missingFine']),
       missingWeek: parseInt(json['missing_week'] ?? json['missingWeek']),
       missingBalance: parseNum(json['missing_balance'] ?? json['missingBalance']),

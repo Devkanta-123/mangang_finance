@@ -246,13 +246,12 @@ class _MissingRecordsExcelUploadDialogState
         children: [
           Row(
             children: [
-              Flexible(
+              Expanded(
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(Icons.description_outlined, size: 15, color: Colors.grey),
                     const SizedBox(width: 4),
-                    Flexible(
+                    Expanded(
                       child: Text(
                         res.fileName,
                         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
@@ -419,7 +418,7 @@ class _MissingRecordsExcelUploadDialogState
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(
-                  width: 460,
+                  width: 490,
                   child: Column(
                     children: [
                       Container(
@@ -504,9 +503,9 @@ class _MissingRecordsExcelUploadDialogState
     return Expanded(
       child: Column(
         children: [
-          Text(label, style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600), maxLines: 1),
+          Text(label, style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600), maxLines: 1, overflow: TextOverflow.ellipsis),
           const SizedBox(height: 2),
-          Text(val, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: valColor), maxLines: 1),
+          Text(val, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: valColor), maxLines: 1, overflow: TextOverflow.ellipsis),
         ],
       ),
     );
@@ -517,8 +516,11 @@ class _MissingRecordsExcelUploadDialogState
   Widget _buildBottomActions() {
     final bool canImport = widget.parseResult.hasValidRecords && !_isImporting;
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
+    return Wrap(
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 10,
+      runSpacing: 8,
       children: [
         OutlinedButton(
           onPressed: _isImporting ? null : () => Navigator.of(context).pop(),
@@ -529,7 +531,6 @@ class _MissingRecordsExcelUploadDialogState
           ),
           child: const Text('Cancel'),
         ),
-        const SizedBox(width: 10),
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF8B1A1A),

@@ -2292,13 +2292,15 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
     final totalCount = missingRecords.length;
 
     final totalMissingAmount = missingRecords
-        .where((record) => !record.isResolved)
+        .where((record) => !record.isResolved && record.paidDate == null)
         .fold<double>(
       0.0,
-      (sum, record) => sum + record.missingPay,
+      (sum, record) => sum + (record.missingPay > 0 ? record.missingPay : record.dayPayment),
     );
 
-    final totalMissingBalance = missingRecords.fold<double>(
+    final totalMissingBalance = missingRecords
+        .where((record) => !record.isResolved && record.paidDate == null)
+        .fold<double>(
       0.0,
       (sum, record) => sum + record.missingBalance,
     );
@@ -2930,19 +2932,55 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                               '${m.missedDate.year}';
                           final isResolved = m.isResolved;
                           final isPartial = m.isPartial;
+                          final bool isPaid = isResolved || m.paidDate != null;
+                          final double displayBasicPay = m.missingPay > 0
+                              ? m.missingPay
+                              : (m.dayPayment > 0 ? m.dayPayment : 0.0);
 
                           return DataRow(
                             color: WidgetStateProperty.resolveWith<Color?>((states) {
+                              if (isPaid) {
+                                return const Color(0xFFF1F5F9); // Frozen / locked row style
+                              }
                               return idx.isEven ? Colors.white : Colors.grey.shade50;
                             }),
                             cells: [
-                              DataCell(Text(
-                                dateString,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
+                              DataCell(
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (isPaid) ...[
+                                      Container(
+                                        padding: const EdgeInsets.all(2.5),
+                                        margin: const EdgeInsets.only(right: 5),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade200,
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: Colors.grey.shade400),
+                                        ),
+                                        child: Tooltip(
+                                          message: m.paidDate != null
+                                              ? 'Paid & Frozen on ${m.paidDate!.day.toString().padLeft(2, '0')}-${m.paidDate!.month.toString().padLeft(2, '0')}-${m.paidDate!.year} - Row is locked'
+                                              : 'Paid & Frozen - Row is locked',
+                                          child: Icon(
+                                            Icons.lock_rounded,
+                                            size: 11,
+                                            color: Colors.grey.shade800,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    Text(
+                                      dateString,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: isPaid ? Colors.grey.shade800 : Colors.black87,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              )),
+                              ),
                               DataCell(
                                 m.paidDate != null
                                     ? Container(
@@ -2977,28 +3015,52 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                         ),
                                       ),
                               ),
+                              DataCell(
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '₹ ${displayBasicPay.toStringAsFixed(2)}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: isPaid ? Colors.grey.shade800 : Colors.orange.shade900,
+                                      ),
+                                    ),
+                                    if (isPaid) ...[
+                                      const SizedBox(width: 4),
+                                      Tooltip(
+                                        message: 'Settled Basic Pay Amount (Preserved & Frozen)',
+                                        child: Icon(
+                                          Icons.lock_clock_rounded,
+                                          size: 11,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
                               DataCell(Text(
-                                '₹ ${m.missingPay.toStringAsFixed(2)}',
+                                '₹ ${m.missingFine.toStringAsFixed(2)}',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.orange.shade900,
+                                  color: isPaid ? Colors.grey.shade700 : Colors.black87,
                                 ),
                               )),
                               DataCell(Text(
-                                '₹ ${m.missingFine.toStringAsFixed(2)}',
-                                style: const TextStyle(fontSize: 11),
-                              )),
-                              DataCell(Text(
                                 '${m.missingWeek}',
-                                style: const TextStyle(fontSize: 11),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isPaid ? Colors.grey.shade700 : Colors.black87,
+                                ),
                               )),
                               DataCell(Text(
                                 '₹ ${m.missingBalance.toStringAsFixed(2)}',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.red.shade900,
+                                  color: isPaid ? Colors.grey.shade600 : Colors.red.shade900,
                                 ),
                               )),
                               DataCell(
@@ -3008,14 +3070,14 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                     vertical: 2,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: isResolved
+                                    color: isPaid
                                         ? Colors.green.shade50
                                         : (isPartial
                                             ? Colors.amber.shade50
                                             : Colors.red.shade50),
                                     borderRadius: BorderRadius.circular(4),
                                     border: Border.all(
-                                      color: isResolved
+                                      color: isPaid
                                           ? Colors.green.shade300
                                           : (isPartial
                                               ? Colors.amber.shade300
@@ -3026,13 +3088,13 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Icon(
-                                        isResolved
-                                            ? Icons.check_circle_rounded
+                                        isPaid
+                                            ? Icons.lock_rounded
                                             : (isPartial
                                                 ? Icons.hourglass_bottom_rounded
                                                 : (m.isPaused ? Icons.pause_circle_rounded : Icons.pending_actions_rounded)),
                                         size: 11,
-                                        color: isResolved
+                                        color: isPaid
                                             ? Colors.green.shade700
                                             : (isPartial
                                                 ? Colors.amber.shade900
@@ -3040,15 +3102,15 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                       ),
                                       const SizedBox(width: 4),
                                       Text(
-                                        isResolved
-                                            ? "PAID"
+                                        isPaid
+                                            ? "PAID (LOCKED)"
                                             : (isPartial
                                                 ? "PARTIAL PAID"
                                                 : (m.isPaused ? "PAUSED" : "MISSING")),
                                         style: TextStyle(
                                           fontSize: 9.5,
                                           fontWeight: FontWeight.bold,
-                                          color: isResolved
+                                          color: isPaid
                                               ? Colors.green.shade800
                                               : (isPartial
                                                   ? Colors.amber.shade900
@@ -3423,9 +3485,13 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         final paidDateStr = record.paidDate != null
             ? '${record.paidDate!.day.toString().padLeft(2, '0')}-${record.paidDate!.month.toString().padLeft(2, '0')}-${record.paidDate!.year}'
             : '—';
-        final statusLabel = record.isResolved
-            ? 'PAID'
+        final bool isPaid = record.isResolved || record.paidDate != null;
+        final statusLabel = isPaid
+            ? 'PAID (LOCKED)'
             : (record.isPartial ? 'PARTIAL PAID' : (record.isPaused ? 'PAUSED' : 'MISSING'));
+        final double exportBasicPay = record.missingPay > 0
+            ? record.missingPay
+            : (record.dayPayment > 0 ? record.dayPayment : 0.0);
 
         sheet
             .cell(
@@ -3454,7 +3520,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
               ),
             )
             .value = xl.DoubleCellValue(
-          record.missingPay,
+          exportBasicPay,
         );
 
         sheet

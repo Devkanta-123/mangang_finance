@@ -6075,7 +6075,7 @@ class __AddPaymentEntryModalContentState
     final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
     final all = cp.getMissingRecordsForCollection(widget.entry.id);
     setState(() {
-      _unclearedMissing = all.where((m) => !m.isResolved).toList()
+      _unclearedMissing = all.where((m) => !m.isResolved && m.paidDate == null).toList()
         ..sort((a, b) => a.missedDate.compareTo(b.missedDate));
     });
   }
