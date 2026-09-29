@@ -228,12 +228,28 @@ class SupabaseService {
         final cleanCustId = customerId.trim();
         final orConds = [
           'customerid.eq.$cleanCustId',
+          'accountnumber.eq.$cleanCustId',
           if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
         ];
         await supaClient
             .from('loanee_accounts')
             .delete()
             .or(orConds.join(','));
+
+        // Also delete from user_auth table so they cannot log in anymore
+        try {
+          final authOr = [
+            'customer_id.eq.$cleanCustId',
+            if (int.tryParse(cleanCustId) != null) 'id.eq.$cleanCustId',
+          ].join(',');
+          await supaClient
+              .from('user_auth')
+              .delete()
+              .eq('user_type', 'loanee')
+              .or(authOr);
+        } catch (authErr) {
+          debugPrint('⚠️ Sync user_auth loanee delete note: $authErr');
+        }
             
         debugPrint('✅ Successfully deleted loanee $customerId');
         return true;

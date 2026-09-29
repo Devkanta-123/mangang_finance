@@ -5,6 +5,7 @@ import '../models/user_model.dart';
 import '../models/loanee_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/loanee_provider.dart';
+import '../providers/collection_sheet_provider.dart';
 import '../widgets/edit_loanee_dialog.dart';
 
 class LoaneeListPage extends StatefulWidget {
@@ -129,10 +130,179 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
     }
   }
 
+  Widget _buildDeleteInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+          Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
+        ],
+      ),
+    );
+  }
+
+  Future<bool> _showDeleteLoaneeConfirmDialog(
+    BuildContext context,
+    LoaneeAccount loanee,
+  ) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        contentPadding: const EdgeInsets.all(24),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.red.shade200, width: 2),
+              ),
+              child: Icon(
+                Icons.warning_amber_rounded,
+                size: 52,
+                color: Colors.red.shade600,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Delete Loanee Account?',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1E1E1E),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Are you sure you want to permanently delete the loanee account for ${loanee.loaneeName} (${loanee.customerId})? Only Managers are authorized to delete accounts.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  _buildDeleteInfoRow('Customer ID', loanee.customerId),
+                  const SizedBox(height: 4),
+                  _buildDeleteInfoRow('Account No', loanee.accountNumber),
+                  const SizedBox(height: 4),
+                  _buildDeleteInfoRow('Mobile No', loanee.mobileNo),
+                  const SizedBox(height: 4),
+                  _buildDeleteInfoRow('Loan Amount', '₹ ${loanee.loanAmount.toStringAsFixed(0)}'),
+                  const SizedBox(height: 4),
+                  _buildDeleteInfoRow('District', loanee.district),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+            ),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: const Text('Yes, Delete Account'),
+          ),
+        ],
+      ),
+    );
+
+    return result ?? false;
+  }
+
+  Future<void> _handleDeleteLoanee(
+    BuildContext context,
+    LoaneeProvider loaneeProvider,
+    LoaneeAccount loanee,
+  ) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final bool isManager = authProvider.activeRole == UserType.manager ||
+        authProvider.currentUser?.userType == UserType.manager;
+
+    if (!isManager) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Access Denied: Only Managers can delete loanee accounts.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await _showDeleteLoaneeConfirmDialog(context, loanee);
+    if (!confirmed || !context.mounted) return;
+
+    final success = await loaneeProvider.deleteLoanee(loanee.customerId);
+
+    // Also clean up matching collection entries if present
+    try {
+      final colProvider = Provider.of<CollectionSheetProvider>(context, listen: false);
+      final matching = colProvider.collectionEntries.where(
+        (e) => e.customerId.trim().toLowerCase() == loanee.customerId.trim().toLowerCase() ||
+               e.accountNumber.trim().toLowerCase() == loanee.accountNumber.trim().toLowerCase(),
+      ).toList();
+      for (final e in matching) {
+        await colProvider.deleteCollectionEntry(e.id);
+      }
+    } catch (_) {}
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  success
+                      ? 'Loanee account for ${loanee.loaneeName} permanently deleted.'
+                      : 'Deleted loanee ${loanee.loaneeName} locally.',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red.shade800,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    final bool isAdmin = authProvider.activeRole == UserType.admin;
+    final bool isAdmin = authProvider.activeRole == UserType.admin &&
+        (authProvider.currentUser == null ||
+            authProvider.currentUser?.userType == UserType.admin);
+    final bool isManager = authProvider.activeRole == UserType.manager ||
+        authProvider.currentUser?.userType == UserType.manager;
 
     final loaneeProvider = Provider.of<LoaneeProvider>(context);
     final allLoanees = loaneeProvider.loanees;
@@ -461,7 +631,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                       itemCount: paginatedLoanees.length,
                       itemBuilder: (context, index) {
                         final item = paginatedLoanees[index];
-                        return _buildLoaneeCard(context, item, loaneeProvider, isAdmin);
+                        return _buildLoaneeCard(context, item, loaneeProvider, isAdmin, isManager);
                       },
                     ),
             ),
@@ -763,6 +933,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
     LoaneeAccount item,
     LoaneeProvider loaneeProvider,
     bool isAdmin,
+    bool isManager,
   ) {
     final bool isActive = item.isActive;
 
@@ -777,7 +948,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
         ),
       ),
       child: InkWell(
-        onTap: () => _showLoaneeDetailsDialog(context, item, loaneeProvider, isAdmin),
+        onTap: () => _showLoaneeDetailsDialog(context, item, loaneeProvider, isAdmin, isManager),
         borderRadius: BorderRadius.circular(14),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -839,6 +1010,36 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                                           fontSize: 10,
                                           fontWeight: FontWeight.bold,
                                           color: Color(0xFF8B1A1A),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (isManager) ...[
+                              InkWell(
+                                onTap: () => _handleDeleteLoanee(context, loaneeProvider, item),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade50,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.red.shade300),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.delete_outline_rounded, size: 14, color: Colors.red),
+                                      SizedBox(width: 2),
+                                      Text(
+                                        'Delete',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.red,
                                         ),
                                       ),
                                     ],
@@ -1062,6 +1263,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
     LoaneeAccount item,
     LoaneeProvider loaneeProvider,
     bool isAdmin,
+    bool isManager,
   ) {
     showDialog(
       context: context,
@@ -1279,6 +1481,23 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
                     },
                     icon: const Icon(Icons.edit_note_rounded, size: 15),
                     label: const Text('Edit Loanee', style: TextStyle(fontSize: 12)),
+                  ),
+                if (isManager)
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade800,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _handleDeleteLoanee(context, loaneeProvider, currentLoanee);
+                    },
+                    icon: const Icon(Icons.delete_forever_rounded, size: 15),
+                    label: const Text('Delete Loanee', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(

@@ -227,7 +227,11 @@ class LoaneeProvider extends ChangeNotifier {
   /// Delete Loanee account
   Future<bool> deleteLoanee(String customerId) async {
     final cleanCust = customerId.trim().toLowerCase();
-    _loanees.removeWhere((l) => l.customerId.trim().toLowerCase() == cleanCust);
+    _loanees.removeWhere((l) =>
+        l.customerId.trim().toLowerCase() == cleanCust ||
+        l.customerid.trim().toLowerCase() == cleanCust ||
+        (l.accountNumber.trim().isNotEmpty &&
+            l.accountNumber.trim().toLowerCase() == cleanCust));
     notifyListeners();
     return await SupabaseService.instance.deleteLoaneeAccount(customerId);
   }

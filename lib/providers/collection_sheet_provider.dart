@@ -1,6 +1,7 @@
 // lib/providers/collection_sheet_provider.dart
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/route_model.dart';
 import '../models/ro_collection_entry_model.dart';
 import '../models/collection_payment_model.dart';
@@ -25,10 +26,18 @@ class CollectionSheetProvider extends ChangeNotifier {
   // Dedicated Missing Payment Records - Missing payment logs in missing_payment_records (MISSING != PAYMENT)
   final List<MissingPaymentRecord> _missingRecords = [];
 
+  // Set of collection IDs where historical missing Excel records have been uploaded.
+  // BY DEFAULT: System auto does NOT run for any entry until historical records are uploaded.
+  final Set<String> _authorizedAutoMissingEntryIds = {};
+
+  // Map of collection IDs to the latest historical date audited by the uploaded Excel.
+  final Map<String, DateTime> _excelAuditEndDates = {};
+
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
 
   CollectionSheetProvider({bool autoFetch = true}) {
+    _loadAuthorizedMissingEntryIds();
     if (autoFetch) {
       fetchFromSupabase();
     }
@@ -98,10 +107,10 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
   /// Total sum of missing fine / balance for a collection card
-  double getTotalMissingBalanceForCollection(String collectionId) {
+  double getTotalMissingBalanceForCollection(String collectionId, {DateTime? asOfDate}) {
     return _missingRecords.where((m) => m.collectionId == collectionId).fold(0.0, (sum, m) {
       if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
-        final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate);
+        final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate, asOfDate: asOfDate);
         return sum + double.parse((m.missingFine * currentWeek).toStringAsFixed(2));
       }
       return sum + m.missingBalance;
@@ -118,6 +127,87 @@ class CollectionSheetProvider extends ChangeNotifier {
     return _missingRecords
         .where((m) => m.collectionId == collectionId)
         .fold(0.0, (sum, m) => sum + m.dayPayment);
+  }
+  /// Check whether missing records automation is authorized for an entry.
+  /// Rule: By default, system auto does NOT run unless historical missing Excel
+  /// has been uploaded and inserted for this entry.
+  bool isMissingAutomationAuthorized(String collectionId, [String? accountNo, String? customerId]) {
+    if (_authorizedAutoMissingEntryIds.contains(collectionId)) return true;
+    if (accountNo != null && _authorizedAutoMissingEntryIds.contains(accountNo)) return true;
+    if (customerId != null && _authorizedAutoMissingEntryIds.contains(customerId)) return true;
+
+    // Check if any missing record with source == 'excel_import' exists for this entry
+    final hasExcelRecord = _missingRecords.any((m) =>
+        (m.collectionId == collectionId ||
+            (accountNo != null && m.accountNo == accountNo) ||
+            (customerId != null && m.customerId == customerId)) &&
+        m.source == 'excel_import');
+    if (hasExcelRecord) {
+      _authorizedAutoMissingEntryIds.add(collectionId);
+      return true;
+    }
+    return false;
+  }
+
+  /// Authorize missing records automation for an entry after Excel upload and set the audit boundary date.
+  Future<void> authorizeMissingAutomationForEntry(String collectionId, {DateTime? auditEndDate, bool notify = true}) async {
+    _authorizedAutoMissingEntryIds.add(collectionId);
+    if (auditEndDate != null) {
+      _excelAuditEndDates[collectionId] = DateTime(auditEndDate.year, auditEndDate.month, auditEndDate.day);
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('authorized_auto_missing_entry_ids', _authorizedAutoMissingEntryIds.toList());
+      if (auditEndDate != null) {
+        await prefs.setString('excel_missing_audit_date_$collectionId', auditEndDate.toIso8601String());
+      }
+    } catch (_) {}
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
+  DateTime? getExcelAuditEndDate(String collectionId) {
+    return _excelAuditEndDates[collectionId];
+  }
+
+  /// Add batch of missing payment records (from Excel import or system)
+  void addMissingPaymentRecordsBatch(List<MissingPaymentRecord> records, {bool notify = true}) {
+    for (final rec in records) {
+      final existingIdx = _missingRecords.indexWhere((m) =>
+          m.id == rec.id ||
+          (m.collectionId == rec.collectionId &&
+              m.missedDate.year == rec.missedDate.year &&
+              m.missedDate.month == rec.missedDate.month &&
+              m.missedDate.day == rec.missedDate.day));
+      if (existingIdx >= 0) {
+        _missingRecords[existingIdx] = rec;
+      } else {
+        _missingRecords.add(rec);
+      }
+    }
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadAuthorizedMissingEntryIds() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ids = prefs.getStringList('authorized_auto_missing_entry_ids');
+      if (ids != null) {
+        _authorizedAutoMissingEntryIds.addAll(ids);
+      }
+      for (final id in _authorizedAutoMissingEntryIds) {
+        final dStr = prefs.getString('excel_missing_audit_date_$id');
+        if (dStr != null) {
+          final dt = DateTime.tryParse(dStr);
+          if (dt != null) {
+            _excelAuditEndDates[id] = DateTime(dt.year, dt.month, dt.day);
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   /// Case 1: When a loanee makes a partial payment (less than the required daily/weekly base installment),
@@ -940,14 +1030,22 @@ class CollectionSheetProvider extends ChangeNotifier {
     DateTime? asOfDate,
     DateTime? sanctionDate,
     bool saveToRemote = true,
+    bool forceAuthorize = false,
   }) async {
+    // 0. RULE: By default, do NOT run system auto for any entry!
+    // Automation strictly runs once historical missing records Excel data has been
+    // uploaded and inserted successfully (or when forceAuthorize is explicitly true).
+    if (!forceAuthorize && !isMissingAutomationAuthorized(entry.id, entry.accountNumber, entry.customerId)) {
+      return [];
+    }
+
     final cardPayments = getPaymentsForCollection(entry.id);
+    final auditEndDate = getExcelAuditEndDate(entry.id);
 
     // If there are no real payment records in ro_collection_payments for this entry
-    // (e.g. before Excel is uploaded or when payment data was deleted/empty),
-    // strictly do NOT auto-insert missing records or post-maturity records,
+    // and no historical Excel uploaded, strictly do NOT auto-insert missing records or post-maturity records,
     // and clean up any orphan records!
-    if (!SettingsProvider.hasRealPayments(cardPayments)) {
+    if (!SettingsProvider.hasRealPayments(cardPayments) && auditEndDate == null) {
       final orphanAuto = cardPayments.where((p) =>
           p.id.startsWith('PAY-LATE-') ||
           p.id.startsWith('PAY-POSTMAT-') ||
@@ -1001,7 +1099,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       return !isAuto;
     }).toList();
 
-    if (nonAutoTx.isEmpty) {
+    if (nonAutoTx.isEmpty && auditEndDate == null) {
       return [];
     }
 
@@ -1077,11 +1175,20 @@ class CollectionSheetProvider extends ChangeNotifier {
     final List<DateTime> skippedPausedDates = [];
 
     // For both Daily and Weekly loans, late fine calculations must strictly start
-    // forward from the latest real transaction (e.g. from Excel upload or manual payment).
-    final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    final baseDate = sorted.first.createdAt;
-    DateTime cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
+    // forward from the latest real transaction or historical Excel audit date.
+    DateTime cleanBaseDate;
+    if (nonAutoTx.isNotEmpty) {
+      final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final baseDate = sorted.first.createdAt;
+      cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
+    } else {
+      cleanBaseDate = DateTime(auditEndDate!.year, auditEndDate.month, auditEndDate.day);
+    }
+
+    if (auditEndDate != null && auditEndDate.isAfter(cleanBaseDate)) {
+      cleanBaseDate = DateTime(auditEndDate.year, auditEndDate.month, auditEndDate.day);
+    }
 
     final effectiveSanction = sanctionDate ?? loanee?.loanSanctionDate;
     if (effectiveSanction != null) {
@@ -1780,6 +1887,9 @@ class CollectionSheetProvider extends ChangeNotifier {
             }
           }
           _missingRecords.add(m);
+          if (m.source == 'excel_import') {
+            _authorizedAutoMissingEntryIds.add(m.collectionId);
+          }
         }
       }
     } catch (e) {

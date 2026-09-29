@@ -15,6 +15,7 @@ import '../providers/auth_provider.dart';
 import '../providers/collection_sheet_provider.dart';
 import '../providers/loanee_provider.dart';
 import '../providers/settings_provider.dart';
+import '../widgets/missing_records_excel_upload_dialog.dart';
 
 /// Missing Manager Page
 ///
@@ -34,6 +35,8 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
   String _selectedType = 'All';
   String _searchQuery = '';
   bool _isTableView = true;
+  String _dateSortOrder = 'none'; // 'none', 'desc', 'asc'
+  final Set<String> _runningAutoEntryIds = {};
 
   final TextEditingController _searchController = TextEditingController();
 
@@ -49,6 +52,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       _selectedType = 'All';
       _searchQuery = '';
       _searchController.clear();
+      _dateSortOrder = 'none';
     });
   }
 
@@ -168,6 +172,13 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
             matchAccount ||
             matchMobile;
       }).toList();
+    }
+
+    // Date sorting for entries list
+    if (_dateSortOrder == 'desc') {
+      filteredEntries.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    } else if (_dateSortOrder == 'asc') {
+      filteredEntries.sort((a, b) => a.createdAt.compareTo(b.createdAt));
     }
 
     // ------------------------------------------------------------
@@ -355,6 +366,24 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                   tooltip: 'Reset Filters',
                   onPressed: _resetFilters,
                 ),
+
+              IconButton(
+                icon: const Icon(
+                  Icons.upload_file_rounded,
+                  size: 18,
+                  color: Colors.white,
+                ),
+                tooltip: 'Upload Missing Old Records (Excel)',
+                onPressed: () async {
+                  final imported =
+                      await MissingRecordsExcelUploadDialog.pickAndShow(context);
+                  if (imported == true && mounted) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) setState(() {});
+                    });
+                  }
+                },
+              ),
 
               IconButton(
                 icon: provider.isSyncing
@@ -800,6 +829,42 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                       });
                     },
                   ),
+
+                  Container(
+                    height: 20,
+                    width: 1,
+                    color: Colors.grey.shade300,
+                  ),
+
+                  IconButton(
+                    icon: Icon(
+                      _dateSortOrder == 'asc'
+                          ? Icons.arrow_upward_rounded
+                          : (_dateSortOrder == 'desc'
+                              ? Icons.arrow_downward_rounded
+                              : Icons.sort_rounded),
+                      size: 18,
+                      color: _dateSortOrder != 'none'
+                          ? const Color(0xFF8B1A1A)
+                          : Colors.grey,
+                    ),
+                    tooltip: _dateSortOrder == 'asc'
+                        ? 'Date: Ascending (Oldest First)'
+                        : (_dateSortOrder == 'desc'
+                            ? 'Date: Descending (Newest First)'
+                            : 'Sort by Date'),
+                    onPressed: () {
+                      setState(() {
+                        if (_dateSortOrder == 'none') {
+                          _dateSortOrder = 'desc';
+                        } else if (_dateSortOrder == 'desc') {
+                          _dateSortOrder = 'asc';
+                        } else {
+                          _dateSortOrder = 'none';
+                        }
+                      });
+                    },
+                  ),
                 ],
               ),
             ),
@@ -981,7 +1046,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     SettingsProvider settingsProvider,
     LoaneeProvider loaneeProvider,
   ) {
-    const double tableWidth = 1020;
+    const double tableWidth = 1135;
 
     return Container(
       width: double.infinity,
@@ -1018,7 +1083,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                 6: FixedColumnWidth(100),
                 7: FixedColumnWidth(105),
                 8: FixedColumnWidth(105),
-                9: FixedColumnWidth(100),
+                9: FixedColumnWidth(215),
               },
 
               children: [
@@ -1047,6 +1112,9 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
 
                     final entry =
                         mapEntry.value;
+
+                    final bool isRunningAuto =
+                        _runningAutoEntryIds.contains(entry.id);
 
                     final int missingCount =
                         provider
@@ -1094,19 +1162,37 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                                 _openMissingDetails(
                               entry,
                             ),
-                            child: Text(
-                              entry.loaneeName,
-                              maxLines: 2,
-                              overflow:
-                                  TextOverflow.ellipsis,
-                              style:
-                                  const TextStyle(
-                                fontSize: 12,
-                                fontWeight:
-                                    FontWeight.bold,
-                                color:
-                                    Color(0xFF8B1A1A),
-                              ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    entry.loaneeName,
+                                    maxLines: 2,
+                                    overflow:
+                                        TextOverflow.ellipsis,
+                                    style:
+                                        const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight:
+                                          FontWeight.bold,
+                                      color:
+                                          Color(0xFF8B1A1A),
+                                    ),
+                                  ),
+                                ),
+                                if (provider.isMissingAutomationAuthorized(entry.id)) ...[
+                                  const SizedBox(width: 4),
+                                  const Tooltip(
+                                    message: 'Excel Uploaded - Automation Active',
+                                    child: Icon(
+                                      Icons.bolt_rounded,
+                                      size: 13,
+                                      color: Colors.green,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         ),
@@ -1276,62 +1362,91 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                           ),
                         ),
 
-                        _dataBodyCell(
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                height: 30,
-                                child:
-                                    ElevatedButton.icon(
-                                  onPressed: () =>
-                                      _openMissingDetails(
-                                    entry,
-                                  ),
-                                  icon: const Icon(
-                                    Icons
-                                        .receipt_long_rounded,
-                                    size: 12,
-                                  ),
-                                  label: const Text(
-                                    'View Log',
-                                    style:
-                                        TextStyle(
-                                      fontSize: 10,
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 8,
+                          ),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  height: 28,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () => _openMissingDetails(entry),
+                                    icon: const Icon(
+                                      Icons.receipt_long_rounded,
+                                      size: 12,
                                     ),
-                                  ),
-                                  style:
-                                      ElevatedButton
-                                          .styleFrom(
-                                    backgroundColor:
-                                        const Color(
-                                      0xFF8B1A1A,
+                                    label: const Text(
+                                      'View Log',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                    foregroundColor:
-                                        Colors.white,
-                                    padding:
-                                        const EdgeInsets
-                                            .symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    minimumSize:
-                                        const Size(
-                                      60,
-                                      28,
-                                    ),
-                                    shape:
-                                        RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius
-                                              .circular(
-                                        6,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF8B1A1A),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2,
+                                      ),
+                                      minimumSize: const Size(0, 28),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(6),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 6),
+                                SizedBox(
+                                  height: 28,
+                                  child: ElevatedButton.icon(
+                                    onPressed: isRunningAuto
+                                        ? null
+                                        : () => _handleStartSystemAuto(entry),
+                                    icon: isRunningAuto
+                                        ? const SizedBox(
+                                            width: 12,
+                                            height: 12,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.bolt_rounded,
+                                            size: 13,
+                                          ),
+                                    label: Text(
+                                      isRunningAuto ? 'Syncing...' : 'Start Auto',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF1E7E34),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2,
+                                      ),
+                                      minimumSize: const Size(0, 28),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -1547,35 +1662,87 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
             const SizedBox(height: 10),
 
             Align(
-              alignment:
-                  Alignment.centerRight,
-              child: ElevatedButton.icon(
-                onPressed: () =>
-                    _openMissingDetails(entry),
-                icon: const Icon(
-                  Icons.receipt_long_rounded,
-                  size: 14,
-                ),
-                label: const Text(
-                  'View Missing Log',
-                ),
-                style:
-                    ElevatedButton.styleFrom(
-                  backgroundColor:
-                      const Color(0xFF8B1A1A),
-                  foregroundColor:
-                      Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 6,
+              alignment: Alignment.centerRight,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SizedBox(
+                    height: 32,
+                    child: ElevatedButton.icon(
+                      onPressed: _runningAutoEntryIds.contains(entry.id)
+                          ? null
+                          : () => _handleStartSystemAuto(entry),
+                      icon: _runningAutoEntryIds.contains(entry.id)
+                          ? const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.bolt_rounded,
+                              size: 14,
+                            ),
+                      label: Text(
+                        _runningAutoEntryIds.contains(entry.id)
+                            ? 'Syncing...'
+                            : 'Start Auto',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1E7E34),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
                   ),
-                  shape:
-                      RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(8),
+                  SizedBox(
+                    height: 32,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _openMissingDetails(entry),
+                      icon: const Icon(
+                        Icons.receipt_long_rounded,
+                        size: 14,
+                      ),
+                      label: const Text(
+                        'View Missing Log',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF8B1A1A),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ],
@@ -1627,6 +1794,103 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       entry,
     );
   }
+
+  Future<void> _handleStartSystemAuto(RoCollectionEntry entry) async {
+    if (_runningAutoEntryIds.contains(entry.id)) return;
+
+    final collectionProvider =
+        Provider.of<CollectionSheetProvider>(context, listen: false);
+    final settingsProvider =
+        Provider.of<SettingsProvider>(context, listen: false);
+    LoaneeProvider? loaneeProvider;
+    try {
+      loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
+    } catch (_) {}
+
+    final isAuthorized = collectionProvider.isMissingAutomationAuthorized(
+      entry.id,
+      entry.accountNumber,
+      entry.customerId,
+    );
+
+    if (!isAuthorized) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Please upload historical missing records Excel from the top header first for ${entry.loaneeName}.',
+          ),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _runningAutoEntryIds.add(entry.id);
+    });
+
+    try {
+      final loanee = loaneeProvider?.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+
+      final effectiveLoanAmount =
+          (entry.loanAmount != null && entry.loanAmount! > 0)
+              ? entry.loanAmount!
+              : ((loanee != null && loanee.loanAmount > 0)
+                  ? loanee.loanAmount
+                  : (entry.actualPrincipal ?? entry.initialBalance));
+
+      final newRecords = await collectionProvider.syncAutoLateFeesForEntry(
+        entry: entry,
+        settingsProvider: settingsProvider,
+        loaneeLoanAmount: effectiveLoanAmount,
+        loaneeProvider: loaneeProvider,
+        sanctionDate: loanee?.loanSanctionDate,
+        saveToRemote: true,
+        forceAuthorize: true,
+      );
+
+      if (mounted) {
+        if (newRecords.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'System auto complete: ${newRecords.length} new missing date record(s) inserted for ${entry.loaneeName}.',
+              ),
+              backgroundColor: Colors.green.shade800,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'System auto complete: Missing records for ${entry.loaneeName} are up to date.',
+              ),
+              backgroundColor: Colors.blue.shade800,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error running system auto: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _runningAutoEntryIds.remove(entry.id);
+        });
+      }
+    }
+  }
 }
 
 // ============================================================================
@@ -1650,34 +1914,9 @@ class _MissingDetailsDialog extends StatefulWidget {
   ) async {
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
-    final settingsProvider =
-        Provider.of<SettingsProvider>(context, listen: false);
     LoaneeProvider? loaneeProvider;
     try {
       loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
-    } catch (_) {}
-
-    try {
-      final loanee = loaneeProvider?.getLoaneeForUser(
-        customerId: entry.customerId,
-        mobileNo: entry.mobileNo,
-        name: entry.loaneeName,
-      );
-
-      final effectiveLoanAmount =
-          (entry.loanAmount != null && entry.loanAmount! > 0)
-              ? entry.loanAmount!
-              : ((loanee != null && loanee.loanAmount > 0)
-                  ? loanee.loanAmount
-                  : (entry.actualPrincipal ?? entry.initialBalance));
-
-      await collectionProvider.syncAutoLateFeesForEntry(
-        entry: entry,
-        settingsProvider: settingsProvider,
-        loaneeLoanAmount: effectiveLoanAmount,
-        loaneeProvider: loaneeProvider,
-        sanctionDate: loanee?.loanSanctionDate,
-      );
     } catch (_) {}
 
     if (!context.mounted) return;
@@ -1700,6 +1939,125 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
   int _page = 1;
   final int _pageSize = 5;
   bool _isExporting = false;
+  bool _isRunningAuto = false;
+  bool _sortAscending = true; // true = asc (oldest first), false = desc (newest first)
+  String _sourceFilter = 'All'; // 'All', 'excel', 'system', 'collection'
+
+  bool _isExcelUpload(MissingPaymentRecord record) {
+    final src = record.source.toLowerCase().trim();
+    if (src == 'excel_import' || src == 'excel' || src == 'excel_upload') return true;
+    final rem = (record.remarks ?? '').toLowerCase();
+    return rem.contains('excel');
+  }
+
+  bool _isSystemAuto(MissingPaymentRecord record) {
+    final src = record.source.toLowerCase().trim();
+    if (src == 'system' || src == 'system_auto' || src == 'auto') return true;
+    final rem = (record.remarks ?? '').toLowerCase();
+    return rem.contains('auto assessed') ||
+        rem.contains('system') ||
+        rem.contains('paused by admin');
+  }
+
+  Widget _buildSourceBadge(MissingPaymentRecord record) {
+    final bool isExcel = _isExcelUpload(record);
+    final bool isAuto = _isSystemAuto(record);
+
+    final Color bgColor;
+    final Color borderColor;
+    final Color textColor;
+    final IconData icon;
+    final String label;
+
+    if (isExcel) {
+      bgColor = Colors.teal.shade50;
+      borderColor = Colors.teal.shade300;
+      textColor = Colors.teal.shade800;
+      icon = Icons.upload_file_rounded;
+      label = 'Excel Upload';
+    } else if (isAuto) {
+      bgColor = Colors.blue.shade50;
+      borderColor = Colors.blue.shade300;
+      textColor = Colors.blue.shade800;
+      icon = Icons.bolt_rounded;
+      label = 'System Auto';
+    } else {
+      bgColor = Colors.purple.shade50;
+      borderColor = Colors.purple.shade300;
+      textColor = Colors.purple.shade800;
+      icon = Icons.receipt_long_rounded;
+      label = 'Collection';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: textColor),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip({
+    required String label,
+    IconData? icon,
+    required bool isSelected,
+    Color? color,
+    required VoidCallback onTap,
+  }) {
+    final activeColor = color ?? const Color(0xFF8B1A1A);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? activeColor : activeColor.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isSelected ? activeColor : activeColor.withValues(alpha: 0.25),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(
+                icon,
+                size: 11,
+                color: isSelected ? Colors.white : activeColor,
+              ),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: isSelected ? Colors.white : activeColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -1716,6 +2074,100 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
   void _onProviderChange() {
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  Future<void> _runSystemAutoInDialog() async {
+    if (_isRunningAuto) return;
+
+    final entry = widget.entry;
+    final collectionProvider = widget.collectionProvider;
+    final settingsProvider =
+        Provider.of<SettingsProvider>(context, listen: false);
+    final loaneeProvider = widget.loaneeProvider;
+
+    final isAuthorized = collectionProvider.isMissingAutomationAuthorized(
+      entry.id,
+      entry.accountNumber,
+      entry.customerId,
+    );
+
+    if (!isAuthorized) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Please upload historical missing records Excel from the top header first for ${entry.loaneeName}.',
+          ),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isRunningAuto = true;
+    });
+
+    try {
+      final loanee = loaneeProvider?.getLoaneeForUser(
+        customerId: entry.customerId,
+        mobileNo: entry.mobileNo,
+        name: entry.loaneeName,
+      );
+
+      final effectiveLoanAmount =
+          (entry.loanAmount != null && entry.loanAmount! > 0)
+              ? entry.loanAmount!
+              : ((loanee != null && loanee.loanAmount > 0)
+                  ? loanee.loanAmount
+                  : (entry.actualPrincipal ?? entry.initialBalance));
+
+      final newRecords = await collectionProvider.syncAutoLateFeesForEntry(
+        entry: entry,
+        settingsProvider: settingsProvider,
+        loaneeLoanAmount: effectiveLoanAmount,
+        loaneeProvider: loaneeProvider,
+        sanctionDate: loanee?.loanSanctionDate,
+        saveToRemote: true,
+        forceAuthorize: true,
+      );
+
+      if (mounted) {
+        if (newRecords.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'System auto complete: ${newRecords.length} new missing date record(s) inserted.',
+              ),
+              backgroundColor: Colors.green.shade800,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'System auto check complete: Missing records are up to date.',
+              ),
+              backgroundColor: Colors.blue,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error running system auto: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRunningAuto = false;
+        });
+      }
     }
   }
 
@@ -1782,22 +2234,101 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             : (entry.actualPrincipal ?? entry.initialBalance));
     final remaining = (loanAmt + effectiveInt - totalPayment).clamp(0.0, double.infinity);
 
-    // Pagination calculations
-    final int totalPages = totalCount == 0 ? 1 : ((totalCount + _pageSize - 1) ~/ _pageSize);
+    // Origin breakdown counts
+    final int excelCount = missingRecords.where(_isExcelUpload).length;
+    final int systemCount = missingRecords.where(_isSystemAuto).length;
+    final int collectionCount =
+        missingRecords.where((r) => !_isExcelUpload(r) && !_isSystemAuto(r)).length;
+
+    // Filter records by source if active
+    List<MissingPaymentRecord> displayRecords =
+        List<MissingPaymentRecord>.from(missingRecords);
+    if (_sourceFilter == 'excel') {
+      displayRecords = displayRecords.where(_isExcelUpload).toList();
+    } else if (_sourceFilter == 'system') {
+      displayRecords = displayRecords.where(_isSystemAuto).toList();
+    } else if (_sourceFilter == 'collection') {
+      displayRecords = displayRecords
+          .where((r) => !_isExcelUpload(r) && !_isSystemAuto(r))
+          .toList();
+    }
+
+    // Sort by missedDate (Ascending or Descending)
+    displayRecords.sort((a, b) {
+      final cmp = a.missedDate.compareTo(b.missedDate);
+      return _sortAscending ? cmp : -cmp;
+    });
+
+    final int filteredCount = displayRecords.length;
+    final int totalPages =
+        filteredCount == 0 ? 1 : ((filteredCount + _pageSize - 1) ~/ _pageSize);
     if (_page > totalPages && totalPages > 0) {
       _page = totalPages;
     }
     final int startIndex = (_page - 1) * _pageSize;
-    final int endIndex = (startIndex + _pageSize).clamp(0, totalCount);
-    final pagedRecords = (startIndex < totalCount)
-        ? missingRecords.sublist(startIndex, endIndex)
+    final int endIndex = (startIndex + _pageSize).clamp(0, filteredCount);
+    final pagedRecords = (startIndex < filteredCount)
+        ? displayRecords.sublist(startIndex, endIndex)
         : <MissingPaymentRecord>[];
+
+    // Determine overall status label & colors
+    final String overallStatusLabel;
+    final Color overallStatusBg;
+    final Color overallStatusBorder;
+    final Color overallStatusText;
+    final IconData overallStatusIcon;
+
+    if (totalCount == 0) {
+      final isAuth = cp.isMissingAutomationAuthorized(
+        entry.id,
+        entry.accountNumber,
+        entry.customerId,
+      );
+      if (isAuth) {
+        overallStatusLabel = "Authorized (Excel Linked)";
+        overallStatusBg = Colors.green.shade50;
+        overallStatusBorder = Colors.green.shade300;
+        overallStatusText = Colors.green.shade800;
+        overallStatusIcon = Icons.check_circle_outline_rounded;
+      } else {
+        overallStatusLabel = "Pending Excel Upload";
+        overallStatusBg = Colors.grey.shade100;
+        overallStatusBorder = Colors.grey.shade300;
+        overallStatusText = Colors.grey.shade700;
+        overallStatusIcon = Icons.pending_outlined;
+      }
+    } else if (excelCount > 0 && systemCount > 0) {
+      overallStatusLabel =
+          "Excel Upload ($excelCount) • System Auto ($systemCount)";
+      overallStatusBg = Colors.amber.shade50;
+      overallStatusBorder = Colors.amber.shade300;
+      overallStatusText = Colors.amber.shade900;
+      overallStatusIcon = Icons.auto_awesome_rounded;
+    } else if (excelCount > 0) {
+      overallStatusLabel = "Excel Upload ($excelCount records)";
+      overallStatusBg = Colors.teal.shade50;
+      overallStatusBorder = Colors.teal.shade300;
+      overallStatusText = Colors.teal.shade800;
+      overallStatusIcon = Icons.upload_file_rounded;
+    } else if (systemCount > 0) {
+      overallStatusLabel = "System Auto ($systemCount records)";
+      overallStatusBg = Colors.blue.shade50;
+      overallStatusBorder = Colors.blue.shade300;
+      overallStatusText = Colors.blue.shade800;
+      overallStatusIcon = Icons.bolt_rounded;
+    } else {
+      overallStatusLabel = "Collection Sheet ($collectionCount records)";
+      overallStatusBg = Colors.purple.shade50;
+      overallStatusBorder = Colors.purple.shade300;
+      overallStatusText = Colors.purple.shade800;
+      overallStatusIcon = Icons.receipt_long_rounded;
+    }
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 900),
+        constraints: const BoxConstraints(maxWidth: 920),
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20.0),
           child: Column(
@@ -1811,56 +2342,97 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                 spacing: 12,
                 runSpacing: 10,
                 children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(
-                          Icons.history_edu_rounded,
-                          color: Color(0xFF8B1A1A),
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "${entry.loaneeName} - Missing Payment Log",
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1E1E1E),
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 480),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            "Account: ${entry.accountNumber} • ID: ${entry.customerId} • Route: ${entry.route} (${entry.isDaily ? 'Daily' : 'Weekly'})",
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey.shade600,
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                          child: const Icon(
+                            Icons.history_edu_rounded,
+                            color: Color(0xFF8B1A1A),
+                            size: 22,
                           ),
-                        ],
-                      ),
-                    ],
+                        ),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "${entry.loaneeName} - Missing Payment Log",
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1E1E1E),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                "Account: ${entry.accountNumber} • ID: ${entry.customerId} • Route: ${entry.route} (${entry.isDaily ? 'Daily' : 'Weekly'})",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 5),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 2.5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: overallStatusBg,
+                                  borderRadius: BorderRadius.circular(5),
+                                  border: Border.all(color: overallStatusBorder),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      overallStatusIcon,
+                                      size: 11,
+                                      color: overallStatusText,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        overallStatusLabel,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: overallStatusText,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       OutlinedButton.icon(
                         onPressed: (_isExporting || missingRecords.isEmpty)
                             ? null
                             : () => _exportToExcel(
                                   entry: entry,
-                                  records: missingRecords,
+                                  records: displayRecords,
                                   totalPayment: totalPayment,
                                   totalMissing: totalCount,
                                   totalMissingAmount: totalMissingAmount,
@@ -1869,9 +2441,14 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF1E7E34),
                           side: const BorderSide(color: Color(0xFF1E7E34)),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
                           minimumSize: const Size(0, 32),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
                         icon: _isExporting
                             ? const SizedBox(
@@ -1882,7 +2459,11 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                   color: Color(0xFF1E7E34),
                                 ),
                               )
-                            : const Icon(Icons.table_view_rounded, size: 15, color: Color(0xFF1E7E34)),
+                            : const Icon(
+                                Icons.table_view_rounded,
+                                size: 15,
+                                color: Color(0xFF1E7E34),
+                              ),
                         label: Text(
                           _isExporting ? "Exporting..." : "Excel Export",
                           style: const TextStyle(
@@ -1892,9 +2473,41 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        onPressed: _isRunningAuto ? null : _runSystemAutoInDialog,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1E7E34),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          minimumSize: const Size(0, 32),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        icon: _isRunningAuto
+                            ? const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.bolt_rounded, size: 14),
+                        label: Text(
+                          _isRunningAuto ? "Running..." : "Start System Auto",
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
                       IconButton(
                         icon: const Icon(Icons.close_rounded, size: 20),
+                        tooltip: 'Close',
                         onPressed: () => Navigator.pop(context),
                       ),
                     ],
@@ -1934,6 +2547,21 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                       label: "Total Missing",
                       value: "$totalCount",
                       valueColor: const Color(0xFF8B1A1A),
+                    ),
+                    _buildMetricItem(
+                      label: "Record Origin",
+                      value: excelCount > 0 && systemCount > 0
+                          ? "Excel + Auto"
+                          : (excelCount > 0
+                              ? "Excel Upload"
+                              : (systemCount > 0
+                                  ? "System Auto"
+                                  : (totalCount == 0 ? "Pending" : "Collection"))),
+                      valueColor: excelCount > 0
+                          ? Colors.teal.shade800
+                          : (systemCount > 0
+                              ? Colors.blue.shade800
+                              : Colors.grey.shade700),
                     ),
                   ],
                 ),
@@ -1981,6 +2609,131 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
 
               const SizedBox(height: 16),
 
+              // Filter & Date Sorting Toolbar (Visible when there are records)
+              if (missingRecords.isNotEmpty)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      // Source status filter chips
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _buildFilterChip(
+                            label: 'All ($totalCount)',
+                            isSelected: _sourceFilter == 'All',
+                            onTap: () => setState(() {
+                              _sourceFilter = 'All';
+                              _page = 1;
+                            }),
+                          ),
+                          if (excelCount > 0)
+                            _buildFilterChip(
+                              label: 'Excel ($excelCount)',
+                              icon: Icons.upload_file_rounded,
+                              isSelected: _sourceFilter == 'excel',
+                              color: Colors.teal,
+                              onTap: () => setState(() {
+                                _sourceFilter =
+                                    _sourceFilter == 'excel' ? 'All' : 'excel';
+                                _page = 1;
+                              }),
+                            ),
+                          if (systemCount > 0)
+                            _buildFilterChip(
+                              label: 'System Auto ($systemCount)',
+                              icon: Icons.bolt_rounded,
+                              isSelected: _sourceFilter == 'system',
+                              color: Colors.blue,
+                              onTap: () => setState(() {
+                                _sourceFilter =
+                                    _sourceFilter == 'system' ? 'All' : 'system';
+                                _page = 1;
+                              }),
+                            ),
+                          if (collectionCount > 0)
+                            _buildFilterChip(
+                              label: 'Collection ($collectionCount)',
+                              icon: Icons.receipt_long_rounded,
+                              isSelected: _sourceFilter == 'collection',
+                              color: Colors.purple,
+                              onTap: () => setState(() {
+                                _sourceFilter =
+                                    _sourceFilter == 'collection'
+                                        ? 'All'
+                                        : 'collection';
+                                _page = 1;
+                              }),
+                            ),
+                        ],
+                      ),
+
+                      // Date sorting button
+                      InkWell(
+                        onTap: () {
+                          setState(() {
+                            _sortAscending = !_sortAscending;
+                            _page = 1;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF8B1A1A).withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: const Color(0xFF8B1A1A).withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _sortAscending
+                                    ? Icons.arrow_upward_rounded
+                                    : Icons.arrow_downward_rounded,
+                                size: 14,
+                                color: const Color(0xFF8B1A1A),
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                _sortAscending
+                                    ? 'Date: Asc (Oldest First)'
+                                    : 'Date: Desc (Newest First)',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF8B1A1A),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
               // Payments Table
               if (missingRecords.isEmpty)
                 Container(
@@ -2020,9 +2773,10 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                     borderRadius: BorderRadius.circular(14),
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minWidth: 780),
-                        child: DataTable(
+                      child: ExcludeSemantics(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minWidth: 920),
+                          child: DataTable(
                         headingRowColor:
                             WidgetStateProperty.all(const Color(0xFF8B1A1A)),
                         headingTextStyle: const TextStyle(
@@ -2034,15 +2788,42 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                         dataRowMinHeight: 40,
                         columnSpacing: 14,
                         horizontalMargin: 12,
-                        columns: const [
-                          DataColumn(label: Text("Date")),
-                          DataColumn(label: Text("Paid Date")),
-                          DataColumn(label: Text("Day Payment")),
-                          DataColumn(label: Text("Missing Pay")),
-                          DataColumn(label: Text("Missing Fine")),
-                          DataColumn(label: Text("Missing Week")),
-                          DataColumn(label: Text("Missing Balance")),
-                          DataColumn(label: Text("Status")),
+                        sortColumnIndex: 0,
+                        sortAscending: _sortAscending,
+                        columns: [
+                          DataColumn(
+                            label: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text("Date"),
+                                const SizedBox(width: 4),
+                                Icon(
+                                  _sortAscending
+                                      ? Icons.arrow_upward_rounded
+                                      : Icons.arrow_downward_rounded,
+                                  size: 13,
+                                  color: Colors.white,
+                                ),
+                              ],
+                            ),
+                            tooltip: _sortAscending
+                                ? 'Click to Sort Date Descending'
+                                : 'Click to Sort Date Ascending',
+                            onSort: (columnIndex, ascending) {
+                              setState(() {
+                                _sortAscending = ascending;
+                                _page = 1;
+                              });
+                            },
+                          ),
+                          const DataColumn(label: Text("Paid Date")),
+                          const DataColumn(label: Text("Day Payment")),
+                          const DataColumn(label: Text("Missing Pay")),
+                          const DataColumn(label: Text("Missing Fine")),
+                          const DataColumn(label: Text("Missing Week")),
+                          const DataColumn(label: Text("Missing Balance")),
+                          const DataColumn(label: Text("Status")),
+                          const DataColumn(label: Text("Source")),
                         ],
                         rows: pagedRecords.asMap().entries.map((mapEntry) {
                           final int idx = mapEntry.key;
@@ -2189,6 +2970,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                   ),
                                 ),
                               ),
+                              DataCell(_buildSourceBadge(m)),
                             ],
                           );
                         }).toList(),
@@ -2197,13 +2979,17 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                   ),
                 ),
               ),
+            ),
 
               const SizedBox(height: 14),
 
               // Pagination Controls: [Previous] Page X of Y (N records) [Next]
               if (totalPages > 0)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 10,
+                  runSpacing: 8,
                   children: [
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
@@ -2232,7 +3018,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                       ),
                     ),
                     Text(
-                      "Page $_page of $totalPages ($totalCount records)",
+                      "Page $_page of $totalPages (${filteredCount != totalCount ? '$filteredCount of $totalCount' : '$totalCount'} records)",
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.bold,
