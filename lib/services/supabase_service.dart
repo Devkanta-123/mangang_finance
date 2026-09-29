@@ -2767,11 +2767,24 @@ class SupabaseService {
       final supaClient = client;
       if (supaClient == null) return false;
 
-      await supaClient.from('missing_payment_records').upsert(
-        record.toJson(),
-        onConflict: 'collection_id,missed_date,collection_type',
-      );
-      return true;
+      final payload = record.toJson();
+      try {
+        await supaClient.from('missing_payment_records').upsert(
+          payload,
+          onConflict: 'collection_id,missed_date,collection_type',
+        );
+        return true;
+      } catch (err) {
+        if (err.toString().contains('paid_date')) {
+          final fallback = Map<String, dynamic>.from(payload)..remove('paid_date');
+          await supaClient.from('missing_payment_records').upsert(
+            fallback,
+            onConflict: 'collection_id,missed_date,collection_type',
+          );
+          return true;
+        }
+        rethrow;
+      }
     } catch (e) {
       debugPrint('ℹ️ Note on saveMissingPaymentRecord: $e');
       return false;
@@ -2786,11 +2799,23 @@ class SupabaseService {
       if (supaClient == null) return false;
 
       final payloads = records.map((r) => r.toJson()).toList();
-      await supaClient.from('missing_payment_records').upsert(
-        payloads,
-        onConflict: 'collection_id,missed_date,collection_type',
-      );
-      return true;
+      try {
+        await supaClient.from('missing_payment_records').upsert(
+          payloads,
+          onConflict: 'collection_id,missed_date,collection_type',
+        );
+        return true;
+      } catch (err) {
+        if (err.toString().contains('paid_date')) {
+          final fallbacks = payloads.map((p) => Map<String, dynamic>.from(p)..remove('paid_date')).toList();
+          await supaClient.from('missing_payment_records').upsert(
+            fallbacks,
+            onConflict: 'collection_id,missed_date,collection_type',
+          );
+          return true;
+        }
+        rethrow;
+      }
     } catch (e) {
       debugPrint('ℹ️ Note on saveMissingPaymentRecordsBatch: $e');
       return false;

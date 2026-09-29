@@ -416,10 +416,10 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
 
         const SizedBox(height: 8),
 
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: availableRoutes.map((routeName) {
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: availableRoutes.map((routeName) {
               final isSelected =
                   _selectedRoute == routeName;
 
@@ -515,7 +515,6 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                 ),
               );
             }).toList(),
-          ),
         ),
       ],
     );
@@ -526,29 +525,33 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
   // ============================================================
 
   Widget _buildSelectedRouteHeader() {
-    return Row(
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      runSpacing: 4,
       children: [
-        const Icon(
-          Icons.location_city_rounded,
-          size: 16,
-          color: Color(0xFF8B1A1A),
-        ),
-
-        const SizedBox(width: 6),
-
-        Expanded(
-          child: Text(
-            'Route: ${_selectedRoute!}',
-            style: const TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.bold,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.location_city_rounded,
+              size: 16,
               color: Color(0xFF8B1A1A),
             ),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
 
-        const SizedBox(width: 8),
+            const SizedBox(width: 6),
+
+            Text(
+              'Route: ${_selectedRoute!}',
+              style: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF8B1A1A),
+              ),
+            ),
+          ],
+        ),
 
         Text(
           'Filter: $_selectedType',
@@ -580,50 +583,46 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       'Sat',
     ];
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: types.map((type) {
-          final isSelected =
-              _selectedType == type;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: types.map((type) {
+        final isSelected =
+            _selectedType == type;
 
-          return Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: ChoiceChip(
-              label: Text(type),
-              selected: isSelected,
-              onSelected: (selected) {
-                if (selected) {
-                  setState(() {
-                    _selectedType = type;
-                  });
-                }
-              },
-              labelStyle: TextStyle(
-                fontSize: 11,
-                fontWeight: isSelected
-                    ? FontWeight.bold
-                    : FontWeight.normal,
-                color: isSelected
-                    ? Colors.white
-                    : Colors.grey.shade800,
-              ),
-              selectedColor:
-                  const Color(0xFF8B1A1A),
-              backgroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(8),
-                side: BorderSide(
-                  color: isSelected
-                      ? const Color(0xFF8B1A1A)
-                      : Colors.grey.shade300,
-                ),
-              ),
+        return ChoiceChip(
+          label: Text(type),
+          selected: isSelected,
+          onSelected: (selected) {
+            if (selected) {
+              setState(() {
+                _selectedType = type;
+              });
+            }
+          },
+          labelStyle: TextStyle(
+            fontSize: 11,
+            fontWeight: isSelected
+                ? FontWeight.bold
+                : FontWeight.normal,
+            color: isSelected
+                ? Colors.white
+                : Colors.grey.shade800,
+          ),
+          selectedColor:
+              const Color(0xFF8B1A1A),
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius:
+                BorderRadius.circular(8),
+            side: BorderSide(
+              color: isSelected
+                  ? const Color(0xFF8B1A1A)
+                  : Colors.grey.shade300,
             ),
-          );
-        }).toList(),
-      ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -1753,7 +1752,9 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
     final totalPayment = cp.getTotalPaidForCollection(entry.id);
     final totalCount = missingRecords.length;
 
-    final totalMissingAmount = missingRecords.fold<double>(
+    final totalMissingAmount = missingRecords
+        .where((record) => !record.isResolved)
+        .fold<double>(
       0.0,
       (sum, record) => sum + record.missingPay,
     );
@@ -1804,52 +1805,52 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Dialog Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 12,
+                runSpacing: 10,
                 children: [
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Icon(
-                            Icons.history_edu_rounded,
-                            color: Color(0xFF8B1A1A),
-                            size: 22,
-                          ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                "${entry.loaneeName} - Missing Payment Log",
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1E1E1E),
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                "Account: ${entry.accountNumber} • ID: ${entry.customerId} • Route: ${entry.route} (${entry.isDaily ? 'Daily' : 'Weekly'})",
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey.shade600,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
+                        child: const Icon(
+                          Icons.history_edu_rounded,
+                          color: Color(0xFF8B1A1A),
+                          size: 22,
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "${entry.loaneeName} - Missing Payment Log",
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1E1E1E),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            "Account: ${entry.accountNumber} • ID: ${entry.customerId} • Route: ${entry.route} (${entry.isDaily ? 'Daily' : 'Weekly'})",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                   Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1905,14 +1906,17 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
 
               // Loan Metrics Banner
               Container(
+                width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.grey.shade50,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: Colors.grey.shade200),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  spacing: 12,
+                  runSpacing: 8,
                   children: [
                     _buildMetricItem(
                       label: "Loan Amount",
@@ -1939,14 +1943,17 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
 
               // Payment History & Breakdown Banner
               Container(
+                width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: const Color(0xFF8B1A1A).withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.15)),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  spacing: 12,
+                  runSpacing: 8,
                   children: [
                     _buildMetricItem(
                       label: "Total Paid",
@@ -1996,12 +2003,26 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                   ),
                 )
               else
-                ExcludeSemantics(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minWidth: 740),
-                      child: DataTable(
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.grey.shade300),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minWidth: 780),
+                        child: DataTable(
                         headingRowColor:
                             WidgetStateProperty.all(const Color(0xFF8B1A1A)),
                         headingTextStyle: const TextStyle(
@@ -2015,6 +2036,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                         horizontalMargin: 12,
                         columns: const [
                           DataColumn(label: Text("Date")),
+                          DataColumn(label: Text("Paid Date")),
                           DataColumn(label: Text("Day Payment")),
                           DataColumn(label: Text("Missing Pay")),
                           DataColumn(label: Text("Missing Fine")),
@@ -2047,6 +2069,40 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                   fontWeight: FontWeight.bold,
                                 ),
                               )),
+                              DataCell(
+                                m.paidDate != null
+                                    ? Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                        decoration: BoxDecoration(
+                                          color: Colors.green.shade50,
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: Colors.green.shade300),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.check_circle_rounded, size: 10, color: Colors.green.shade700),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              '${m.paidDate!.day.toString().padLeft(2, '0')}-${m.paidDate!.month.toString().padLeft(2, '0')}-${m.paidDate!.year}',
+                                              style: TextStyle(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.green.shade800,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    : Text(
+                                        '—',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey.shade400,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                              ),
                               DataCell(Text(
                                 dayPayString,
                                 style: const TextStyle(fontSize: 11),
@@ -2104,17 +2160,21 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                             ? Icons.check_circle_rounded
                                             : (isPartial
                                                 ? Icons.hourglass_bottom_rounded
-                                                : Icons.pending_actions_rounded),
+                                                : (m.isPaused ? Icons.pause_circle_rounded : Icons.pending_actions_rounded)),
                                         size: 11,
                                         color: isResolved
                                             ? Colors.green.shade700
                                             : (isPartial
                                                 ? Colors.amber.shade900
-                                                : Colors.red.shade700),
+                                                : (m.isPaused ? Colors.blue.shade700 : Colors.red.shade700)),
                                       ),
                                       const SizedBox(width: 4),
                                       Text(
-                                        m.status.toUpperCase(),
+                                        isResolved
+                                            ? "PAID"
+                                            : (isPartial
+                                                ? "PARTIAL PAID"
+                                                : (m.isPaused ? "PAUSED" : "MISSING")),
                                         style: TextStyle(
                                           fontSize: 9.5,
                                           fontWeight: FontWeight.bold,
@@ -2122,7 +2182,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                                               ? Colors.green.shade800
                                               : (isPartial
                                                   ? Colors.amber.shade900
-                                                  : Colors.red.shade800),
+                                                  : (m.isPaused ? Colors.blue.shade900 : Colors.red.shade800)),
                                         ),
                                       ),
                                     ],
@@ -2136,6 +2196,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                     ),
                   ),
                 ),
+              ),
 
               const SizedBox(height: 14),
 
@@ -2410,7 +2471,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Day Payment',
+        'Paid Date',
       );
 
       sheet
@@ -2420,7 +2481,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Missing Pay',
+        'Day Payment',
       );
 
       sheet
@@ -2430,7 +2491,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Missing Fine',
+        'Missing Pay',
       );
 
       sheet
@@ -2440,7 +2501,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
-        'Missing Week',
+        'Missing Fine',
       );
 
       sheet
@@ -2450,7 +2511,27 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             ),
           )
           .value = xl.TextCellValue(
+        'Missing Week',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'G7',
+            ),
+          )
+          .value = xl.TextCellValue(
         'Missing Balance',
+      );
+
+      sheet
+          .cell(
+            xl.CellIndex.indexByString(
+              'H7',
+            ),
+          )
+          .value = xl.TextCellValue(
+        'Status',
       );
 
       // ----------------------------------------------------------
@@ -2464,6 +2545,12 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
             '${record.missedDate.day.toString().padLeft(2, '0')}-'
             '${record.missedDate.month.toString().padLeft(2, '0')}-'
             '${record.missedDate.year}';
+        final paidDateStr = record.paidDate != null
+            ? '${record.paidDate!.day.toString().padLeft(2, '0')}-${record.paidDate!.month.toString().padLeft(2, '0')}-${record.paidDate!.year}'
+            : '—';
+        final statusLabel = record.isResolved
+            ? 'PAID'
+            : (record.isPartial ? 'PARTIAL PAID' : (record.isPaused ? 'PAUSED' : 'MISSING'));
 
         sheet
             .cell(
@@ -2475,11 +2562,21 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
           dateString,
         );
 
+        sheet
+            .cell(
+              xl.CellIndex.indexByString(
+                'B$rowIndex',
+              ),
+            )
+            .value = xl.TextCellValue(
+          paidDateStr,
+        );
+
         if (record.dayPayment > 0) {
           sheet
               .cell(
                 xl.CellIndex.indexByString(
-                  'B$rowIndex',
+                  'C$rowIndex',
                 ),
               )
               .value =
@@ -2490,7 +2587,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
           sheet
               .cell(
                 xl.CellIndex.indexByString(
-                  'B$rowIndex',
+                  'C$rowIndex',
                 ),
               )
               .value = xl.TextCellValue(
@@ -2501,7 +2598,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         sheet
             .cell(
               xl.CellIndex.indexByString(
-                'C$rowIndex',
+                'D$rowIndex',
               ),
             )
             .value = xl.DoubleCellValue(
@@ -2511,7 +2608,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         sheet
             .cell(
               xl.CellIndex.indexByString(
-                'D$rowIndex',
+                'E$rowIndex',
               ),
             )
             .value = xl.DoubleCellValue(
@@ -2521,7 +2618,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         sheet
             .cell(
               xl.CellIndex.indexByString(
-                'E$rowIndex',
+                'F$rowIndex',
               ),
             )
             .value = xl.IntCellValue(
@@ -2531,11 +2628,21 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         sheet
             .cell(
               xl.CellIndex.indexByString(
-                'F$rowIndex',
+                'G$rowIndex',
               ),
             )
             .value = xl.DoubleCellValue(
           record.missingBalance,
+        );
+
+        sheet
+            .cell(
+              xl.CellIndex.indexByString(
+                'H$rowIndex',
+              ),
+            )
+            .value = xl.TextCellValue(
+          statusLabel,
         );
 
         rowIndex++;

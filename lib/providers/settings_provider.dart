@@ -1264,6 +1264,7 @@ class SettingsProvider extends ChangeNotifier {
     DateTime? sanctionDate,
     DateTime? asOfDate,
     double? overrideTotalPaid,
+    double? overrideLateFine,
   }) {
     final type = entry.collectionType.toLowerCase().trim();
     final isDaily = type == 'daily';
@@ -1405,7 +1406,9 @@ class SettingsProvider extends ChangeNotifier {
             )
           : 0.0;
 
-      calculatedFine = currentIntervalFine + previousUnpaidFee;
+      calculatedFine = (overrideLateFine != null && overrideLateFine > 0)
+          ? overrideLateFine
+          : (currentIntervalFine + previousUnpaidFee);
 
       final double effectiveBase = baseInstallment;
       overdueMissedAmount = lateUnits * effectiveBase;

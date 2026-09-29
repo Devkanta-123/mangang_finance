@@ -11,6 +11,7 @@ import '../providers/ro_provider.dart';
 import '../providers/settings_provider.dart';
 import '../models/collection_payment_model.dart';
 import '../models/holiday_model.dart';
+import '../models/missing_payment_model.dart';
 import '../services/supabase_service.dart';
 import '../services/historical_payment_import_service.dart';
 import '../services/payment_reconciliation_service.dart';
@@ -3331,6 +3332,7 @@ class _RoCollectionDetailsModalSheetState
       maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
       sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
       overrideTotalPaid: totalCollected,
+      overrideLateFine: collectionProvider.getTotalMissingBalanceForCollection(entry.id),
     );
     final postMaturity = latePayable.postMaturityBreakdown;
     final displayBal = remainingBal;
@@ -3719,34 +3721,58 @@ class _RoCollectionDetailsModalSheetState
                           color: Colors.grey.shade700,
                         ),
                       ),
-                      Text(
-                        '₹ ${_RoCollectionDetailsModalSheet._formatCurrency((postMaturity != null && postMaturity.isPastMaturity) ? postMaturity.remainingBalance : displayBal)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: ((postMaturity != null && postMaturity.isPastMaturity) ? postMaturity.remainingBalance : displayBal) > 0
-                              ? Colors.red.shade800
-                              : Colors.green.shade800,
-                        ),
+                      Builder(
+                        builder: (context) {
+                          final totalMissingBal = collectionProvider
+                              .getTotalMissingBalanceForCollection(entry.id);
+                          final baseDue = (postMaturity != null && postMaturity.isPastMaturity)
+                              ? postMaturity.remainingBalance
+                              : displayBal;
+                          final dueWithMissing = baseDue + totalMissingBal;
+                          return Text(
+                            '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(dueWithMissing)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: dueWithMissing > 0
+                                  ? Colors.red.shade800
+                                  : Colors.green.shade800,
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
-                  if (latePayable.calculatedLateFine > 0) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Late Payment Fee (${latePayable.lateUnits} missed ${latePayable.isDaily ? (latePayable.lateUnits == 1 ? "day" : "days") : (latePayable.lateUnits == 1 ? "wk" : "wks")}):',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
+                  Builder(
+                    builder: (context) {
+                      final totalMissingBal = collectionProvider.getTotalMissingBalanceForCollection(entry.id);
+                      final effectiveLateFee = totalMissingBal > 0 ? totalMissingBal : latePayable.calculatedLateFine;
+                      if (effectiveLateFee <= 0) return const SizedBox.shrink();
+
+                      final missingRecords = collectionProvider.getMissingRecordsForCollection(entry.id);
+                      final activeMissing = missingRecords.where((m) => !m.isResolved).toList();
+                      final displayUnits = activeMissing.isNotEmpty
+                          ? activeMissing.length
+                          : (latePayable.lateUnits > 0 ? latePayable.lateUnits : 1);
+
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Late Payment Fee ($displayUnits missed ${entry.isDaily ? (displayUnits == 1 ? "day" : "days") : (displayUnits == 1 ? "wk" : "wks")}):',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
+                            ),
+                            Text(
+                              '+ ₹ ${_RoCollectionDetailsModalSheet._formatCurrency(effectiveLateFee)}',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                            ),
+                          ],
                         ),
-                        Text(
-                          '+ ₹ ${_RoCollectionDetailsModalSheet._formatCurrency(latePayable.calculatedLateFine)}',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
-                        ),
-                      ],
-                    ),
-                  ],
+                      );
+                    },
+                  ),
                   if (postMaturity != null && postMaturity.isPastMaturity && postMaturity.postMaturityPayableAmount > postMaturity.remainingBalance) ...[
                     const SizedBox(height: 6),
                     Row(
@@ -5445,16 +5471,60 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                         ),
                                       ),
                                     )
-                                  : Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.calendar_today_rounded,
-                                            size: 12, color: Colors.grey.shade600),
-                                        const SizedBox(width: 5),
-                                        Text(formattedDate,
-                                            style: const TextStyle(
-                                                fontSize: 11, fontWeight: FontWeight.w600)),
-                                      ],
+                                  : Builder(
+                                      builder: (context) {
+                                        String? clearedDateLabel;
+                                        if (p.remarks != null && p.remarks!.contains('Cleared missing date:')) {
+                                          final match = RegExp(r'Cleared missing date:\s*([^,\)]+)').firstMatch(p.remarks!);
+                                          if (match != null) {
+                                            clearedDateLabel = match.group(1)!.trim();
+                                          }
+                                        }
+
+                                        return Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.calendar_today_rounded,
+                                                    size: 12, color: Colors.grey.shade600),
+                                                const SizedBox(width: 5),
+                                                Text(formattedDate,
+                                                    style: const TextStyle(
+                                                        fontSize: 11, fontWeight: FontWeight.w600)),
+                                              ],
+                                            ),
+                                            if (clearedDateLabel != null) ...[
+                                              const SizedBox(height: 2),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.green.shade50,
+                                                  borderRadius: BorderRadius.circular(4),
+                                                  border: Border.all(color: Colors.green.shade300),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(Icons.check_circle_rounded, size: 9, color: Colors.green.shade700),
+                                                    const SizedBox(width: 3),
+                                                    Text(
+                                                      'Cleared: ' + clearedDateLabel,
+                                                      style: TextStyle(
+                                                        fontSize: 9,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: Colors.green.shade800,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        );
+                                      },
                                     ),
                             ),
                             DataCell(
@@ -5891,6 +5961,10 @@ class __AddPaymentEntryModalContentState
 
   final List<_HybridPaymentRowEntry> _hybridEntries = [];
 
+  MissingPaymentRecord? _selectedPastMissingRecord;
+  late TextEditingController _missingAllocationController;
+  List<MissingPaymentRecord> _unclearedMissing = [];
+
   void _initHybridEntries() {
     _disposeHybridEntries();
     // Default initial hybrid modes: Cash and Gpay as requested ("partial in gpay with cash")
@@ -5958,15 +6032,58 @@ class __AddPaymentEntryModalContentState
     super.initState();
     _remainingBalanceController = TextEditingController(text: '0.00');
     _paymentAmountController = TextEditingController();
+    _missingAllocationController = TextEditingController();
     _roPasscodeController = TextEditingController();
     _selectedPaymentType = 'Cash';
 
     _paymentAmountController.addListener(_updateRemainingBalanceDisplay);
+    _missingAllocationController.addListener(_updateRemainingBalanceDisplay);
+    _loadMissingRecords();
+  }
+
+  Future<void> _loadMissingRecords() async {
+    final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+    final sp = Provider.of<SettingsProvider>(context, listen: false);
+    LoaneeProvider? lp;
+    try {
+      lp = Provider.of<LoaneeProvider>(context, listen: false);
+    } catch (_) {}
+    final loanee = lp?.getLoaneeForUser(
+      customerId: widget.entry.customerId,
+      mobileNo: widget.entry.mobileNo,
+      name: widget.entry.loaneeName,
+    );
+    final effLoan = (widget.entry.loanAmount != null && widget.entry.loanAmount! > 0)
+        ? widget.entry.loanAmount!
+        : ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : (widget.entry.actualPrincipal ?? widget.entry.initialBalance));
+    try {
+      await cp.syncAutoLateFeesForEntry(
+        entry: widget.entry,
+        settingsProvider: sp,
+        loaneeLoanAmount: effLoan,
+        loaneeProvider: lp,
+        sanctionDate: loanee?.loanSanctionDate,
+      );
+    } catch (_) {}
+    _refreshUnclearedMissing();
+  }
+
+  void _refreshUnclearedMissing() {
+    if (!mounted) return;
+    final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+    final all = cp.getMissingRecordsForCollection(widget.entry.id);
+    setState(() {
+      _unclearedMissing = all.where((m) => !m.isResolved).toList()
+        ..sort((a, b) => a.missedDate.compareTo(b.missedDate));
+    });
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _refreshUnclearedMissing();
     if (!_initializedBalance) {
       _initializedBalance = true;
       final collectionProvider =
@@ -5983,6 +6100,8 @@ class __AddPaymentEntryModalContentState
         mobileNo: widget.entry.mobileNo,
         name: widget.entry.loaneeName,
       );
+      final totalMissingBalance =
+          collectionProvider.getTotalMissingBalanceForCollection(widget.entry.id);
       final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
         entry: widget.entry,
         payments: payments,
@@ -5990,6 +6109,7 @@ class __AddPaymentEntryModalContentState
         loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
         maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
         sanctionDate: loanee?.loanSanctionDate ?? widget.entry.createdAt,
+        overrideLateFine: totalMissingBalance,
       );
 
       _payableBreakdown = breakdown;
@@ -6005,7 +6125,7 @@ class __AddPaymentEntryModalContentState
           collectionProvider.getTotalInterestForCollection(widget.entry.id);
 
       _currentDueBalance =
-          (initialBal + totalInterest - totalPaid).clamp(0.0, double.infinity);
+          (initialBal + totalInterest - totalPaid + totalMissingBalance).clamp(0.0, double.infinity);
 
       if (_paymentAmountController.text.trim().isEmpty) {
         _paymentAmountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
@@ -6019,8 +6139,10 @@ class __AddPaymentEntryModalContentState
         double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
 
     final breakdown = _payableBreakdown;
+    final totalMissingBalance = Provider.of<CollectionSheetProvider>(context, listen: false)
+        .getTotalMissingBalanceForCollection(widget.entry.id);
     final double baseTarget = (breakdown?.isPastMaturity == true)
-        ? breakdown!.totalPayableAmount
+        ? (breakdown!.totalPayableAmount + totalMissingBalance)
         : _currentDueBalance;
 
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
@@ -6032,9 +6154,17 @@ class __AddPaymentEntryModalContentState
       configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
     );
 
+    double missingAlloc = 0.0;
+    if (_selectedPastMissingRecord != null) {
+      missingAlloc = double.tryParse(_missingAllocationController.text.trim()) ?? _selectedPastMissingRecord!.missingPay;
+      missingAlloc = missingAlloc.clamp(0.0, payment);
+    }
+
+    final double todayPortion = (payment - missingAlloc).clamp(0.0, double.infinity);
+
     double partialPaymentCharge = 0.0;
-    if (!isPastMaturity && payment > 0 && payment < baseInstallment) {
-      final unpaid = baseInstallment - payment;
+    if (!isPastMaturity && todayPortion > 0 && todayPortion < baseInstallment) {
+      final unpaid = baseInstallment - todayPortion;
       final finePct = settingsProvider.lateFinePercentage;
       partialPaymentCharge = double.parse((unpaid * (finePct / 100.0)).toStringAsFixed(2));
     }
@@ -6054,8 +6184,10 @@ class __AddPaymentEntryModalContentState
   void dispose() {
     _disposeHybridEntries();
     _paymentAmountController.removeListener(_updateRemainingBalanceDisplay);
+    _missingAllocationController.removeListener(_updateRemainingBalanceDisplay);
     _remainingBalanceController.dispose();
     _paymentAmountController.dispose();
+    _missingAllocationController.dispose();
     _roPasscodeController.dispose();
     super.dispose();
   }
@@ -6375,7 +6507,8 @@ class __AddPaymentEntryModalContentState
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
     final double baseTarget = (breakdown?.isPastMaturity == true)
-        ? breakdown!.totalPayableAmount
+        ? (breakdown!.totalPayableAmount +
+            collectionProvider.getTotalMissingBalanceForCollection(widget.entry.id))
         : _currentDueBalance;
 
     final isPastMaturity = breakdown?.isPastMaturity == true;
@@ -6386,10 +6519,23 @@ class __AddPaymentEntryModalContentState
       configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
     );
 
+    // 1. Resolve past missing allocation (Case 2)
+    double amountForMissing = 0.0;
+    MissingPaymentRecord? pastMissingRecord = _selectedPastMissingRecord;
+    if (pastMissingRecord != null) {
+      amountForMissing = double.tryParse(_missingAllocationController.text.trim()) ?? pastMissingRecord.missingPay;
+      if (amountForMissing <= 0 || amountForMissing > paymentAmount) {
+        amountForMissing = paymentAmount.clamp(0.0, pastMissingRecord.missingPay);
+      }
+    }
+
+    final double todayPortion = (paymentAmount - amountForMissing).clamp(0.0, double.infinity);
+
+    // 2. Resolve partial payment for today's installment (Case 1)
     double partialPaymentCharge = 0.0;
     double unpaidBaseAmount = 0.0;
-    if (!isPastMaturity && paymentAmount > 0 && paymentAmount < baseInstallment) {
-      unpaidBaseAmount = baseInstallment - paymentAmount;
+    if (!isPastMaturity && todayPortion > 0 && todayPortion < baseInstallment) {
+      unpaidBaseAmount = baseInstallment - todayPortion;
       final finePct = settingsProvider.lateFinePercentage;
       partialPaymentCharge = double.parse((unpaidBaseAmount * (finePct / 100.0)).toStringAsFixed(2));
     }
@@ -6400,8 +6546,15 @@ class __AddPaymentEntryModalContentState
         ? (effectiveTarget - paymentAmount + partialPaymentCharge)
         : 0.0;
 
-    final String partialPaymentNote = partialPaymentCharge > 0
-        ? ' | Partial Payment: ₹${paymentAmount.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)} base (Unpaid: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Charge: ₹${partialPaymentCharge.toStringAsFixed(2)}, Balance Impact: ₹${(unpaidBaseAmount + partialPaymentCharge).toStringAsFixed(2)})'
+    String missingClearNote = '';
+    if (pastMissingRecord != null && amountForMissing > 0) {
+      final missedDateFormatted = SettingsProvider.formatDate(pastMissingRecord.missedDate);
+      final todayFormatted = SettingsProvider.formatDate(DateTime.now());
+      missingClearNote = ' | Cleared missing date: $missedDateFormatted (Paid Date: $todayFormatted, Amount: ₹${amountForMissing.toStringAsFixed(2)})';
+    }
+
+    final String partialPaymentNote = (partialPaymentCharge > 0 && todayPortion < baseInstallment)
+        ? ' | Partial Payment: ₹${todayPortion.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)} base (Unpaid: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Charge: ₹${partialPaymentCharge.toStringAsFixed(2)}, Balance Impact: ₹${(unpaidBaseAmount + partialPaymentCharge).toStringAsFixed(2)})'
         : '';
 
     final bool isHybrid = _selectedPaymentType == 'Other' && _hybridEntries.isNotEmpty;
@@ -6421,9 +6574,9 @@ class __AddPaymentEntryModalContentState
         : '';
 
     final String? finalRemarks = remarks != null
-        ? '$remarks$partialPaymentNote$hybridNote'
-        : ((partialPaymentNote + hybridNote).isNotEmpty
-            ? (partialPaymentNote + hybridNote).replaceFirst(' | ', '')
+        ? '$remarks$missingClearNote$partialPaymentNote$hybridNote'
+        : ((missingClearNote + partialPaymentNote + hybridNote).isNotEmpty
+            ? (missingClearNote + partialPaymentNote + hybridNote).replaceFirst(' | ', '')
             : null);
 
     final messenger = ScaffoldMessenger.of(context);
@@ -6455,6 +6608,28 @@ class __AddPaymentEntryModalContentState
         paymentAmount: paymentAmount,
         newRemainingBalance: newRemainingBalance,
       );
+
+      // Case 2: Clear selected past missing record and update paidDate & status
+      if (pastMissingRecord != null && amountForMissing > 0) {
+        await collectionProvider.clearPastMissingRecord(
+          missingRecord: pastMissingRecord,
+          paidDate: DateTime.now(),
+          amountPaidForMissing: amountForMissing,
+        );
+      }
+
+      // Case 1: Loanee partially paid today's base installment (e.g. paid 1000 of 1500)
+      // Apply 3% fine to the remaining shortfall (500) and insert into missing records with status 'partial paid'
+      if (!isPastMaturity && todayPortion > 0 && todayPortion < baseInstallment) {
+        await collectionProvider.recordPartialPaymentMissingRecord(
+          entry: widget.entry,
+          paymentAmount: todayPortion,
+          baseInstallment: baseInstallment,
+          settingsProvider: settingsProvider,
+          paymentDate: DateTime.now(),
+          remarks: 'Partial Payment: ₹${todayPortion.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)}. Remaining: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Fine: ₹${partialPaymentCharge.toStringAsFixed(2)}',
+        );
+      }
     }
 
     if (!mounted) return;
@@ -6740,6 +6915,7 @@ class __AddPaymentEntryModalContentState
                           name: widget.entry.loaneeName,
                         );
                         final payments = collectionProvider.getPaymentsForCollection(widget.entry.id);
+                        final totalMissingBalDialog = collectionProvider.getTotalMissingBalanceForCollection(widget.entry.id);
                         final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                           entry: widget.entry,
                           payments: payments,
@@ -6747,6 +6923,7 @@ class __AddPaymentEntryModalContentState
                           loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
                           maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
                           sanctionDate: loanee?.loanSanctionDate ?? widget.entry.createdAt,
+                          overrideLateFine: totalMissingBalDialog,
                         );
                         final postMaturity = breakdown.postMaturityBreakdown;
                         final loanBreakdown = widget.entry.getLoanBreakdown(
@@ -6892,34 +7069,57 @@ class __AddPaymentEntryModalContentState
                                     color: Colors.grey.shade700,
                                   ),
                                 ),
-                                Text(
-                                  '₹ ${((postMaturity != null && postMaturity.isPastMaturity) ? postMaturity.remainingBalance : _currentDueBalance).toStringAsFixed(2)}',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: ((postMaturity != null && postMaturity.isPastMaturity) ? postMaturity.remainingBalance : _currentDueBalance) > 0
-                                        ? Colors.red.shade800
-                                        : Colors.green.shade800,
-                                  ),
+                                Builder(
+                                  builder: (context) {
+                                    final totalMissingBal = collectionProvider
+                                        .getTotalMissingBalanceForCollection(widget.entry.id);
+                                    final dueVal = (postMaturity != null && postMaturity.isPastMaturity)
+                                        ? (postMaturity.remainingBalance + totalMissingBal)
+                                        : _currentDueBalance;
+                                    return Text(
+                                      '₹ ${dueVal.toStringAsFixed(2)}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: dueVal > 0
+                                            ? Colors.red.shade800
+                                            : Colors.green.shade800,
+                                      ),
+                                    );
+                                  },
                                 ),
                               ],
                             ),
-                            if (breakdown.calculatedLateFine > 0) ...[
-                              const SizedBox(height: 6),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    'Late Payment Fee (${breakdown.lateUnits} missed ${breakdown.isDaily ? (breakdown.lateUnits == 1 ? "day" : "days") : (breakdown.lateUnits == 1 ? "wk" : "wks")}):',
-                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
+                            Builder(
+                              builder: (context) {
+                                final totalMissingBal = collectionProvider.getTotalMissingBalanceForCollection(widget.entry.id);
+                                final effectiveLateFee = totalMissingBal > 0 ? totalMissingBal : breakdown.calculatedLateFine;
+                                if (effectiveLateFee <= 0) return const SizedBox.shrink();
+
+                                final missingRecords = collectionProvider.getMissingRecordsForCollection(widget.entry.id);
+                                final activeMissing = missingRecords.where((m) => !m.isResolved).toList();
+                                final displayUnits = activeMissing.isNotEmpty
+                                    ? activeMissing.length
+                                    : (breakdown.lateUnits > 0 ? breakdown.lateUnits : 1);
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Late Payment Fee ($displayUnits missed ${widget.entry.isDaily ? (displayUnits == 1 ? "day" : "days") : (displayUnits == 1 ? "wk" : "wks")}):',
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
+                                      ),
+                                      Text(
+                                        '+ ₹ ${effectiveLateFee.toStringAsFixed(2)}',
+                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                                      ),
+                                    ],
                                   ),
-                                  Text(
-                                    '+ ₹ ${breakdown.calculatedLateFine.toStringAsFixed(2)}',
-                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
-                                  ),
-                                ],
-                              ),
-                            ],
+                                );
+                              },
+                            ),
                             if (postMaturity != null && postMaturity.isPastMaturity && postMaturity.postMaturityPayableAmount > postMaturity.remainingBalance) ...[
                               const SizedBox(height: 6),
                               Row(
@@ -7154,11 +7354,17 @@ class __AddPaymentEntryModalContentState
                     configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
                   );
 
-                  if (!isPastMat && enteredAmt > 0 && enteredAmt < baseInstallment) {
-                    final unpaid = baseInstallment - enteredAmt;
+                  double missingAlloc = 0.0;
+                  if (_selectedPastMissingRecord != null) {
+                    missingAlloc = double.tryParse(_missingAllocationController.text.trim()) ?? _selectedPastMissingRecord!.missingPay;
+                    missingAlloc = missingAlloc.clamp(0.0, enteredAmt);
+                  }
+                  final todayPortion = (enteredAmt - missingAlloc).clamp(0.0, double.infinity);
+
+                  if (!isPastMat && todayPortion > 0 && todayPortion < baseInstallment) {
+                    final unpaid = baseInstallment - todayPortion;
                     final finePct = settingsProvider.lateFinePercentage;
                     final charge = double.parse((unpaid * (finePct / 100.0)).toStringAsFixed(2));
-                    final totalImpact = unpaid + charge;
 
                     return Container(
                       width: double.infinity,
@@ -7177,7 +7383,7 @@ class __AddPaymentEntryModalContentState
                               Icon(Icons.info_outline_rounded, size: 14, color: Colors.amber.shade900),
                               const SizedBox(width: 6),
                               Text(
-                                'Partial Base Payment Detected',
+                                'Case 1: Partial Base Payment Detected',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
@@ -7188,7 +7394,7 @@ class __AddPaymentEntryModalContentState
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Base: ₹${baseInstallment.toStringAsFixed(2)} • Unpaid: ₹${unpaid.toStringAsFixed(2)} • ${finePct.toStringAsFixed(1)}% Charge: ₹${charge.toStringAsFixed(2)} • Outstanding Balance Impact: ₹${totalImpact.toStringAsFixed(2)}',
+                            'Paid: ₹${todayPortion.toStringAsFixed(2)} • Base: ₹${baseInstallment.toStringAsFixed(2)} • Shortfall: ₹${unpaid.toStringAsFixed(2)} • ${finePct.toStringAsFixed(1)}% Fine: ₹${charge.toStringAsFixed(2)} (Inserted to Missing Records as "Partial Paid")',
                             style: TextStyle(
                               fontSize: 10.5,
                               fontWeight: FontWeight.w600,
@@ -7202,6 +7408,245 @@ class __AddPaymentEntryModalContentState
                   return const SizedBox.shrink();
                 },
               ),
+
+              // Case 2: Past Missing Payment Clearance Section (Select date matched from missing records)
+              if (_unclearedMissing.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B1A1A).withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFF8B1A1A).withValues(alpha: 0.25),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF8B1A1A).withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Icon(
+                                  Icons.history_toggle_off_rounded,
+                                  size: 15,
+                                  color: Color(0xFF8B1A1A),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Clear Past Missing Date (Case 2)',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF8B1A1A),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade100,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '${_unclearedMissing.length} Unresolved',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red.shade900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Select a past missed or paused date if loanee wants to clear it from this payment:',
+                        style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: _selectedPastMissingRecord?.id,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String>(
+                            value: null,
+                            child: Text('None (Regular installment only)', style: TextStyle(fontSize: 11.5)),
+                          ),
+                          ..._unclearedMissing.map((m) {
+                            final dateStr = '${m.missedDate.day.toString().padLeft(2, '0')}-${m.missedDate.month.toString().padLeft(2, '0')}-${m.missedDate.year}';
+                            return DropdownMenuItem<String>(
+                              value: m.id,
+                              child: Text(
+                                dateStr,
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1E1E1E),
+                                ),
+                              ),
+                            );
+                          }),
+                        ],
+                        onChanged: (id) {
+                          setState(() {
+                            if (id == null) {
+                              _selectedPastMissingRecord = null;
+                              _missingAllocationController.clear();
+                            } else {
+                              _selectedPastMissingRecord = _unclearedMissing.firstWhere((m) => m.id == id);
+                              _missingAllocationController.text = _selectedPastMissingRecord!.missingPay.toStringAsFixed(2);
+
+                              final breakdown = _payableBreakdown;
+                              final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                              final baseInstallment = breakdown?.baseInstallment ?? widget.entry.getCalculatedPayableAmount(
+                                configuredInterestRate: settingsProvider.investmentInterestRate,
+                                configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+                                configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+                                configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+                              );
+                              final currentPayment = double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
+                              final suggested = baseInstallment + _selectedPastMissingRecord!.missingPay;
+                              if (currentPayment < suggested) {
+                                _paymentAmountController.text = suggested.toStringAsFixed(2);
+                              }
+                            }
+                            _updateRemainingBalanceDisplay();
+                          });
+                        },
+                      ),
+                      if (_selectedPastMissingRecord != null) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.green.shade300),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.green.shade700),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Clearing Date: ${SettingsProvider.formatDate(_selectedPastMissingRecord!.missedDate)}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.green.shade800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  Text(
+                                    'Missing Pay: ₹${_selectedPastMissingRecord!.missingPay.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF8B1A1A),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextFormField(
+                                      controller: _missingAllocationController,
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                      decoration: InputDecoration(
+                                        isDense: true,
+                                        labelText: 'Amount to Clear Missing',
+                                        labelStyle: const TextStyle(fontSize: 10.5),
+                                        prefixText: '₹ ',
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                      ),
+                                      onChanged: (_) => _updateRemainingBalanceDisplay(),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF8B1A1A),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                      minimumSize: const Size(0, 36),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                    ),
+                                    onPressed: () {
+                                      final breakdown = _payableBreakdown;
+                                      final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                                      final baseInstallment = breakdown?.baseInstallment ?? widget.entry.getCalculatedPayableAmount(
+                                        configuredInterestRate: settingsProvider.investmentInterestRate,
+                                        configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+                                        configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+                                        configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+                                      );
+                                      final suggested = baseInstallment + _selectedPastMissingRecord!.missingPay;
+                                      _paymentAmountController.text = suggested.toStringAsFixed(2);
+                                      _missingAllocationController.text = _selectedPastMissingRecord!.missingPay.toStringAsFixed(2);
+                                      _updateRemainingBalanceDisplay();
+                                    },
+                                    child: Builder(
+                                      builder: (context) {
+                                        final breakdown = _payableBreakdown;
+                                        final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                                        final baseInstallment = breakdown?.baseInstallment ?? widget.entry.getCalculatedPayableAmount(
+                                          configuredInterestRate: settingsProvider.investmentInterestRate,
+                                          configuredBasePrincipal: settingsProvider.investmentBaseAmount,
+                                          configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
+                                          configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
+                                        );
+                                        return Text(
+                                          'Auto Set Total (₹${(baseInstallment + _selectedPastMissingRecord!.missingPay).toStringAsFixed(0)})',
+                                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 12),
 

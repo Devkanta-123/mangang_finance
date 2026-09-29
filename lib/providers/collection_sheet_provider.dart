@@ -73,28 +73,44 @@ class CollectionSheetProvider extends ChangeNotifier {
 
   /// Fetch all missing payment records for a collection card ID (sorted chronological ascending)
   List<MissingPaymentRecord> getMissingRecordsForCollection(String collectionId) {
-    final list = _missingRecords.where((m) => m.collectionId == collectionId).toList();
+    final list = _missingRecords.where((m) => m.collectionId == collectionId).map((m) {
+      if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
+        final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate);
+        final currentBalance = double.parse((m.missingFine * currentWeek).toStringAsFixed(2));
+        if (m.missingWeek != currentWeek || m.missingBalance != currentBalance) {
+          return m.copyWith(
+            missingWeek: currentWeek,
+            missingBalance: currentBalance,
+          );
+        }
+      }
+      return m;
+    }).toList();
     list.sort((a, b) => a.missedDate.compareTo(b.missedDate));
     return list;
   }
 
-  /// Total sum of missing pay for a collection card
+  /// Total sum of missing pay for a collection card (uncleared/unresolved only)
   double getTotalMissingPayForCollection(String collectionId) {
     return _missingRecords
-        .where((m) => m.collectionId == collectionId)
+        .where((m) => m.collectionId == collectionId && !m.isResolved)
         .fold(0.0, (sum, m) => sum + m.missingPay);
   }
 
   /// Total sum of missing fine / balance for a collection card
   double getTotalMissingBalanceForCollection(String collectionId) {
-    return _missingRecords
-        .where((m) => m.collectionId == collectionId)
-        .fold(0.0, (sum, m) => sum + m.missingBalance);
+    return _missingRecords.where((m) => m.collectionId == collectionId).fold(0.0, (sum, m) {
+      if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
+        final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate);
+        return sum + double.parse((m.missingFine * currentWeek).toStringAsFixed(2));
+      }
+      return sum + m.missingBalance;
+    });
   }
 
-  /// Count of missing records for a collection card
+  /// Count of active uncleared missing records for a collection card
   int getTotalMissingCountForCollection(String collectionId) {
-    return _missingRecords.where((m) => m.collectionId == collectionId).length;
+    return _missingRecords.where((m) => m.collectionId == collectionId && !m.isResolved).length;
   }
 
   /// Total sum of partial day payments recorded in missing logs for a collection card
@@ -102,6 +118,134 @@ class CollectionSheetProvider extends ChangeNotifier {
     return _missingRecords
         .where((m) => m.collectionId == collectionId)
         .fold(0.0, (sum, m) => sum + m.dayPayment);
+  }
+
+  /// Case 1: When a loanee makes a partial payment (less than the required daily/weekly base installment),
+  /// the remaining shortfall has late fine percentage applied (default 3%),
+  /// and is inserted/updated into missing records with status 'partial'.
+  Future<MissingPaymentRecord?> recordPartialPaymentMissingRecord({
+    required RoCollectionEntry entry,
+    required double paymentAmount,
+    required double baseInstallment,
+    required SettingsProvider settingsProvider,
+    DateTime? paymentDate,
+    String? remarks,
+  }) async {
+    if (paymentAmount >= baseInstallment) return null;
+
+    final cleanDate = paymentDate ?? DateTime.now();
+    final missedDate = DateTime(cleanDate.year, cleanDate.month, cleanDate.day, 12, 0, 0);
+
+    final double unpaidShortfall = double.parse(
+      (baseInstallment - paymentAmount).clamp(0.0, double.infinity).toStringAsFixed(2),
+    );
+    final double fineRatePct = settingsProvider.lateFinePercentage;
+    final double missingFine = double.parse(
+      (unpaidShortfall * (fineRatePct / 100.0)).toStringAsFixed(2),
+    );
+    final int missingWeek = MissingPaymentRecord.calculateWeeks(missedDate: missedDate, asOfDate: cleanDate);
+    final double missingBalance = double.parse(
+      (missingFine * missingWeek).toStringAsFixed(2),
+    );
+
+    final dateStr =
+        '${cleanDate.year}${cleanDate.month.toString().padLeft(2, '0')}${cleanDate.day.toString().padLeft(2, '0')}';
+    final recordId = 'MISS-${entry.id}-$dateStr';
+
+    final rec = MissingPaymentRecord(
+      id: recordId,
+      accountId: entry.accountNumber,
+      collectionId: entry.id,
+      loaneeId: entry.customerId,
+      customerId: entry.customerId,
+      accountNo: entry.accountNumber,
+      loaneeName: entry.loaneeName,
+      mobileNo: entry.mobileNo,
+      route: entry.route,
+      collectionType: entry.isDaily ? 'daily' : 'weekly',
+      missedDate: missedDate,
+      dayPayment: paymentAmount,
+      missingPay: unpaidShortfall,
+      missingFine: missingFine,
+      missingWeek: missingWeek,
+      missingBalance: missingBalance,
+      status: 'partial paid',
+      source: 'collection',
+      remarks: remarks ??
+          'Partial Payment: ₹${paymentAmount.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)}. Remaining: ₹${unpaidShortfall.toStringAsFixed(2)}, ${fineRatePct.toStringAsFixed(1)}% Fine: ₹${missingFine.toStringAsFixed(2)}',
+      createdAt: missedDate,
+      updatedAt: DateTime.now(),
+    );
+
+    final existingIdx = _missingRecords.indexWhere((m) =>
+        m.id == rec.id ||
+        (m.collectionId == rec.collectionId &&
+            m.missedDate.year == rec.missedDate.year &&
+            m.missedDate.month == rec.missedDate.month &&
+            m.missedDate.day == rec.missedDate.day));
+
+    if (existingIdx >= 0) {
+      _missingRecords[existingIdx] = rec;
+    } else {
+      _missingRecords.add(rec);
+    }
+
+    if (SupabaseService.instance.isInitialized) {
+      await SupabaseService.instance.saveMissingPaymentRecord(rec);
+    }
+
+    notifyListeners();
+    return rec;
+  }
+
+  /// Case 2: When a payment is allocated to clear an existing missing/paused record,
+  /// the missing record is marked resolved/cleared, its paidDate is set to the collection payment date,
+  /// and it persists in-memory and Supabase.
+  Future<MissingPaymentRecord?> clearPastMissingRecord({
+    required MissingPaymentRecord missingRecord,
+    required DateTime paidDate,
+    required double amountPaidForMissing,
+  }) async {
+    final cleanPaidDate = DateTime(paidDate.year, paidDate.month, paidDate.day);
+    final String formattedPaidDate = SettingsProvider.formatDate(cleanPaidDate);
+
+    // If payment covers the entire missingPay (or balance):
+    final bool isFullyCleared = amountPaidForMissing >= missingRecord.missingPay;
+
+    // Recalculate weeks and balance as of the payment date
+    final int resolvedWeek = missingRecord.missingFine > 0
+        ? MissingPaymentRecord.calculateWeeks(missedDate: missingRecord.missedDate, asOfDate: cleanPaidDate)
+        : (missingRecord.missingWeek > 0 ? missingRecord.missingWeek : 1);
+    final double finalBalance = missingRecord.missingFine > 0
+        ? double.parse((missingRecord.missingFine * resolvedWeek).toStringAsFixed(2))
+        : missingRecord.missingBalance;
+
+    final updated = missingRecord.copyWith(
+      status: isFullyCleared ? 'resolved' : 'partial paid',
+      paidDate: cleanPaidDate,
+      missingWeek: resolvedWeek,
+      missingBalance: finalBalance,
+      dayPayment: missingRecord.dayPayment + amountPaidForMissing,
+      missingPay: isFullyCleared
+          ? 0.0
+          : (missingRecord.missingPay - amountPaidForMissing).clamp(0.0, double.infinity),
+      remarks: 'Paid ₹${amountPaidForMissing.toStringAsFixed(2)} on $formattedPaidDate [PAID_DATE:${cleanPaidDate.toIso8601String()}]',
+      updatedAt: DateTime.now(),
+    );
+
+    final idx = _missingRecords.indexWhere((m) => m.id == missingRecord.id);
+    if (idx >= 0) {
+      _missingRecords[idx] = updated;
+    } else {
+      _missingRecords.add(updated);
+    }
+
+    if (SupabaseService.instance.isInitialized) {
+      await SupabaseService.instance.saveMissingPaymentRecord(updated);
+    }
+
+    notifyListeners();
+    return updated;
   }
 
   /// Ensures all payments for a specific collection card ID are loaded from Supabase into memory
@@ -1087,8 +1231,7 @@ class CollectionSheetProvider extends ChangeNotifier {
 
       final double missingPay = double.parse((baseInstallment - dayPayment).clamp(0.0, double.infinity).toStringAsFixed(2));
       final double missingFine = double.parse((missingPay * (settingsProvider.lateFinePercentage / 100.0)).toStringAsFixed(2));
-      final int daysPast = cleanToday.difference(candidate).inDays;
-      final int missingWeek = (daysPast ~/ 7).clamp(1, 52);
+      final int missingWeek = MissingPaymentRecord.calculateWeeks(missedDate: candidate, asOfDate: cleanToday);
       final double missingBalance = double.parse((missingFine * missingWeek).toStringAsFixed(2));
 
       final dateStr = '${candidate.year}${candidate.month.toString().padLeft(2, '0')}${candidate.day.toString().padLeft(2, '0')}';
@@ -1115,6 +1258,57 @@ class CollectionSheetProvider extends ChangeNotifier {
         source: 'system',
         remarks: '${isDaily ? "Daily" : "Weekly"} Missing Payment: ₹${missingPay.toStringAsFixed(2)}, Fine: ₹${missingFine.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(candidate)})',
         createdAt: DateTime(candidate.year, candidate.month, candidate.day, 12, 0, 0),
+        updatedAt: DateTime.now(),
+      );
+
+      newlyCreatedRecords.add(record);
+    }
+
+    // Process skipped paused dates: create records with status 'paused' and 0 fine so they can be tracked & cleared
+    for (final pDate in skippedPausedDates) {
+      final paymentsOnDate = cardPayments.where((p) {
+        final s = p.status.toLowerCase().trim();
+        return p.createdAt.year == pDate.year &&
+            p.createdAt.month == pDate.month &&
+            p.createdAt.day == pDate.day &&
+            s != 'failed' &&
+            s != 'cancelled';
+      }).toList();
+
+      final double dayPayment = paymentsOnDate.fold(0.0, (sum, p) => sum + p.paymentAmount);
+      if (dayPayment >= baseInstallment) continue;
+
+      final alreadyAssessed = _missingRecords.any((m) =>
+          m.collectionId == entry.id &&
+          m.missedDate.year == pDate.year &&
+          m.missedDate.month == pDate.month &&
+          m.missedDate.day == pDate.day);
+      if (alreadyAssessed) continue;
+
+      final dateStr = '${pDate.year}${pDate.month.toString().padLeft(2, '0')}${pDate.day.toString().padLeft(2, '0')}';
+      final recordId = 'MISS-${entry.id}-$dateStr';
+
+      final record = MissingPaymentRecord(
+        id: recordId,
+        accountId: entry.accountNumber,
+        collectionId: entry.id,
+        loaneeId: loanee?.customerid ?? entry.customerId,
+        customerId: entry.customerId,
+        accountNo: entry.accountNumber,
+        loaneeName: entry.loaneeName,
+        mobileNo: entry.mobileNo,
+        route: entry.route,
+        collectionType: isDaily ? 'daily' : 'weekly',
+        missedDate: DateTime(pDate.year, pDate.month, pDate.day, 12, 0, 0),
+        dayPayment: dayPayment,
+        missingPay: (baseInstallment - dayPayment).clamp(0.0, double.infinity),
+        missingFine: 0.0,
+        missingWeek: 1,
+        missingBalance: (baseInstallment - dayPayment).clamp(0.0, double.infinity),
+        status: 'paused',
+        source: 'system',
+        remarks: 'Payment Paused by Admin for ${SettingsProvider.formatDate(pDate)}',
+        createdAt: DateTime(pDate.year, pDate.month, pDate.day, 12, 0, 0),
         updatedAt: DateTime.now(),
       );
 
@@ -1166,9 +1360,31 @@ class CollectionSheetProvider extends ChangeNotifier {
     logBuf.writeln('====================================================');
     debugPrint(logBuf.toString());
 
+    final List<MissingPaymentRecord> recordsToPersist = List.from(newlyCreatedRecords);
+
+    // Refresh week and balance for any active, unresolved missing records for this entry
+    for (int i = 0; i < _missingRecords.length; i++) {
+      final rec = _missingRecords[i];
+      if (rec.collectionId == entry.id && !rec.isResolved && !rec.isPaused && rec.missingFine > 0) {
+        final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: rec.missedDate, asOfDate: cleanToday);
+        final currentBal = double.parse((rec.missingFine * currentWeek).toStringAsFixed(2));
+        if (rec.missingWeek != currentWeek || rec.missingBalance != currentBal) {
+          final updated = rec.copyWith(
+            missingWeek: currentWeek,
+            missingBalance: currentBal,
+            updatedAt: DateTime.now(),
+          );
+          _missingRecords[i] = updated;
+          if (!recordsToPersist.any((r) => r.id == updated.id)) {
+            recordsToPersist.add(updated);
+          }
+        }
+      }
+    }
+
     // 7. Insert new missing records in-memory and save to Supabase missing_payment_records table
-    if (newlyCreatedRecords.isNotEmpty) {
-      for (final rec in newlyCreatedRecords) {
+    if (recordsToPersist.isNotEmpty) {
+      for (final rec in recordsToPersist) {
         final existingIdx = _missingRecords.indexWhere((m) =>
             m.id == rec.id ||
             (m.collectionId == rec.collectionId &&
@@ -1183,7 +1399,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       }
 
       if (saveToRemote && SupabaseService.instance.isInitialized) {
-        await SupabaseService.instance.saveMissingPaymentRecordsBatch(newlyCreatedRecords);
+        await SupabaseService.instance.saveMissingPaymentRecordsBatch(recordsToPersist);
       }
 
       notifyListeners();
@@ -1549,9 +1765,20 @@ class CollectionSheetProvider extends ChangeNotifier {
       final remoteMissing = await SupabaseService.instance.fetchMissingPaymentRecords();
       final seenMissingIds = <String>{};
       _missingRecords.clear();
+      final now = DateTime.now();
       for (var m in remoteMissing) {
         if (m.id.isNotEmpty && !seenMissingIds.contains(m.id)) {
           seenMissingIds.add(m.id);
+          if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
+            final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate, asOfDate: now);
+            final currentBalance = double.parse((m.missingFine * currentWeek).toStringAsFixed(2));
+            if (m.missingWeek != currentWeek || m.missingBalance != currentBalance) {
+              m = m.copyWith(
+                missingWeek: currentWeek,
+                missingBalance: currentBalance,
+              );
+            }
+          }
           _missingRecords.add(m);
         }
       }

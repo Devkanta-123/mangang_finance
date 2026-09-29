@@ -23,6 +23,7 @@ class MissingPaymentRecord {
   final String status; // 'missing', 'partially_resolved', 'resolved'
   final String source; // 'system'
   final String? remarks;
+  final DateTime? paidDate;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -46,14 +47,43 @@ class MissingPaymentRecord {
     this.status = 'missing',
     this.source = 'system',
     this.remarks,
+    this.paidDate,
     required this.createdAt,
     required this.updatedAt,
   });
 
   bool get isDaily => collectionType.toLowerCase().trim() == 'daily';
   bool get isWeekly => !isDaily;
-  bool get isResolved => status.toLowerCase().trim() == 'resolved';
-  bool get isPartial => status.toLowerCase().trim() == 'partially_resolved' || (dayPayment > 0 && missingPay > 0);
+  bool get isResolved =>
+      status.toLowerCase().trim() == 'resolved' ||
+      status.toLowerCase().trim() == 'cleared' ||
+      status.toLowerCase().trim() == 'paid';
+  bool get isPartial =>
+      !isResolved &&
+      (status.toLowerCase().trim() == 'partially_resolved' ||
+          status.toLowerCase().trim() == 'partial' ||
+          status.toLowerCase().trim() == 'partial paid' ||
+          status.toLowerCase().trim() == 'partially paid' ||
+          (dayPayment > 0 && missingPay > 0));
+  bool get isPaused => status.toLowerCase().trim() == 'paused';
+
+  /// Calculates the number of missing weeks elapsed from missedDate to asOfDate.
+  /// Rule:
+  /// - Days 1 to 7: 1 week (e.g. 7 days = 1 week)
+  /// - Days 8 to 14: 2 weeks (e.g. 10 days = 2 weeks)
+  /// - Days 15 to 21: 3 weeks
+  /// - Formula: (daysPast / 7.0).ceil().clamp(1, 52)
+  static int calculateWeeks({
+    required DateTime missedDate,
+    DateTime? asOfDate,
+  }) {
+    final cleanMissed = DateTime(missedDate.year, missedDate.month, missedDate.day);
+    final targetDate = asOfDate ?? DateTime.now();
+    final cleanTarget = DateTime(targetDate.year, targetDate.month, targetDate.day);
+    final int daysPast = cleanTarget.difference(cleanMissed).inDays;
+    if (daysPast <= 0) return 1;
+    return (daysPast / 7.0).ceil().clamp(1, 52);
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -76,6 +106,9 @@ class MissingPaymentRecord {
       'status': status,
       'source': source,
       'remarks': remarks,
+      'paid_date': paidDate != null
+          ? '${paidDate!.year}-${paidDate!.month.toString().padLeft(2, '0')}-${paidDate!.day.toString().padLeft(2, '0')}'
+          : null,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
     };
@@ -89,6 +122,14 @@ class MissingPaymentRecord {
       return DateTime.tryParse(str) ?? DateTime.now();
     }
 
+    DateTime? parseNullableDate(dynamic val) {
+      if (val == null) return null;
+      if (val is DateTime) return val;
+      final str = val.toString().trim();
+      if (str.isEmpty) return null;
+      return DateTime.tryParse(str);
+    }
+
     double parseNum(dynamic val) {
       if (val == null) return 0.0;
       if (val is num) return val.toDouble();
@@ -100,6 +141,15 @@ class MissingPaymentRecord {
       if (val is int) return val;
       if (val is num) return val.toInt();
       return int.tryParse(val.toString()) ?? 0;
+    }
+
+    final rawRemarks = json['remarks']?.toString();
+    DateTime? resolvedPaidDate = parseNullableDate(json['paid_date'] ?? json['paidDate']);
+    if (resolvedPaidDate == null && rawRemarks != null && rawRemarks.contains('PAID_DATE:')) {
+      final match = RegExp(r'PAID_DATE:([^\s\]]+)').firstMatch(rawRemarks);
+      if (match != null) {
+        resolvedPaidDate = DateTime.tryParse(match.group(1)!);
+      }
     }
 
     return MissingPaymentRecord(
@@ -121,7 +171,8 @@ class MissingPaymentRecord {
       missingBalance: parseNum(json['missing_balance'] ?? json['missingBalance']),
       status: json['status']?.toString() ?? 'missing',
       source: json['source']?.toString() ?? 'system',
-      remarks: json['remarks']?.toString(),
+      remarks: rawRemarks,
+      paidDate: resolvedPaidDate,
       createdAt: parseDate(json['created_at'] ?? json['createdAt']),
       updatedAt: parseDate(json['updated_at'] ?? json['updatedAt']),
     );
@@ -147,6 +198,7 @@ class MissingPaymentRecord {
     String? status,
     String? source,
     String? remarks,
+    DateTime? paidDate,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -170,6 +222,7 @@ class MissingPaymentRecord {
       status: status ?? this.status,
       source: source ?? this.source,
       remarks: remarks ?? this.remarks,
+      paidDate: paidDate ?? this.paidDate,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

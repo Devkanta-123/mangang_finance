@@ -467,6 +467,7 @@ class _TransactionPageState extends State<TransactionPage> {
                                       name: val.loaneeName,
                                     );
                                     final payments = collectionProvider.getPaymentsForCollection(val.id);
+                                    final totalMissingBal = collectionProvider.getTotalMissingBalanceForCollection(val.id);
                                     final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                                       entry: val,
                                       payments: payments,
@@ -474,6 +475,7 @@ class _TransactionPageState extends State<TransactionPage> {
                                       loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
                                       maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
                                       sanctionDate: loanee?.loanSanctionDate ?? val.createdAt,
+                                      overrideLateFine: totalMissingBal,
                                     );
                                     _selectedBreakdown = breakdown;
                                     _amountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
@@ -597,26 +599,39 @@ class _TransactionPageState extends State<TransactionPage> {
                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                        children: [
                                          Text('Amount Due Till Last Month:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
-                                         Text('₹ ${collectionProvider.getLatestRemainingBalance(_selectedCard!.id).toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                         Text('₹ ${(collectionProvider.getLatestRemainingBalance(_selectedCard!.id) + collectionProvider.getTotalMissingBalanceForCollection(_selectedCard!.id)).toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
                                        ],
                                      ),
-                                    if (_selectedBreakdown!.calculatedLateFine > 0) ...[
-                                      const SizedBox(height: 6),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            'Late Payment Fee (${_selectedBreakdown!.lateUnits} missed ${_selectedBreakdown!.isDaily ? (_selectedBreakdown!.lateUnits == 1 ? "day" : "days") : (_selectedBreakdown!.lateUnits == 1 ? "wk" : "wks")}):',
-                                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
-                                          ),
-                                          Text(
-                                            '+ ₹ ${_selectedBreakdown!.calculatedLateFine.toStringAsFixed(2)}',
-                                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
-                                          ),
-                                        ],
-                                      ),
+                                    Builder(
+                                      builder: (context) {
+                                        final totalMissingBal = collectionProvider.getTotalMissingBalanceForCollection(_selectedCard!.id);
+                                        final effectiveLateFee = totalMissingBal > 0 ? totalMissingBal : _selectedBreakdown!.calculatedLateFine;
+                                        if (effectiveLateFee <= 0) return const SizedBox.shrink();
 
-                                    ],
+                                        final missingRecords = collectionProvider.getMissingRecordsForCollection(_selectedCard!.id);
+                                        final activeMissing = missingRecords.where((m) => !m.isResolved).toList();
+                                        final displayUnits = activeMissing.isNotEmpty
+                                            ? activeMissing.length
+                                            : (_selectedBreakdown!.lateUnits > 0 ? _selectedBreakdown!.lateUnits : 1);
+
+                                        return Padding(
+                                          padding: const EdgeInsets.only(top: 6),
+                                          child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Text(
+                                                'Late Payment Fee ($displayUnits missed ${_selectedBreakdown!.isDaily ? (displayUnits == 1 ? "day" : "days") : (displayUnits == 1 ? "wk" : "wks")}):',
+                                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade900),
+                                              ),
+                                              Text(
+                                                '+ ₹ ${effectiveLateFee.toStringAsFixed(2)}',
+                                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ),
                                   ],
                                 ),
                               ),

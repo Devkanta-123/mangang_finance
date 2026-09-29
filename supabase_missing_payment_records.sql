@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS public.missing_payment_records (
     status TEXT NOT NULL DEFAULT 'missing', -- 'missing', 'partially_resolved', 'resolved'
     source TEXT NOT NULL DEFAULT 'system',
     remarks TEXT,
+    paid_date DATE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     -- Database-level duplicate protection
