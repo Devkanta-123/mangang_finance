@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_payment_model.dart';
 import '../models/ro_collection_entry_model.dart';
 import '../models/loanee_model.dart';
+import '../models/missing_payment_model.dart';
 import '../models/notification_model.dart';
 import '../providers/collection_sheet_provider.dart';
 import '../providers/loanee_provider.dart';
@@ -109,10 +110,20 @@ class RealtimeSyncService {
         },
       );
 
+      // 6. Listen to 'missing_payment_records' table (cross-device/model live sync)
+      _realtimeChannel!.onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'missing_payment_records',
+        callback: (PostgresChangePayload payload) {
+          _handleMissingRecordChange(payload);
+        },
+      );
+
       _realtimeChannel!.subscribe((status, error) {
         if (status == RealtimeSubscribeStatus.subscribed) {
           _isSubscribed = true;
-          debugPrint('🟢 Supabase Realtime connected & listening to (payments, entries, loanees, notifications, holidays)');
+          debugPrint('🟢 Supabase Realtime connected & listening to (payments, entries, loanees, notifications, holidays, missing_records)');
         } else if (status == RealtimeSubscribeStatus.closed || status == RealtimeSubscribeStatus.channelError) {
           _isSubscribed = false;
           debugPrint('🔴 Supabase Realtime channel status: $status, error: $error');
@@ -268,6 +279,23 @@ class RealtimeSyncService {
       _settingsProvider?.loadHolidays();
     } catch (e) {
       debugPrint('⚠️ Error handling realtime holiday change: $e');
+    }
+  }
+
+  void _handleMissingRecordChange(PostgresChangePayload payload) {
+    try {
+      debugPrint('⚡ Realtime Missing Record Event: ${payload.eventType}');
+      if (payload.eventType == PostgresChangeEvent.delete) {
+        final oldId = payload.oldRecord['id']?.toString();
+        if (oldId != null && oldId.isNotEmpty) {
+          _collectionProvider?.handleRealtimeMissingRecordDelete(oldId);
+        }
+      } else if (payload.newRecord.isNotEmpty) {
+        final record = MissingPaymentRecord.fromJson(Map<String, dynamic>.from(payload.newRecord));
+        _collectionProvider?.handleRealtimeMissingRecordUpsert(record);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error processing realtime missing record event: $e');
     }
   }
 

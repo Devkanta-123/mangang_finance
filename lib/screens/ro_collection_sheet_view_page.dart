@@ -1044,7 +1044,14 @@ class _RoCollectionSheetViewPageState
                                             ),
                                           );
                                           if (confirmed == true) {
-                                            final success = await collectionProvider.deleteCollectionPayment(p.id);
+                                            SettingsProvider? settingsProvider;
+                                            try {
+                                              settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+                                            } catch (_) {}
+                                            final success = await collectionProvider.deleteCollectionPayment(
+                                              p.id,
+                                              settingsProvider: settingsProvider,
+                                            );
                                             if (success) {
                                               LoaneeProvider? loaneeProvider;
                                               try {
@@ -4682,15 +4689,18 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
             children: [
               const Icon(Icons.warning_amber_rounded, color: Color(0xFFE65100), size: 16),
               const SizedBox(width: 6),
-              Text(
-                "Reconciliation Notice: ${rec.issues.length} Issue${rec.issues.length == 1 ? '' : 's'} Identified",
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFFB71C1C),
+              Expanded(
+                child: Text(
+                  "Reconciliation Notice: ${rec.issues.length} Issue${rec.issues.length == 1 ? '' : 's'} Identified",
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFFB71C1C),
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               const Text(
                 "Chronological ledger enforced",
                 style: TextStyle(
@@ -4923,7 +4933,11 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
         _isLoading = true;
       });
       try {
-        final success = await widget.collectionProvider.deleteCollectionPayment(payment.id);
+        final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+        final success = await widget.collectionProvider.deleteCollectionPayment(
+          payment.id,
+          settingsProvider: settingsProvider,
+        );
         if (success) {
           // Also update Loanee record in memory & provider
           final card = widget.entry;
@@ -5075,7 +5089,11 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
         _isLoading = true;
       });
       try {
-        await widget.collectionProvider.deleteAllPaymentsForCollection(widget.entry.id);
+        final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+        await widget.collectionProvider.deleteAllPaymentsForCollection(
+          widget.entry.id,
+          settingsProvider: settingsProvider,
+        );
 
         final card = widget.entry;
         final initialBal = card.initialBalance;
@@ -5142,7 +5160,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 900),
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(20.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -5473,11 +5491,16 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                     )
                                   : Builder(
                                       builder: (context) {
-                                        String? clearedDateLabel;
-                                        if (p.remarks != null && p.remarks!.contains('Cleared missing date:')) {
-                                          final match = RegExp(r'Cleared missing date:\s*([^,\)]+)').firstMatch(p.remarks!);
+                                        String? clearedOnDateLabel;
+                                        if (p.remarks != null) {
+                                          final match = RegExp(r'(?:Cleared on|Paid Date):\s*([^,\)\]]+)').firstMatch(p.remarks!);
                                           if (match != null) {
-                                            clearedDateLabel = match.group(1)!.trim();
+                                            clearedOnDateLabel = match.group(1)!.trim();
+                                          } else if (p.remarks!.contains('Cleared missing date:')) {
+                                            final m = RegExp(r'Cleared missing date:\s*([^,\)\[]+)').firstMatch(p.remarks!);
+                                            if (m != null) {
+                                              clearedOnDateLabel = m.group(1)!.trim();
+                                            }
                                           }
                                         }
 
@@ -5496,7 +5519,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                                         fontSize: 11, fontWeight: FontWeight.w600)),
                                               ],
                                             ),
-                                            if (clearedDateLabel != null) ...[
+                                            if (clearedOnDateLabel != null) ...[
                                               const SizedBox(height: 2),
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
@@ -5511,7 +5534,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                                     Icon(Icons.check_circle_rounded, size: 9, color: Colors.green.shade700),
                                                     const SizedBox(width: 3),
                                                     Text(
-                                                      'Cleared: ' + clearedDateLabel,
+                                                      'Cleared on: $clearedOnDateLabel',
                                                       style: TextStyle(
                                                         fontSize: 9,
                                                         fontWeight: FontWeight.bold,
@@ -6546,11 +6569,23 @@ class __AddPaymentEntryModalContentState
         ? (effectiveTarget - paymentAmount + partialPaymentCharge)
         : 0.0;
 
+    final DateTime now = DateTime.now();
+    final DateTime paymentCreatedAt = (pastMissingRecord != null)
+        ? DateTime(
+            pastMissingRecord.missedDate.year,
+            pastMissingRecord.missedDate.month,
+            pastMissingRecord.missedDate.day,
+            now.hour,
+            now.minute,
+            now.second,
+          )
+        : now;
+
     String missingClearNote = '';
     if (pastMissingRecord != null && amountForMissing > 0) {
       final missedDateFormatted = SettingsProvider.formatDate(pastMissingRecord.missedDate);
-      final todayFormatted = SettingsProvider.formatDate(DateTime.now());
-      missingClearNote = ' | Cleared missing date: $missedDateFormatted (Paid Date: $todayFormatted, Amount: ₹${amountForMissing.toStringAsFixed(2)})';
+      final todayFormatted = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
+      missingClearNote = ' | Cleared missing date: $missedDateFormatted [MISSING_ID:${pastMissingRecord.id}] (Cleared on: $todayFormatted, Paid Date: $todayFormatted, Amount: ₹${amountForMissing.toStringAsFixed(2)})';
     }
 
     final String partialPaymentNote = (partialPaymentCharge > 0 && todayPortion < baseInstallment)
@@ -6573,33 +6608,127 @@ class __AddPaymentEntryModalContentState
           }).join(', ')}'
         : '';
 
-    final String? finalRemarks = remarks != null
-        ? '$remarks$missingClearNote$partialPaymentNote$hybridNote'
-        : ((missingClearNote + partialPaymentNote + hybridNote).isNotEmpty
-            ? (missingClearNote + partialPaymentNote + hybridNote).replaceFirst(' | ', '')
-            : null);
-
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     final loaneeProvider =
         Provider.of<LoaneeProvider>(context, listen: false);
 
-    final payment = CollectionPaymentModel(
-      id: 'PAY-${DateTime.now().millisecondsSinceEpoch}',
-      collectionId: widget.entry.id,
-      paymentAmount: paymentAmount,
-      remainingBalance: newRemainingBalance,
-      lateFine: 0.0,
-      interest: partialPaymentCharge,
-      paymentType: paymentTypeToSave,
-      roPasscode: enteredPasscode,
-      roName: realRoName,
-      roId: realRoId,
-      roRoute: roAssignedRoute,
-      remarks: finalRemarks,
-    );
+    bool success = false;
 
-    final success = await collectionProvider.addCollectionPayment(payment);
+    if (pastMissingRecord != null && amountForMissing > 0) {
+      // Case 2: Payment is dedicated to clearing the past missing date.
+      // In payment history, the payment date MUST be the date picked up from dropdown!
+      final double remBalAfterMissing = (baseTarget >= amountForMissing)
+          ? (baseTarget - amountForMissing)
+          : 0.0;
+
+      final missingPayment = CollectionPaymentModel(
+        id: 'PAY-${now.millisecondsSinceEpoch}',
+        collectionId: widget.entry.id,
+        paymentAmount: amountForMissing,
+        remainingBalance: todayPortion > 0 ? remBalAfterMissing : newRemainingBalance,
+        lateFine: 0.0,
+        interest: 0.0,
+        paymentType: paymentTypeToSave,
+        roPasscode: enteredPasscode,
+        roName: realRoName,
+        roId: realRoId,
+        roRoute: roAssignedRoute,
+        createdAt: paymentCreatedAt,
+        remarks: remarks != null
+            ? '$remarks$missingClearNote$hybridNote'
+            : ((missingClearNote + hybridNote).isNotEmpty
+                ? (missingClearNote + hybridNote).replaceFirst(' | ', '')
+                : null),
+      );
+
+      success = await collectionProvider.addCollectionPayment(missingPayment);
+
+      if (success) {
+        // Clear selected past missing record and update paidDate & status
+        await collectionProvider.clearPastMissingRecord(
+          missingRecord: pastMissingRecord,
+          paidDate: now,
+          amountPaidForMissing: amountForMissing,
+        );
+
+        // If loanee also paid an extra amount for today's regular installment
+        if (todayPortion > 0) {
+          final todayPayment = CollectionPaymentModel(
+            id: 'PAY-${now.millisecondsSinceEpoch + 10}',
+            collectionId: widget.entry.id,
+            paymentAmount: todayPortion,
+            remainingBalance: newRemainingBalance,
+            lateFine: 0.0,
+            interest: partialPaymentCharge,
+            paymentType: paymentTypeToSave,
+            roPasscode: enteredPasscode,
+            roName: realRoName,
+            roId: realRoId,
+            roRoute: roAssignedRoute,
+            createdAt: now,
+            remarks: remarks != null
+                ? '$remarks$partialPaymentNote$hybridNote'
+                : ((partialPaymentNote + hybridNote).isNotEmpty
+                    ? (partialPaymentNote + hybridNote).replaceFirst(' | ', '')
+                    : null),
+          );
+
+          await collectionProvider.addCollectionPayment(todayPayment);
+
+          // Case 1: Loanee partially paid today's base installment
+          if (!isPastMaturity && todayPortion < baseInstallment) {
+            await collectionProvider.recordPartialPaymentMissingRecord(
+              entry: widget.entry,
+              paymentAmount: todayPortion,
+              baseInstallment: baseInstallment,
+              settingsProvider: settingsProvider,
+              paymentDate: now,
+              remarks: 'Partial Payment: ₹${todayPortion.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)}. Remaining: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Fine: ₹${partialPaymentCharge.toStringAsFixed(2)}',
+            );
+          }
+        }
+      }
+    } else {
+      // Normal single payment for today
+      final String? finalRemarks = remarks != null
+          ? '$remarks$partialPaymentNote$hybridNote'
+          : ((partialPaymentNote + hybridNote).isNotEmpty
+              ? (partialPaymentNote + hybridNote).replaceFirst(' | ', '')
+              : null);
+
+      final payment = CollectionPaymentModel(
+        id: 'PAY-${now.millisecondsSinceEpoch}',
+        collectionId: widget.entry.id,
+        paymentAmount: paymentAmount,
+        remainingBalance: newRemainingBalance,
+        lateFine: 0.0,
+        interest: partialPaymentCharge,
+        paymentType: paymentTypeToSave,
+        roPasscode: enteredPasscode,
+        roName: realRoName,
+        roId: realRoId,
+        roRoute: roAssignedRoute,
+        createdAt: now,
+        remarks: finalRemarks,
+      );
+
+      success = await collectionProvider.addCollectionPayment(payment);
+
+      if (success) {
+        // Case 1: Loanee partially paid today's base installment
+        if (!isPastMaturity && todayPortion > 0 && todayPortion < baseInstallment) {
+          await collectionProvider.recordPartialPaymentMissingRecord(
+            entry: widget.entry,
+            paymentAmount: todayPortion,
+            baseInstallment: baseInstallment,
+            settingsProvider: settingsProvider,
+            paymentDate: now,
+            remarks: 'Partial Payment: ₹${todayPortion.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)}. Remaining: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Fine: ₹${partialPaymentCharge.toStringAsFixed(2)}',
+          );
+        }
+      }
+    }
 
     if (success) {
       loaneeProvider.recordPaymentForLoanee(
@@ -6608,28 +6737,6 @@ class __AddPaymentEntryModalContentState
         paymentAmount: paymentAmount,
         newRemainingBalance: newRemainingBalance,
       );
-
-      // Case 2: Clear selected past missing record and update paidDate & status
-      if (pastMissingRecord != null && amountForMissing > 0) {
-        await collectionProvider.clearPastMissingRecord(
-          missingRecord: pastMissingRecord,
-          paidDate: DateTime.now(),
-          amountPaidForMissing: amountForMissing,
-        );
-      }
-
-      // Case 1: Loanee partially paid today's base installment (e.g. paid 1000 of 1500)
-      // Apply 3% fine to the remaining shortfall (500) and insert into missing records with status 'partial paid'
-      if (!isPastMaturity && todayPortion > 0 && todayPortion < baseInstallment) {
-        await collectionProvider.recordPartialPaymentMissingRecord(
-          entry: widget.entry,
-          paymentAmount: todayPortion,
-          baseInstallment: baseInstallment,
-          settingsProvider: settingsProvider,
-          paymentDate: DateTime.now(),
-          remarks: 'Partial Payment: ₹${todayPortion.toStringAsFixed(2)} paid of ₹${baseInstallment.toStringAsFixed(2)}. Remaining: ₹${unpaidBaseAmount.toStringAsFixed(2)}, ${settingsProvider.lateFinePercentage.toStringAsFixed(1)}% Fine: ₹${partialPaymentCharge.toStringAsFixed(2)}',
-        );
-      }
     }
 
     if (!mounted) return;
@@ -7519,21 +7626,12 @@ class __AddPaymentEntryModalContentState
                               _missingAllocationController.clear();
                             } else {
                               _selectedPastMissingRecord = _unclearedMissing.firstWhere((m) => m.id == id);
-                              _missingAllocationController.text = _selectedPastMissingRecord!.missingPay.toStringAsFixed(2);
-
-                              final breakdown = _payableBreakdown;
-                              final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
-                              final baseInstallment = breakdown?.baseInstallment ?? widget.entry.getCalculatedPayableAmount(
-                                configuredInterestRate: settingsProvider.investmentInterestRate,
-                                configuredBasePrincipal: settingsProvider.investmentBaseAmount,
-                                configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
-                                configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
-                              );
-                              final currentPayment = double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
-                              final suggested = baseInstallment + _selectedPastMissingRecord!.missingPay;
-                              if (currentPayment < suggested) {
-                                _paymentAmountController.text = suggested.toStringAsFixed(2);
-                              }
+                              final missingAmt = _selectedPastMissingRecord!.missingPay > 0
+                                  ? _selectedPastMissingRecord!.missingPay
+                                  : _selectedPastMissingRecord!.dayPayment;
+                              _missingAllocationController.text = missingAmt.toStringAsFixed(2);
+                              // Case 2 is for clearing past missing date: payment is for this past date, leaving today unpaid
+                              _paymentAmountController.text = missingAmt.toStringAsFixed(2);
                             }
                             _updateRemainingBalanceDisplay();
                           });
@@ -7607,6 +7705,35 @@ class __AddPaymentEntryModalContentState
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                                     ),
                                     onPressed: () {
+                                      final missingAmt = _selectedPastMissingRecord!.missingPay > 0
+                                          ? _selectedPastMissingRecord!.missingPay
+                                          : _selectedPastMissingRecord!.dayPayment;
+                                      _paymentAmountController.text = missingAmt.toStringAsFixed(2);
+                                      _missingAllocationController.text = missingAmt.toStringAsFixed(2);
+                                      _updateRemainingBalanceDisplay();
+                                    },
+                                    child: Builder(
+                                      builder: (context) {
+                                        final missingAmt = _selectedPastMissingRecord!.missingPay > 0
+                                            ? _selectedPastMissingRecord!.missingPay
+                                            : _selectedPastMissingRecord!.dayPayment;
+                                        return Text(
+                                          'Set Missing (₹${missingAmt.toStringAsFixed(0)})',
+                                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  OutlinedButton(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFF8B1A1A),
+                                      side: const BorderSide(color: Color(0xFF8B1A1A)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                      minimumSize: const Size(0, 36),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                    ),
+                                    onPressed: () {
                                       final breakdown = _payableBreakdown;
                                       final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
                                       final baseInstallment = breakdown?.baseInstallment ?? widget.entry.getCalculatedPayableAmount(
@@ -7615,9 +7742,12 @@ class __AddPaymentEntryModalContentState
                                         configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
                                         configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
                                       );
-                                      final suggested = baseInstallment + _selectedPastMissingRecord!.missingPay;
+                                      final missingAmt = _selectedPastMissingRecord!.missingPay > 0
+                                          ? _selectedPastMissingRecord!.missingPay
+                                          : _selectedPastMissingRecord!.dayPayment;
+                                      final suggested = baseInstallment + missingAmt;
                                       _paymentAmountController.text = suggested.toStringAsFixed(2);
-                                      _missingAllocationController.text = _selectedPastMissingRecord!.missingPay.toStringAsFixed(2);
+                                      _missingAllocationController.text = missingAmt.toStringAsFixed(2);
                                       _updateRemainingBalanceDisplay();
                                     },
                                     child: Builder(
@@ -7630,8 +7760,11 @@ class __AddPaymentEntryModalContentState
                                           configuredBaseDailyAmount: settingsProvider.baseDailyAmount,
                                           configuredWeeklyInstallment: settingsProvider.weeklyInstallmentAmount,
                                         );
+                                        final missingAmt = _selectedPastMissingRecord!.missingPay > 0
+                                            ? _selectedPastMissingRecord!.missingPay
+                                            : _selectedPastMissingRecord!.dayPayment;
                                         return Text(
-                                          'Auto Set Total (₹${(baseInstallment + _selectedPastMissingRecord!.missingPay).toStringAsFixed(0)})',
+                                          'Pay Both (₹${(baseInstallment + missingAmt).toStringAsFixed(0)})',
                                           style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold),
                                         );
                                       },

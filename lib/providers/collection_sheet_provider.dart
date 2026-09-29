@@ -82,7 +82,8 @@ class CollectionSheetProvider extends ChangeNotifier {
 
   /// Fetch all missing payment records for a collection card ID (sorted chronological ascending)
   List<MissingPaymentRecord> getMissingRecordsForCollection(String collectionId) {
-    final list = _missingRecords.where((m) => m.collectionId == collectionId).map((m) {
+    final cleanId = collectionId.trim().toLowerCase();
+    final list = _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == cleanId).map((m) {
       final bool isExcel = m.source.toLowerCase().trim() == 'excel_import' ||
           m.source.toLowerCase().trim() == 'excel' ||
           (m.remarks ?? '').toLowerCase().contains('excel');
@@ -115,14 +116,16 @@ class CollectionSheetProvider extends ChangeNotifier {
 
   /// Total sum of missing pay for a collection card (uncleared/unresolved only)
   double getTotalMissingPayForCollection(String collectionId) {
+    final cleanId = collectionId.trim().toLowerCase();
     return _missingRecords
-        .where((m) => m.collectionId == collectionId && !m.isResolved && m.paidDate == null)
+        .where((m) => m.collectionId.trim().toLowerCase() == cleanId && !m.isResolved && m.paidDate == null)
         .fold(0.0, (sum, m) => sum + (m.missingPay > 0 ? m.missingPay : m.dayPayment));
   }
 
   /// Total sum of missing fine / balance for a collection card
   double getTotalMissingBalanceForCollection(String collectionId, {DateTime? asOfDate}) {
-    return _missingRecords.where((m) => m.collectionId == collectionId).fold(0.0, (sum, m) {
+    final cleanId = collectionId.trim().toLowerCase();
+    return _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == cleanId).fold(0.0, (sum, m) {
       final bool isExcel = m.source.toLowerCase().trim() == 'excel_import' ||
           m.source.toLowerCase().trim() == 'excel' ||
           (m.remarks ?? '').toLowerCase().contains('excel');
@@ -139,29 +142,41 @@ class CollectionSheetProvider extends ChangeNotifier {
 
   /// Count of active uncleared missing records for a collection card
   int getTotalMissingCountForCollection(String collectionId) {
-    return _missingRecords.where((m) => m.collectionId == collectionId && !m.isResolved && m.paidDate == null).length;
+    final cleanId = collectionId.trim().toLowerCase();
+    return _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == cleanId && !m.isResolved && m.paidDate == null).length;
   }
 
   /// Total sum of partial day payments recorded in missing logs for a collection card
   double getTotalDayPaymentForCollection(String collectionId) {
+    final cleanId = collectionId.trim().toLowerCase();
     return _missingRecords
-        .where((m) => m.collectionId == collectionId)
+        .where((m) => m.collectionId.trim().toLowerCase() == cleanId)
         .fold(0.0, (sum, m) => sum + m.dayPayment);
   }
   /// Check whether missing records automation is authorized for an entry.
   /// Rule: By default, system auto does NOT run unless historical missing Excel
   /// has been uploaded and inserted for this entry.
   bool isMissingAutomationAuthorized(String collectionId, [String? accountNo, String? customerId]) {
-    if (_authorizedAutoMissingEntryIds.contains(collectionId)) return true;
-    if (accountNo != null && _authorizedAutoMissingEntryIds.contains(accountNo)) return true;
-    if (customerId != null && _authorizedAutoMissingEntryIds.contains(customerId)) return true;
+    final colIdClean = collectionId.trim().toLowerCase();
+    final accNoClean = accountNo?.trim().toLowerCase();
+    final custIdClean = customerId?.trim().toLowerCase();
 
-    // Check if any missing record with source == 'excel_import' exists for this entry
-    final hasExcelRecord = _missingRecords.any((m) =>
-        (m.collectionId == collectionId ||
-            (accountNo != null && m.accountNo == accountNo) ||
-            (customerId != null && m.customerId == customerId)) &&
-        m.source == 'excel_import');
+    if (_authorizedAutoMissingEntryIds.any((id) => id.trim().toLowerCase() == colIdClean)) return true;
+    if (accNoClean != null && accNoClean.isNotEmpty && _authorizedAutoMissingEntryIds.any((id) => id.trim().toLowerCase() == accNoClean)) return true;
+    if (custIdClean != null && custIdClean.isNotEmpty && _authorizedAutoMissingEntryIds.any((id) => id.trim().toLowerCase() == custIdClean)) return true;
+    if (_excelAuditEndDates.keys.any((k) => k.trim().toLowerCase() == colIdClean)) return true;
+
+    // Check if any missing record with Excel source or remarks exists for this entry
+    final hasExcelRecord = _missingRecords.any((m) {
+      final matches = m.collectionId.trim().toLowerCase() == colIdClean ||
+          (accNoClean != null && accNoClean.isNotEmpty && (m.accountNo ?? '').trim().toLowerCase() == accNoClean) ||
+          (custIdClean != null && custIdClean.isNotEmpty && (m.customerId ?? '').trim().toLowerCase() == custIdClean);
+      if (!matches) return false;
+      final src = m.source.toLowerCase().trim();
+      if (src == 'excel_import' || src == 'excel' || src == 'past' || src == 'excel_upload') return true;
+      final rem = (m.remarks ?? '').toLowerCase();
+      return rem.contains('excel') || rem.contains('imported') || rem.contains('historical') || rem.contains('past');
+    });
     if (hasExcelRecord) {
       _authorizedAutoMissingEntryIds.add(collectionId);
       return true;
@@ -182,13 +197,70 @@ class CollectionSheetProvider extends ChangeNotifier {
         await prefs.setString('excel_missing_audit_date_$collectionId', auditEndDate.toIso8601String());
       }
     } catch (_) {}
+
+    // Persist to Supabase system_settings so all other Android devices/models share authorization & audit boundary
+    if (SupabaseService.instance.isInitialized) {
+      try {
+        final client = SupabaseService.instance.client;
+        if (client != null) {
+          if (auditEndDate != null) {
+            await client.from('system_settings').upsert({
+              'setting_key': 'excel_missing_audit_date_$collectionId',
+              'setting_value': auditEndDate.toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
+            }, onConflict: 'setting_key');
+          }
+          await client.from('system_settings').upsert({
+            'setting_key': 'authorized_auto_missing_entry_ids',
+            'setting_value': _authorizedAutoMissingEntryIds.join(','),
+            'updated_at': DateTime.now().toIso8601String(),
+          }, onConflict: 'setting_key');
+        }
+      } catch (e) {
+        debugPrint('Note saving auto missing authorization to remote: $e');
+      }
+    }
+
     if (notify) {
       notifyListeners();
     }
   }
 
   DateTime? getExcelAuditEndDate(String collectionId) {
-    return _excelAuditEndDates[collectionId];
+    final colIdClean = collectionId.trim().toLowerCase();
+    for (final entry in _excelAuditEndDates.entries) {
+      if (entry.key.trim().toLowerCase() == colIdClean) {
+        return entry.value;
+      }
+    }
+
+    // Fallback: If not cached in memory, inspect _missingRecords for any Excel records for this collection
+    final excelRecords = _missingRecords.where((m) {
+      if (m.collectionId.trim().toLowerCase() != colIdClean) return false;
+      final src = m.source.toLowerCase().trim();
+      if (src == 'excel_import' || src == 'excel' || src == 'past' || src == 'excel_upload') return true;
+      final rem = (m.remarks ?? '').toLowerCase();
+      return rem.contains('excel') || rem.contains('imported') || rem.contains('historical') || rem.contains('past');
+    }).toList();
+
+    if (excelRecords.isNotEmpty) {
+      final maxDate = excelRecords
+          .map((m) => DateTime(m.missedDate.year, m.missedDate.month, m.missedDate.day))
+          .reduce((a, b) => a.isAfter(b) ? a : b);
+      _excelAuditEndDates[collectionId] = maxDate;
+      return maxDate;
+    }
+
+    // Second fallback: Any existing missing record for this collection
+    final anyRecords = _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == colIdClean).toList();
+    if (anyRecords.isNotEmpty) {
+      final maxDate = anyRecords
+          .map((m) => DateTime(m.missedDate.year, m.missedDate.month, m.missedDate.day))
+          .reduce((a, b) => a.isAfter(b) ? a : b);
+      return maxDate;
+    }
+
+    return null;
   }
 
   final Map<String, List<DateTime>> _lastAutoSkippedDuplicateDates = {};
@@ -762,8 +834,26 @@ class CollectionSheetProvider extends ChangeNotifier {
     bool suppressNotification = false,
     bool saveToRemote = true,
   }) async {
-    // Strictly prevent duplicate payment entry for the same collection card on the same date
-    if (hasPaymentForDate(payment.collectionId, payment.createdAt)) {
+    // Check if this payment is clearing a past missing date
+    final bool isMissingClearance =
+        payment.remarks != null && payment.remarks!.contains('Cleared missing date:');
+
+    if (isMissingClearance) {
+      // Prevent exact duplicate missing payment clearance submission on same date
+      final cardPayments = getPaymentsForCollection(payment.collectionId);
+      final hasAlreadyClearedOnDate = cardPayments.any((p) =>
+          p.remarks != null &&
+          p.remarks!.contains('Cleared missing date:') &&
+          p.createdAt.year == payment.createdAt.year &&
+          p.createdAt.month == payment.createdAt.month &&
+          p.createdAt.day == payment.createdAt.day &&
+          p.id != payment.id);
+      if (hasAlreadyClearedOnDate) {
+        debugPrint(
+            '⚠️ Duplicate missing payment clearance rejected on ${payment.createdAt.toString().split(' ')[0]}');
+        return false;
+      }
+    } else if (hasPaymentForDate(payment.collectionId, payment.createdAt)) {
       debugPrint(
           '⚠️ Duplicate payment rejected: Collection ${payment.collectionId} already recorded on ${payment.createdAt.toString().split(' ')[0]}');
       return false;
@@ -795,8 +885,152 @@ class CollectionSheetProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Reverts a cleared/resolved missing payment record back to normal active missing state
+  /// (unlocked, not frozen, paidDate null, status 'missing' or 'paused', recalculated balance).
+  Future<MissingPaymentRecord?> revertClearedMissingRecord(
+    MissingPaymentRecord missingRecord, {
+    SettingsProvider? settingsProvider,
+  }) async {
+    final entry = getCollectionEntryById(missingRecord.collectionId);
+
+    final cleanMissed = DateTime(missingRecord.missedDate.year, missingRecord.missedDate.month, missingRecord.missedDate.day, 12, 0, 0);
+    final now = DateTime.now();
+
+    final bool isPaused = (settingsProvider != null &&
+            settingsProvider.isLateFinePaused(missingRecord.collectionId, cleanMissed, customerId: missingRecord.customerId)) ||
+        (missingRecord.remarks?.toLowerCase().contains('pause') == true && missingRecord.missingFine == 0.0);
+
+    final int weeks = isPaused
+        ? 0
+        : MissingPaymentRecord.calculateWeeks(missedDate: cleanMissed, asOfDate: now);
+
+    final double basicPay = missingRecord.missingPay > 0
+        ? missingRecord.missingPay
+        : (missingRecord.dayPayment > 0 ? missingRecord.dayPayment : (entry?.isDaily == true ? 200.0 : 1500.0));
+
+    final double finePct = settingsProvider?.lateFinePercentage ?? 3.0;
+    final double fine = isPaused
+        ? 0.0
+        : (missingRecord.missingFine > 0
+            ? missingRecord.missingFine
+            : double.parse((basicPay * (finePct / 100.0)).toStringAsFixed(2)));
+
+    final double balance = isPaused
+        ? 0.0
+        : double.parse((fine * (weeks > 0 ? weeks : 1)).toStringAsFixed(2));
+
+    final reverted = missingRecord.copyWith(
+      status: isPaused ? 'paused' : 'missing',
+      clearPaidDate: true,
+      missingWeek: weeks,
+      missingBalance: balance,
+      missingPay: basicPay,
+      missingFine: fine,
+      dayPayment: 0.0,
+      remarks: isPaused
+          ? 'Late Fine Paused on ${SettingsProvider.formatDate(cleanMissed)}'
+          : '${missingRecord.isDaily ? "Daily" : "Weekly"} Missing Payment: ₹${basicPay.toStringAsFixed(2)}, Fine: ₹${fine.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(cleanMissed)})',
+      updatedAt: DateTime.now(),
+    );
+
+    final idx = _missingRecords.indexWhere((m) => m.id == missingRecord.id);
+    if (idx >= 0) {
+      _missingRecords[idx] = reverted;
+    } else {
+      _missingRecords.add(reverted);
+    }
+
+    if (SupabaseService.instance.isInitialized) {
+      await SupabaseService.instance.saveMissingPaymentRecord(reverted);
+    }
+
+    notifyListeners();
+    return reverted;
+  }
+
+  /// Finds and reverts any cleared missing record associated with a collection payment.
+  Future<MissingPaymentRecord?> revertMissingRecordForPayment(
+    CollectionPaymentModel payment, {
+    SettingsProvider? settingsProvider,
+  }) async {
+    MissingPaymentRecord? target;
+
+    // 1. Try finding missing record by MISSING_ID in remarks
+    if (payment.remarks != null && payment.remarks!.contains('[MISSING_ID:')) {
+      final match = RegExp(r'\[MISSING_ID:([^\]]+)\]').firstMatch(payment.remarks!);
+      if (match != null) {
+        final id = match.group(1)!.trim();
+        target = _missingRecords.where((m) => m.id == id).firstOrNull;
+      }
+    }
+
+    // 2. Try finding missing record by cleared date in remarks
+    if (target == null && payment.remarks != null && payment.remarks!.contains('Cleared missing date:')) {
+      final match = RegExp(r'Cleared missing date:\s*([^,\)\[]+)').firstMatch(payment.remarks!);
+      if (match != null) {
+        final dateStr = match.group(1)!.trim();
+        final parsedDate = MissingPaymentRecord.parseCalendarDate(dateStr);
+        target = _missingRecords.where((m) =>
+            m.collectionId == payment.collectionId &&
+            m.missedDate.year == parsedDate.year &&
+            m.missedDate.month == parsedDate.month &&
+            m.missedDate.day == parsedDate.day).firstOrNull;
+      }
+    }
+
+    // 3. Try finding missing record matching collectionId and payment.createdAt
+    target ??= _missingRecords.where((m) =>
+        m.collectionId == payment.collectionId &&
+        m.missedDate.year == payment.createdAt.year &&
+        m.missedDate.month == payment.createdAt.month &&
+        m.missedDate.day == payment.createdAt.day &&
+        (m.isResolved || m.paidDate != null)).firstOrNull;
+
+    // If still null, try refreshing from remote and re-checking
+    if (target == null) {
+      await refreshMissingRecordsForCollection(payment.collectionId);
+      if (payment.remarks != null && payment.remarks!.contains('[MISSING_ID:')) {
+        final match = RegExp(r'\[MISSING_ID:([^\]]+)\]').firstMatch(payment.remarks!);
+        if (match != null) {
+          final id = match.group(1)!.trim();
+          target = _missingRecords.where((m) => m.id == id).firstOrNull;
+        }
+      }
+      if (target == null && payment.remarks != null && payment.remarks!.contains('Cleared missing date:')) {
+        final match = RegExp(r'Cleared missing date:\s*([^,\)\[]+)').firstMatch(payment.remarks!);
+        if (match != null) {
+          final dateStr = match.group(1)!.trim();
+          final parsedDate = MissingPaymentRecord.parseCalendarDate(dateStr);
+          target = _missingRecords.where((m) =>
+              m.collectionId == payment.collectionId &&
+              m.missedDate.year == parsedDate.year &&
+              m.missedDate.month == parsedDate.month &&
+              m.missedDate.day == parsedDate.day).firstOrNull;
+        }
+      }
+      target ??= _missingRecords.where((m) =>
+          m.collectionId == payment.collectionId &&
+          m.missedDate.year == payment.createdAt.year &&
+          m.missedDate.month == payment.createdAt.month &&
+          m.missedDate.day == payment.createdAt.day &&
+          (m.isResolved || m.paidDate != null)).firstOrNull;
+    }
+
+    if (target != null) {
+      return await revertClearedMissingRecord(target, settingsProvider: settingsProvider);
+    }
+    return null;
+  }
+
   /// Delete collection payment by ID
-  Future<bool> deleteCollectionPayment(String paymentId) async {
+  Future<bool> deleteCollectionPayment(
+    String paymentId, {
+    SettingsProvider? settingsProvider,
+  }) async {
+    final payment = _payments.where((p) => p.id == paymentId).firstOrNull;
+    if (payment != null) {
+      await revertMissingRecordForPayment(payment, settingsProvider: settingsProvider);
+    }
     _payments.removeWhere((p) => p.id == paymentId);
     notifyListeners();
     if (SupabaseService.instance.isInitialized) {
@@ -806,7 +1040,15 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
   /// Delete all collection payments for a collection ID (in memory and remote database in one operation)
-  Future<bool> deleteAllPaymentsForCollection(String collectionId) async {
+  Future<bool> deleteAllPaymentsForCollection(
+    String collectionId, {
+    SettingsProvider? settingsProvider,
+  }) async {
+    final resolvedMissing = _missingRecords.where((m) =>
+        m.collectionId == collectionId && (m.isResolved || m.paidDate != null)).toList();
+    for (final rec in resolvedMissing) {
+      await revertClearedMissingRecord(rec, settingsProvider: settingsProvider);
+    }
     _payments.removeWhere((p) => p.collectionId == collectionId);
     _dbTotalCollectedCache[collectionId] = 0.0;
     notifyListeners();
@@ -817,9 +1059,16 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
   /// Delete multiple collection payments by IDs in a single batch operation
-  Future<bool> deleteCollectionPaymentsBatch(List<String> paymentIds) async {
+  Future<bool> deleteCollectionPaymentsBatch(
+    List<String> paymentIds, {
+    SettingsProvider? settingsProvider,
+  }) async {
     if (paymentIds.isEmpty) return true;
     final idsSet = paymentIds.toSet();
+    final toDelete = _payments.where((p) => idsSet.contains(p.id)).toList();
+    for (final p in toDelete) {
+      await revertMissingRecordForPayment(p, settingsProvider: settingsProvider);
+    }
     _payments.removeWhere((p) => idsSet.contains(p.id));
     notifyListeners();
     if (SupabaseService.instance.isInitialized) {
@@ -1064,15 +1313,40 @@ class CollectionSheetProvider extends ChangeNotifier {
     bool saveToRemote = true,
     bool forceAuthorize = false,
   }) async {
-    // 0. RULE: By default, do NOT run system auto for any entry!
-    // Automation strictly runs once historical missing records Excel data has been
-    // uploaded and inserted successfully (or when forceAuthorize is explicitly true).
-    if (!forceAuthorize && !isMissingAutomationAuthorized(entry.id, entry.accountNumber, entry.customerId)) {
-      return [];
+    // Ensure this entry's missing records are up to date from remote before evaluation
+    // to prevent cross-device/model race conditions and duplicate inserts
+    if (saveToRemote && SupabaseService.instance.isInitialized) {
+      try {
+        final remote = await SupabaseService.instance.fetchMissingPaymentRecords(
+          collectionId: entry.id,
+        );
+        for (final r in remote) {
+          final idx = _missingRecords.indexWhere((m) => m.id == r.id);
+          if (idx >= 0) {
+            _missingRecords[idx] = r;
+          } else {
+            _missingRecords.add(r);
+          }
+        }
+      } catch (e) {
+        debugPrint('Note refreshing remote missing records prior to auto check: $e');
+      }
     }
 
+    // 0. RULE: By default, do NOT run system auto for any entry!
+    // Automation strictly runs once historical missing records Excel data has been
+    // uploaded and inserted successfully (or when forceAuthorize is explicitly true,
+    // or when the loan has real payments recorded).
     final cardPayments = getPaymentsForCollection(entry.id);
     final auditEndDate = getExcelAuditEndDate(entry.id);
+    final isAuthorized = forceAuthorize ||
+        isMissingAutomationAuthorized(entry.id, entry.accountNumber, entry.customerId) ||
+        auditEndDate != null ||
+        SettingsProvider.hasRealPayments(cardPayments);
+
+    if (!isAuthorized) {
+      return [];
+    }
 
     // If there are no real payment records in ro_collection_payments for this entry
     // and no historical Excel uploaded, strictly do NOT auto-insert missing records or post-maturity records,
@@ -1207,22 +1481,53 @@ class CollectionSheetProvider extends ChangeNotifier {
     final List<DateTime> skippedPausedDates = [];
 
     // For both Daily and Weekly loans, late fine calculations must strictly start
-    // forward from the latest real transaction or historical Excel audit date.
+    // forward from the latest real transaction, historical Excel audit date, or existing missing records.
     DateTime cleanBaseDate;
+    final entryIdClean = entry.id.trim().toLowerCase();
+    final entryAccClean = entry.accountNumber.trim().toLowerCase();
+    final entryCustClean = entry.customerId.trim().toLowerCase();
+
+    final existingMissingForEntry = _missingRecords.where((m) {
+      if (m.collectionId.trim().toLowerCase() == entryIdClean) return true;
+      if (entryAccClean.isNotEmpty && (m.accountNo ?? '').trim().toLowerCase() == entryAccClean) return true;
+      if (entryCustClean.isNotEmpty && (m.customerId ?? '').trim().toLowerCase() == entryCustClean) return true;
+      return false;
+    }).toList();
+
+    DateTime? latestExistingMissingDate;
+    if (existingMissingForEntry.isNotEmpty) {
+      latestExistingMissingDate = existingMissingForEntry
+          .map((m) => DateTime(m.missedDate.year, m.missedDate.month, m.missedDate.day))
+          .reduce((a, b) => a.isAfter(b) ? a : b);
+    }
+
+    final effectiveSanction = sanctionDate ?? loanee?.loanSanctionDate;
+
     if (nonAutoTx.isNotEmpty) {
       final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
       final baseDate = sorted.first.createdAt;
       cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
+    } else if (auditEndDate != null) {
+      cleanBaseDate = DateTime(auditEndDate.year, auditEndDate.month, auditEndDate.day);
+    } else if (latestExistingMissingDate != null) {
+      cleanBaseDate = latestExistingMissingDate;
+    } else if (effectiveSanction != null) {
+      cleanBaseDate = DateTime(effectiveSanction.year, effectiveSanction.month, effectiveSanction.day);
     } else {
-      cleanBaseDate = DateTime(auditEndDate!.year, auditEndDate.month, auditEndDate.day);
+      return [];
     }
 
     if (auditEndDate != null && auditEndDate.isAfter(cleanBaseDate)) {
       cleanBaseDate = DateTime(auditEndDate.year, auditEndDate.month, auditEndDate.day);
     }
 
-    final effectiveSanction = sanctionDate ?? loanee?.loanSanctionDate;
+    // Crucial: If missing records already exist up to date X, all candidate dates
+    // must strictly start AFTER date X to prevent duplicate assessment across devices/models!
+    if (latestExistingMissingDate != null && latestExistingMissingDate.isAfter(cleanBaseDate)) {
+      cleanBaseDate = latestExistingMissingDate;
+    }
+
     if (effectiveSanction != null) {
       final cleanSanction = DateTime(effectiveSanction.year, effectiveSanction.month, effectiveSanction.day);
       if (cleanSanction.isAfter(cleanBaseDate)) {
@@ -1255,7 +1560,7 @@ class CollectionSheetProvider extends ChangeNotifier {
 
     if (isDaily) {
       if (cleanToday.isAfter(cleanBaseDate)) {
-        final firstCheckDate = cleanBaseDate.add(const Duration(days: 1));
+        final firstCheckDate = DateTime(cleanBaseDate.year, cleanBaseDate.month, cleanBaseDate.day + 1);
         DateTime current = firstCheckDate;
         while (current.isBefore(cleanToday)) {
           final isSunday = current.weekday == DateTime.sunday;
@@ -1271,7 +1576,7 @@ class CollectionSheetProvider extends ChangeNotifier {
           if (!isSunday && !isHoliday && !isPaused) {
             candidateDates.add(DateTime(current.year, current.month, current.day));
           }
-          current = current.add(const Duration(days: 1));
+          current = DateTime(current.year, current.month, current.day + 1);
         }
       }
     } else {
@@ -1293,7 +1598,7 @@ class CollectionSheetProvider extends ChangeNotifier {
         final int weeksToAssess = weeksElapsedSinceBase.clamp(0, remainingTenureWeeks);
 
         for (int w = 1; w <= weeksToAssess; w++) {
-          final candidate = cleanBaseDate.add(Duration(days: w * 7));
+          final candidate = DateTime(cleanBaseDate.year, cleanBaseDate.month, cleanBaseDate.day + (w * 7));
           if (candidate.isBefore(cleanToday)) {
             final isPaused = settingsProvider.isLateFinePaused(entry.id, candidate, customerId: entry.customerId);
             if (isPaused) {
@@ -1354,12 +1659,20 @@ class CollectionSheetProvider extends ChangeNotifier {
         continue;
       }
 
-      // Check if missing payment record already exists for this exact date
-      final alreadyAssessed = _missingRecords.any((m) =>
-          m.collectionId == entry.id &&
-          m.missedDate.year == candidate.year &&
-          m.missedDate.month == candidate.month &&
-          m.missedDate.day == candidate.day);
+      final dateStr = '${candidate.year}${candidate.month.toString().padLeft(2, '0')}${candidate.day.toString().padLeft(2, '0')}';
+      final recordId = 'MISS-${entry.id}-$dateStr';
+
+      // Check if missing payment record already exists for this exact date or deterministic ID
+      final alreadyAssessed = _missingRecords.any((m) {
+        if (m.id == recordId) return true;
+        final matches = m.collectionId.trim().toLowerCase() == entryIdClean ||
+            (entryAccClean.isNotEmpty && (m.accountNo ?? '').trim().toLowerCase() == entryAccClean) ||
+            (entryCustClean.isNotEmpty && (m.customerId ?? '').trim().toLowerCase() == entryCustClean);
+        if (!matches) return false;
+        return m.missedDate.year == candidate.year &&
+            m.missedDate.month == candidate.month &&
+            m.missedDate.day == candidate.day;
+      });
       if (alreadyAssessed) {
         alreadyAssessedDates.add(candidate);
         continue;
@@ -1372,9 +1685,6 @@ class CollectionSheetProvider extends ChangeNotifier {
       final double missingFine = double.parse((missingPay * (settingsProvider.lateFinePercentage / 100.0)).toStringAsFixed(2));
       final int missingWeek = MissingPaymentRecord.calculateWeeks(missedDate: candidate, asOfDate: cleanToday);
       final double missingBalance = double.parse((missingFine * missingWeek).toStringAsFixed(2));
-
-      final dateStr = '${candidate.year}${candidate.month.toString().padLeft(2, '0')}${candidate.day.toString().padLeft(2, '0')}';
-      final recordId = 'MISS-${entry.id}-$dateStr';
 
       final record = MissingPaymentRecord(
         id: recordId,
@@ -1417,15 +1727,20 @@ class CollectionSheetProvider extends ChangeNotifier {
       final double dayPayment = paymentsOnDate.fold(0.0, (sum, p) => sum + p.paymentAmount);
       if (dayPayment >= baseInstallment) continue;
 
-      final alreadyAssessed = _missingRecords.any((m) =>
-          m.collectionId == entry.id &&
-          m.missedDate.year == pDate.year &&
-          m.missedDate.month == pDate.month &&
-          m.missedDate.day == pDate.day);
-      if (alreadyAssessed) continue;
-
       final dateStr = '${pDate.year}${pDate.month.toString().padLeft(2, '0')}${pDate.day.toString().padLeft(2, '0')}';
       final recordId = 'MISS-${entry.id}-$dateStr';
+
+      final alreadyAssessed = _missingRecords.any((m) {
+        if (m.id == recordId) return true;
+        final matches = m.collectionId.trim().toLowerCase() == entryIdClean ||
+            (entryAccClean.isNotEmpty && (m.accountNo ?? '').trim().toLowerCase() == entryAccClean) ||
+            (entryCustClean.isNotEmpty && (m.customerId ?? '').trim().toLowerCase() == entryCustClean);
+        if (!matches) return false;
+        return m.missedDate.year == pDate.year &&
+            m.missedDate.month == pDate.month &&
+            m.missedDate.day == pDate.day;
+      });
+      if (alreadyAssessed) continue;
 
       final record = MissingPaymentRecord(
         id: recordId,
@@ -1543,12 +1858,15 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
 
     // 7. Insert new missing records in-memory and save to Supabase missing_payment_records table
+    final List<MissingPaymentRecord> actuallyInsertedRecords = [];
     if (recordsToPersist.isNotEmpty) {
       final List<MissingPaymentRecord> finalPersistList = [];
       for (final rec in recordsToPersist) {
         final existingIdx = _missingRecords.indexWhere((m) =>
             m.id == rec.id ||
-            (m.collectionId == rec.collectionId &&
+            ((m.collectionId.trim().toLowerCase() == rec.collectionId.trim().toLowerCase() ||
+                (rec.accountNo != null && m.accountNo != null && m.accountNo!.trim().toLowerCase() == rec.accountNo!.trim().toLowerCase()) ||
+                (rec.customerId != null && m.customerId != null && m.customerId!.trim().toLowerCase() == rec.customerId!.trim().toLowerCase())) &&
                 m.missedDate.year == rec.missedDate.year &&
                 m.missedDate.month == rec.missedDate.month &&
                 m.missedDate.day == rec.missedDate.day));
@@ -1562,6 +1880,9 @@ class CollectionSheetProvider extends ChangeNotifier {
         } else {
           _missingRecords.add(rec);
           finalPersistList.add(rec);
+          if (newlyCreatedRecords.any((n) => n.id == rec.id)) {
+            actuallyInsertedRecords.add(rec);
+          }
         }
       }
 
@@ -1572,7 +1893,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       notifyListeners();
     }
 
-    return newlyCreatedRecords;
+    return actuallyInsertedRecords;
   }
 
   /// Synchronize automatic late fees across all active entries
@@ -1736,6 +2057,40 @@ class CollectionSheetProvider extends ChangeNotifier {
   void handleRealtimeEntryDelete(String id) {
     _collectionEntries.removeWhere((e) => e.id == id);
     notifyListeners();
+  }
+
+  void handleRealtimeMissingRecordUpsert(MissingPaymentRecord record) {
+    final existingIndex = _missingRecords.indexWhere((m) => m.id == record.id);
+    if (existingIndex != -1) {
+      _missingRecords[existingIndex] = record;
+    } else {
+      _missingRecords.add(record);
+    }
+    notifyListeners();
+  }
+
+  void handleRealtimeMissingRecordDelete(String id) {
+    _missingRecords.removeWhere((m) => m.id == id);
+    notifyListeners();
+  }
+
+  /// Ensure latest missing records for a specific collection entry are synced from remote
+  Future<void> refreshMissingRecordsForCollection(String collectionId) async {
+    if (!SupabaseService.instance.isInitialized) return;
+    try {
+      final remote = await SupabaseService.instance.fetchMissingPaymentRecords(collectionId: collectionId);
+      for (final r in remote) {
+        final idx = _missingRecords.indexWhere((m) => m.id == r.id);
+        if (idx >= 0) {
+          _missingRecords[idx] = r;
+        } else {
+          _missingRecords.add(r);
+        }
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error refreshing missing records for collection $collectionId: $e');
+    }
   }
 
   Future<bool> updateCollectionEntry(RoCollectionEntry updatedEntry) async {
@@ -1929,17 +2284,53 @@ class CollectionSheetProvider extends ChangeNotifier {
         }
       }
 
+      // Fetch cross-device authorization and Excel audit dates from system_settings
+      try {
+        final client = SupabaseService.instance.client;
+        if (client != null) {
+          final settingsRows = await client
+              .from('system_settings')
+              .select('*')
+              .or('setting_key.ilike.excel_missing_audit_date_%,setting_key.eq.authorized_auto_missing_entry_ids');
+          final list = settingsRows as List<dynamic>;
+          for (final row in list) {
+            final key = row['setting_key']?.toString() ?? '';
+            final val = row['setting_value']?.toString() ?? '';
+            if (key == 'authorized_auto_missing_entry_ids' && val.isNotEmpty) {
+              final ids = val.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty);
+              _authorizedAutoMissingEntryIds.addAll(ids);
+            } else if (key.startsWith('excel_missing_audit_date_') && val.isNotEmpty) {
+              final colId = key.replaceFirst('excel_missing_audit_date_', '');
+              final dt = DateTime.tryParse(val);
+              if (dt != null) {
+                _excelAuditEndDates[colId] = DateTime(dt.year, dt.month, dt.day);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Note fetching auto missing settings from remote: $e');
+      }
+
       final remoteMissing = await SupabaseService.instance.fetchMissingPaymentRecords();
       final seenMissingIds = <String>{};
-      _missingRecords.clear();
+      final List<MissingPaymentRecord> newMissingList = [];
       final now = DateTime.now();
       for (var m in remoteMissing) {
         if (m.id.isNotEmpty && !seenMissingIds.contains(m.id)) {
           seenMissingIds.add(m.id);
           final bool isExcel = m.source.toLowerCase().trim() == 'excel_import' ||
               m.source.toLowerCase().trim() == 'excel' ||
+              m.source.toLowerCase().trim() == 'excel_upload' ||
+              m.source.toLowerCase().trim() == 'past' ||
               (m.remarks ?? '').toLowerCase().contains('excel');
           if (isExcel) {
+            _authorizedAutoMissingEntryIds.add(m.collectionId);
+            final mCleanDate = DateTime(m.missedDate.year, m.missedDate.month, m.missedDate.day);
+            final existingAudit = _excelAuditEndDates[m.collectionId];
+            if (existingAudit == null || mCleanDate.isAfter(existingAudit)) {
+              _excelAuditEndDates[m.collectionId] = mCleanDate;
+            }
             if (m.missingWeek != 1 || m.missingBalance != m.missingFine) {
               m = m.copyWith(
                 missingWeek: 1,
@@ -1956,12 +2347,11 @@ class CollectionSheetProvider extends ChangeNotifier {
               );
             }
           }
-          _missingRecords.add(m);
-          if (m.source == 'excel_import') {
-            _authorizedAutoMissingEntryIds.add(m.collectionId);
-          }
+          newMissingList.add(m);
         }
       }
+      _missingRecords.clear();
+      _missingRecords.addAll(newMissingList);
     } catch (e) {
       debugPrint('Error fetching data from Supabase: $e');
     }

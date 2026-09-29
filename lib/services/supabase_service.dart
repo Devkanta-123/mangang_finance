@@ -2743,7 +2743,7 @@ class SupabaseService {
   // Dedicated storage for automatic missing-payment logs
   // ==============================================================================
 
-  /// Fetch all missing payment records with optional filters
+  /// Fetch all missing payment records with optional filters (fully paginated to prevent 1000-row truncate)
   Future<List<MissingPaymentRecord>> fetchMissingPaymentRecords({
     String? collectionId,
     String? customerId,
@@ -2754,23 +2754,38 @@ class SupabaseService {
       final supaClient = client;
       if (supaClient == null) return [];
 
-      var query = supaClient.from('missing_payment_records').select('*');
-      if (collectionId != null && collectionId.isNotEmpty) {
-        query = query.eq('collection_id', collectionId);
-      }
-      if (customerId != null && customerId.isNotEmpty) {
-        query = query.eq('customer_id', customerId);
-      }
-      if (route != null && route.isNotEmpty) {
-        query = query.eq('route', route);
-      }
-      if (collectionType != null && collectionType.isNotEmpty) {
-        query = query.eq('collection_type', collectionType);
+      final List<MissingPaymentRecord> allRecords = [];
+      int from = 0;
+      const int pageSize = 1000;
+
+      while (true) {
+        var query = supaClient.from('missing_payment_records').select('*');
+        if (collectionId != null && collectionId.isNotEmpty) {
+          query = query.eq('collection_id', collectionId);
+        }
+        if (customerId != null && customerId.isNotEmpty) {
+          query = query.eq('customer_id', customerId);
+        }
+        if (route != null && route.isNotEmpty) {
+          query = query.eq('route', route);
+        }
+        if (collectionType != null && collectionType.isNotEmpty) {
+          query = query.eq('collection_type', collectionType);
+        }
+
+        final response = await query
+            .order('missed_date', ascending: true)
+            .range(from, from + pageSize - 1);
+
+        if (response.isEmpty) break;
+        final List<dynamic> data = response as List<dynamic>;
+        allRecords.addAll(data.map((json) => MissingPaymentRecord.fromJson(json as Map<String, dynamic>)));
+
+        if (response.length < pageSize) break;
+        from += pageSize;
       }
 
-      final response = await query.order('missed_date', ascending: true);
-      final List<dynamic> data = response as List<dynamic>;
-      return data.map((json) => MissingPaymentRecord.fromJson(json as Map<String, dynamic>)).toList();
+      return allRecords;
     } catch (e) {
       debugPrint('ℹ️ Note on fetchMissingPaymentRecords (table may be pending creation): $e');
       return [];

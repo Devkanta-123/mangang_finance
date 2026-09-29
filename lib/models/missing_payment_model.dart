@@ -71,10 +71,10 @@ class MissingPaymentRecord {
 
   /// Calculates the number of missing weeks elapsed from missedDate to asOfDate.
   /// Rule:
-  /// - Full 7-day interval per week elapsed (daysPast ~/ 7)
-  /// - Minimum 1 week (initial missing status)
-  /// - Example: From August 26, 2026 to September 29, 2026 = 34 days
-  ///   34 days = 4 weeks + 6 days => 4 weeks
+  /// - Days 1 to 7: 1 week (e.g. 7 days = 1 week)
+  /// - Days 8 to 14: 2 weeks (e.g. 10 days = 2 weeks)
+  /// - Days 15 to 21: 3 weeks
+  /// - Formula: (daysPast / 7.0).ceil().clamp(1, 52)
   static int calculateWeeks({
     required DateTime missedDate,
     DateTime? asOfDate,
@@ -84,8 +84,7 @@ class MissingPaymentRecord {
     final cleanTarget = DateTime(targetDate.year, targetDate.month, targetDate.day);
     final int daysPast = cleanTarget.difference(cleanMissed).inDays;
     if (daysPast <= 0) return 1;
-    final int elapsedWeeks = daysPast ~/ 7;
-    return elapsedWeeks < 1 ? 1 : elapsedWeeks.clamp(1, 52);
+    return (daysPast / 7.0).ceil().clamp(1, 52);
   }
 
   Map<String, dynamic> toJson() {
@@ -117,22 +116,62 @@ class MissingPaymentRecord {
     };
   }
 
+  /// Robust calendar date parser capable of handling ISO strings, Postgres dates,
+  /// timestamps, and delimited dates without corrupting the calendar day via .toLocal().
+  /// Rule: A calendar day (e.g. 2026-09-28) must evaluate identically across all Android models and timezones.
+  static DateTime parseCalendarDate(dynamic val) {
+    if (val == null) return DateTime.now();
+    if (val is DateTime) return DateTime(val.year, val.month, val.day);
+    if (val is num) {
+      if (val > 1000 && val < 100000) {
+        final base = DateTime(1899, 12, 30);
+        return base.add(Duration(days: val.toInt()));
+      }
+      final dt = DateTime.fromMillisecondsSinceEpoch(val.toInt());
+      return DateTime(dt.year, dt.month, dt.day);
+    }
+    final str = val.toString().trim();
+    if (str.isEmpty || str.toLowerCase() == 'null') return DateTime.now();
+
+    // 1. Standard ISO-8601 YYYY-MM-DD (e.g. "2026-09-28", "2026-09-28T00:00:00+00:00", "2026-09-28 12:00:00")
+    final isoMatch = RegExp(r'^(\d{4})-(\d{1,2})-(\d{1,2})').firstMatch(str);
+    if (isoMatch != null) {
+      final y = int.parse(isoMatch.group(1)!);
+      final m = int.parse(isoMatch.group(2)!);
+      final d = int.parse(isoMatch.group(3)!);
+      return DateTime(y, m, d);
+    }
+
+    // 2. Delimited formats (DD/MM/YYYY, DD-MM-YYYY, YYYY/MM/DD)
+    final parts = str.split(RegExp(r'[-/.\s]')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 3) {
+      final p0 = int.tryParse(parts[0]);
+      final p1 = int.tryParse(parts[1]);
+      final p2 = int.tryParse(parts[2]);
+      if (p0 != null && p1 != null && p2 != null) {
+        if (p0 > 1000) {
+          return DateTime(p0, p1, p2);
+        } else if (p2 > 1000) {
+          return DateTime(p2, p1, p0);
+        }
+      }
+    }
+
+    final dt = DateTime.tryParse(str);
+    if (dt != null) {
+      return DateTime(dt.year, dt.month, dt.day);
+    }
+    return DateTime.now();
+  }
+
+  static DateTime? parseNullableCalendarDate(dynamic val) {
+    if (val == null) return null;
+    final str = val.toString().trim();
+    if (str.isEmpty || str.toLowerCase() == 'null') return null;
+    return parseCalendarDate(val);
+  }
+
   factory MissingPaymentRecord.fromJson(Map<String, dynamic> json) {
-    DateTime parseDate(dynamic val) {
-      if (val == null) return DateTime.now();
-      if (val is DateTime) return val;
-      final str = val.toString().trim();
-      return DateTime.tryParse(str) ?? DateTime.now();
-    }
-
-    DateTime? parseNullableDate(dynamic val) {
-      if (val == null) return null;
-      if (val is DateTime) return val;
-      final str = val.toString().trim();
-      if (str.isEmpty) return null;
-      return DateTime.tryParse(str);
-    }
-
     double parseNum(dynamic val) {
       if (val == null) return 0.0;
       if (val is num) return val.toDouble();
@@ -147,11 +186,11 @@ class MissingPaymentRecord {
     }
 
     final rawRemarks = json['remarks']?.toString();
-    DateTime? resolvedPaidDate = parseNullableDate(json['paid_date'] ?? json['paidDate']);
+    DateTime? resolvedPaidDate = parseNullableCalendarDate(json['paid_date'] ?? json['paidDate']);
     if (resolvedPaidDate == null && rawRemarks != null && rawRemarks.contains('PAID_DATE:')) {
       final match = RegExp(r'PAID_DATE:([^\s\]]+)').firstMatch(rawRemarks);
       if (match != null) {
-        resolvedPaidDate = DateTime.tryParse(match.group(1)!);
+        resolvedPaidDate = parseCalendarDate(match.group(1)!);
       }
     }
 
@@ -187,7 +226,7 @@ class MissingPaymentRecord {
       mobileNo: json['mobile_no']?.toString() ?? json['mobileNo']?.toString(),
       route: json['route']?.toString(),
       collectionType: json['collection_type']?.toString() ?? json['collectionType']?.toString() ?? 'daily',
-      missedDate: parseDate(json['missed_date'] ?? json['missedDate']),
+      missedDate: parseCalendarDate(json['missed_date'] ?? json['missedDate']),
       dayPayment: dayPaymentVal,
       missingPay: missingPayVal,
       missingFine: parseNum(json['missing_fine'] ?? json['missingFine']),
@@ -197,8 +236,8 @@ class MissingPaymentRecord {
       source: json['source']?.toString() ?? 'system',
       remarks: rawRemarks,
       paidDate: resolvedPaidDate,
-      createdAt: parseDate(json['created_at'] ?? json['createdAt']),
-      updatedAt: parseDate(json['updated_at'] ?? json['updatedAt']),
+      createdAt: parseCalendarDate(json['created_at'] ?? json['createdAt']),
+      updatedAt: parseCalendarDate(json['updated_at'] ?? json['updatedAt']),
     );
   }
 
@@ -223,6 +262,7 @@ class MissingPaymentRecord {
     String? source,
     String? remarks,
     DateTime? paidDate,
+    bool clearPaidDate = false,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -246,7 +286,7 @@ class MissingPaymentRecord {
       status: status ?? this.status,
       source: source ?? this.source,
       remarks: remarks ?? this.remarks,
-      paidDate: paidDate ?? this.paidDate,
+      paidDate: clearPaidDate ? null : (paidDate ?? this.paidDate),
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

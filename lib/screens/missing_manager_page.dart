@@ -41,6 +41,18 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
   final TextEditingController _searchController = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+      if (!cp.isSyncing) {
+        cp.fetchFromSupabase();
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
@@ -1880,6 +1892,16 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       loaneeProvider = Provider.of<LoaneeProvider>(context, listen: false);
     } catch (_) {}
 
+    if (collectionProvider.isSyncing) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Syncing data with server, please wait a moment...'),
+          backgroundColor: Colors.blueGrey,
+        ),
+      );
+      return;
+    }
+
     final isAuthorized = collectionProvider.isMissingAutomationAuthorized(
       entry.id,
       entry.accountNumber,
@@ -2143,6 +2165,10 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
   void initState() {
     super.initState();
     widget.collectionProvider.addListener(_onProviderChange);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.collectionProvider.refreshMissingRecordsForCollection(widget.entry.id);
+    });
   }
 
   @override
@@ -2165,6 +2191,16 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
     final settingsProvider =
         Provider.of<SettingsProvider>(context, listen: false);
     final loaneeProvider = widget.loaneeProvider;
+
+    if (collectionProvider.isSyncing) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Syncing data with server, please wait a moment...'),
+          backgroundColor: Colors.blueGrey,
+        ),
+      );
+      return;
+    }
 
     final isAuthorized = collectionProvider.isMissingAutomationAuthorized(
       entry.id,
@@ -2321,7 +2357,6 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         : ((loanee != null && loanee.loanAmount > 0)
             ? loanee.loanAmount
             : (entry.actualPrincipal ?? entry.initialBalance));
-    final remaining = (loanAmt + effectiveInt - totalPayment).clamp(0.0, double.infinity);
 
     // Origin breakdown counts
     final int excelCount = missingRecords.where(_isExcelUpload).length;
