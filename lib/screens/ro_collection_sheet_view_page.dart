@@ -7559,84 +7559,74 @@ class __AddPaymentEntryModalContentState
                               ),
                             ],
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade100,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              '${_unclearedMissing.length} Unresolved',
-                              style: TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.red.shade900,
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_selectedPastMissingRecord != null) ...[
+                                InkWell(
+                                  onTap: () {
+                                    setState(() {
+                                      _selectedPastMissingRecord = null;
+                                      _missingAllocationController.clear();
+                                      if (_payableBreakdown != null) {
+                                        _paymentAmountController.text =
+                                            _payableBreakdown!.totalPayableAmount.toStringAsFixed(2);
+                                      }
+                                      _updateRemainingBalanceDisplay();
+                                    });
+                                  },
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    margin: const EdgeInsets.only(right: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey.shade200,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.close_rounded, size: 11, color: Colors.grey.shade700),
+                                        const SizedBox(width: 2),
+                                        Text(
+                                          'Deselect',
+                                          style: TextStyle(
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey.shade700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade100,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '${_unclearedMissing.length} Unresolved',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red.shade900,
+                                  ),
+                                ),
                               ),
-                            ),
+                            ],
                           ),
                         ],
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Select a past missed or paused date if loanee wants to clear it from this payment:',
+                        'Select a past missed date to clear (1 date at a time):',
                         style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
                       ),
                       const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: _selectedPastMissingRecord?.id,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          filled: true,
-                          fillColor: Colors.white,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.grey.shade300),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.grey.shade300),
-                          ),
-                        ),
-                        items: [
-                          const DropdownMenuItem<String>(
-                            value: null,
-                            child: Text('None (Regular installment only)', style: TextStyle(fontSize: 11.5)),
-                          ),
-                          ..._unclearedMissing.map((m) {
-                            final dateStr = '${m.missedDate.day.toString().padLeft(2, '0')}-${m.missedDate.month.toString().padLeft(2, '0')}-${m.missedDate.year}';
-                            return DropdownMenuItem<String>(
-                              value: m.id,
-                              child: Text(
-                                dateStr,
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF1E1E1E),
-                                ),
-                              ),
-                            );
-                          }),
-                        ],
-                        onChanged: (id) {
-                          setState(() {
-                            if (id == null) {
-                              _selectedPastMissingRecord = null;
-                              _missingAllocationController.clear();
-                            } else {
-                              _selectedPastMissingRecord = _unclearedMissing.firstWhere((m) => m.id == id);
-                              final missingAmt = _selectedPastMissingRecord!.missingPay > 0
-                                  ? _selectedPastMissingRecord!.missingPay
-                                  : _selectedPastMissingRecord!.dayPayment;
-                              _missingAllocationController.text = missingAmt.toStringAsFixed(2);
-                              // Case 2 is for clearing past missing date: payment is for this past date, leaving today unpaid
-                              _paymentAmountController.text = missingAmt.toStringAsFixed(2);
-                            }
-                            _updateRemainingBalanceDisplay();
-                          });
-                        },
-                      ),
+                      _buildMissingDateGrid(),
                       if (_selectedPastMissingRecord != null) ...[
                         const SizedBox(height: 10),
                         Container(
@@ -8323,6 +8313,155 @@ class __AddPaymentEntryModalContentState
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildMissingDateGrid() {
+    final List<Widget> rows = [];
+    for (int i = 0; i < _unclearedMissing.length; i += 3) {
+      final chunk = _unclearedMissing.skip(i).take(3).toList();
+      rows.add(
+        Row(
+          children: [
+            for (int c = 0; c < 3; c++) ...[
+              if (c > 0) const SizedBox(width: 6),
+              if (c < chunk.length)
+                Expanded(
+                  child: _buildMissingDateChip(chunk[c]),
+                )
+              else
+                const Expanded(child: SizedBox.shrink()),
+            ],
+          ],
+        ),
+      );
+      if (i + 3 < _unclearedMissing.length) {
+        rows.add(const SizedBox(height: 6));
+      }
+    }
+
+    if (_unclearedMissing.length > 6) {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 125),
+        child: Scrollbar(
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: rows,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: rows,
+    );
+  }
+
+  Widget _buildMissingDateChip(MissingPaymentRecord m) {
+    final isSelected = _selectedPastMissingRecord?.id == m.id;
+    final dateStr =
+        '${m.missedDate.day.toString().padLeft(2, '0')}-${m.missedDate.month.toString().padLeft(2, '0')}-${m.missedDate.year}';
+    final missingAmt = m.missingPay > 0 ? m.missingPay : m.dayPayment;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            if (isSelected) {
+              // Deselect if already selected (toggle)
+              _selectedPastMissingRecord = null;
+              _missingAllocationController.clear();
+              if (_payableBreakdown != null) {
+                _paymentAmountController.text =
+                    _payableBreakdown!.totalPayableAmount.toStringAsFixed(2);
+              }
+            } else {
+              // Single selection: select this date and assign amount
+              _selectedPastMissingRecord = m;
+              final amt = m.missingPay > 0 ? m.missingPay : m.dayPayment;
+              _missingAllocationController.text = amt.toStringAsFixed(2);
+              // Case 2: payment is for this past date, leaving today unpaid
+              _paymentAmountController.text = amt.toStringAsFixed(2);
+            }
+            _updateRemainingBalanceDisplay();
+          });
+        },
+        borderRadius: BorderRadius.circular(6),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFF8B1A1A) : Colors.white,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isSelected ? const Color(0xFF8B1A1A) : Colors.grey.shade300,
+              width: isSelected ? 1.5 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF8B1A1A).withValues(alpha: 0.25),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isSelected) ...[
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      size: 10,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 2),
+                  ],
+                  Flexible(
+                    child: Text(
+                      dateStr,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                        color: isSelected ? Colors.white : const Color(0xFF1E1E1E),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 1),
+              Text(
+                '₹${missingAmt.toStringAsFixed(0)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 8.5,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  color: isSelected
+                      ? Colors.white.withValues(alpha: 0.92)
+                      : Colors.red.shade700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

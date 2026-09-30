@@ -140,8 +140,14 @@ class CollectionSheetProvider extends ChangeNotifier {
     });
   }
 
-  /// Count of active uncleared missing records for a collection card
+  /// Total count of all missing records for a collection card
   int getTotalMissingCountForCollection(String collectionId) {
+    final cleanId = collectionId.trim().toLowerCase();
+    return _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == cleanId).length;
+  }
+
+  /// Count of active uncleared missing records for a collection card
+  int getUnclearedMissingCountForCollection(String collectionId) {
     final cleanId = collectionId.trim().toLowerCase();
     return _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == cleanId && !m.isResolved && m.paidDate == null).length;
   }

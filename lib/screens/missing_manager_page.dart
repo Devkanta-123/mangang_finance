@@ -2327,19 +2327,9 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
     final totalPayment = cp.getTotalPaidForCollection(entry.id);
     final totalCount = missingRecords.length;
 
-    final totalMissingAmount = missingRecords
-        .where((record) => !record.isResolved && record.paidDate == null)
-        .fold<double>(
-      0.0,
-      (sum, record) => sum + (record.missingPay > 0 ? record.missingPay : record.dayPayment),
-    );
+    final totalMissingAmount = cp.getTotalMissingPayForCollection(entry.id);
 
-    final totalMissingBalance = missingRecords
-        .where((record) => !record.isResolved && record.paidDate == null)
-        .fold<double>(
-      0.0,
-      (sum, record) => sum + record.missingBalance,
-    );
+    final totalMissingBalance = cp.getTotalMissingBalanceForCollection(entry.id);
 
     final loanee = widget.loaneeProvider?.getLoaneeForUser(
       customerId: entry.customerId,
@@ -2347,11 +2337,6 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
       name: entry.loaneeName,
     );
 
-    final totalLateFees = cp.getTotalLatePaymentFeesForCollection(entry.id);
-    final totalPostMat = cp.getTotalPostMaturityInterestForCollection(entry.id);
-    final totalInt = cp.getTotalInterestForCollection(entry.id);
-    final totalOverdueInterest = totalLateFees + totalPostMat;
-    final effectiveInt = totalOverdueInterest > 0 ? totalOverdueInterest : totalInt;
     final loanAmt = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
         : ((loanee != null && loanee.loanAmount > 0)
@@ -2696,11 +2681,6 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                       value: entry.mobileNo.isNotEmpty ? entry.mobileNo : "—",
                     ),
                     _buildMetricItem(
-                      label: "Total Missing",
-                      value: "$totalCount",
-                      valueColor: const Color(0xFF8B1A1A),
-                    ),
-                    _buildMetricItem(
                       label: "Record Origin",
                       value: excelCount > 0 && systemCount > 0
                           ? "Excel + Auto"
@@ -2739,6 +2719,11 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                       label: "Total Paid",
                       value: "₹${totalPayment.toStringAsFixed(2)}",
                       valueColor: Colors.green.shade800,
+                    ),
+                    _buildMetricItem(
+                      label: "Total Missing",
+                      value: "$totalCount",
+                      valueColor: const Color(0xFF8B1A1A),
                     ),
                     _buildMetricItem(
                       label: "Total Missing Pay",
