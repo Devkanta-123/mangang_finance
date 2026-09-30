@@ -628,10 +628,16 @@ class _RoCollectionSheetViewPageState
         final allPayments =
             cp.getPaymentsForCollection(entry.id);
         final now = DateTime.now();
-        final payments = allPayments.where((p) =>
-            p.createdAt.year == now.year &&
-            p.createdAt.month == now.month &&
-            p.createdAt.day == now.day).toList();
+        final payments = allPayments.where((p) {
+          final sortD = p.effectiveSortDate;
+          return (p.createdAt.year == now.year &&
+                  p.createdAt.month == now.month &&
+                  p.createdAt.day == now.day) ||
+                 (sortD.year == now.year &&
+                  sortD.month == now.month &&
+                  sortD.day == now.day);
+        }).toList();
+        payments.sort((a, b) => b.effectiveSortDate.compareTo(a.effectiveSortDate));
 
         return Padding(
           padding: const EdgeInsets.all(20),
@@ -918,6 +924,32 @@ class _RoCollectionSheetViewPageState
                                         );
                                       },
                                     ),
+                                    if (p.isMissingDateClearance) ...[
+                                      const SizedBox(width: 5),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.green.shade50,
+                                          borderRadius: BorderRadius.circular(5),
+                                          border: Border.all(color: Colors.green.shade300),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.check_circle_outline_rounded, size: 10, color: Colors.green.shade800),
+                                            const SizedBox(width: 3),
+                                            Text(
+                                              'Missed: ${p.createdAt.day.toString().padLeft(2, '0')}/${p.createdAt.month.toString().padLeft(2, '0')}/${p.createdAt.year}',
+                                              style: TextStyle(
+                                                fontSize: 9.5,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.green.shade900,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                     Builder(
                                       builder: (context) {
                                         final postMatVal = p.postMaturityInterest;
@@ -4612,10 +4644,19 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
       ascending: _ascending,
     );
 
+    final sortedPayments = List<CollectionPaymentModel>.from(result.payments);
+    sortedPayments.sort((a, b) {
+      final dateCmp = _ascending
+          ? a.effectiveSortDate.compareTo(b.effectiveSortDate)
+          : b.effectiveSortDate.compareTo(a.effectiveSortDate);
+      if (dateCmp != 0) return dateCmp;
+      return _ascending ? a.id.compareTo(b.id) : b.id.compareTo(a.id);
+    });
+
     if (!mounted) return;
     setState(() {
       _reconciliation = reconciliation;
-      _payments = result.payments;
+      _payments = sortedPayments;
       _totalCount = result.totalCount;
       _totalPages = result.totalPages;
       _page = result.page;
@@ -5491,16 +5532,15 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                     )
                                   : Builder(
                                       builder: (context) {
+                                        final clearedD = p.clearedOnDate;
                                         String? clearedOnDateLabel;
-                                        if (p.remarks != null) {
+                                        if (clearedD != null) {
+                                          clearedOnDateLabel =
+                                              "${clearedD.day.toString().padLeft(2, '0')}/${clearedD.month.toString().padLeft(2, '0')}/${clearedD.year}";
+                                        } else if (p.remarks != null) {
                                           final match = RegExp(r'(?:Cleared on|Paid Date):\s*([^,\)\]]+)').firstMatch(p.remarks!);
                                           if (match != null) {
                                             clearedOnDateLabel = match.group(1)!.trim();
-                                          } else if (p.remarks!.contains('Cleared missing date:')) {
-                                            final m = RegExp(r'Cleared missing date:\s*([^,\)\[]+)').firstMatch(p.remarks!);
-                                            if (m != null) {
-                                              clearedOnDateLabel = m.group(1)!.trim();
-                                            }
                                           }
                                         }
 

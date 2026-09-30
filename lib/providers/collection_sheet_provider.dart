@@ -1991,10 +1991,11 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
 
     // Stable Sort: Payment date ascending or descending, then ID
+    // Uses effectiveSortDate so missing date payments cleared on latest date sort to the top!
     filtered.sort((a, b) {
       final dateCmp = ascending
-          ? a.createdAt.compareTo(b.createdAt)
-          : b.createdAt.compareTo(a.createdAt);
+          ? a.effectiveSortDate.compareTo(b.effectiveSortDate)
+          : b.effectiveSortDate.compareTo(a.effectiveSortDate);
       if (dateCmp != 0) return dateCmp;
       return ascending ? a.id.compareTo(b.id) : b.id.compareTo(a.id);
     });

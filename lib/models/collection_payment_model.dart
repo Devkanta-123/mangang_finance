@@ -43,6 +43,88 @@ class CollectionPaymentModel {
   /// Check if this is a historical Excel imported transaction
   bool get isHistorical => id.startsWith('PAY-HIST') || (remarks != null && remarks!.contains('Historical'));
 
+  /// Whether this payment represents a clearance of a past missing date
+  bool get isMissingDateClearance {
+    if (remarks != null &&
+        (remarks!.contains('Cleared missing date:') ||
+         remarks!.contains('Cleared on:') ||
+         remarks!.contains('[MISSING_ID:'))) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Helper to parse standard date strings ("dd/MM/yyyy", "dd-MM-yyyy", "yyyy-MM-dd")
+  static DateTime? _parseDateString(String str) {
+    try {
+      final clean = str.trim();
+      if (clean.contains('/')) {
+        final parts = clean.split('/');
+        if (parts.length == 3) {
+          if (parts[0].length == 4) {
+            return DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+          } else {
+            return DateTime(int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
+          }
+        }
+      } else if (clean.contains('-')) {
+        final parts = clean.split('-');
+        if (parts.length == 3) {
+          if (parts[0].length == 4) {
+            return DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+          } else {
+            return DateTime(int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Returns the date this payment was cleared/paid, if this payment was for a past missing date
+  DateTime? get clearedOnDate {
+    if (remarks != null) {
+      // 1. Check for "(Cleared on: dd/MM/yyyy)" or "(Paid Date: dd/MM/yyyy)"
+      final match = RegExp(r'(?:Cleared on|Paid Date):\s*([0-9]{1,4}[/-][0-9]{1,2}[/-][0-9]{1,4})').firstMatch(remarks!);
+      if (match != null) {
+        final parsed = _parseDateString(match.group(1)!.trim());
+        if (parsed != null) {
+          // If ID has timestamp, merge time of day for exact chronological tie-breaking
+          if (id.startsWith('PAY-')) {
+            final millis = int.tryParse(id.replaceFirst('PAY-', '').trim());
+            if (millis != null && millis > 1577836800000) {
+              final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+              return DateTime(parsed.year, parsed.month, parsed.day, dt.hour, dt.minute, dt.second, dt.millisecond);
+            }
+          }
+          return parsed;
+        }
+      }
+    }
+
+    // 2. If marked as missing clearance and ID has numeric timestamp
+    if (isMissingDateClearance && id.startsWith('PAY-')) {
+      final millis = int.tryParse(id.replaceFirst('PAY-', '').trim());
+      if (millis != null && millis > 1577836800000) {
+        return DateTime.fromMillisecondsSinceEpoch(millis);
+      }
+    }
+
+    return null;
+  }
+
+  /// Effective date used for latest-date sorting in payment history lists and tables.
+  /// Even when recorded for a past missing date (e.g., missed date 01/06/2026),
+  /// if it was paid on a later date (e.g., 30/09/2026), this returns the latest date (30/09/2026)
+  /// so that the record sorts to the very top in descending order.
+  DateTime get effectiveSortDate {
+    final cleared = clearedOnDate;
+    if (cleared != null && cleared.isAfter(createdAt)) {
+      return cleared;
+    }
+    return createdAt;
+  }
+
   /// Effective late fine for this payment:
   /// Uses lateFine if recorded (> 0), otherwise falls back to interest for historical records.
   double get effectiveLateFine => lateFine > 0 ? lateFine : interest;
