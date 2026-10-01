@@ -54,6 +54,15 @@ class CollectionPaymentModel {
     return false;
   }
 
+  /// Whether this payment represents an extra pay transaction
+  bool get isExtraPay {
+    final s = status.toLowerCase();
+    if (s.contains('extra')) return true;
+    if (remarks != null && remarks!.toLowerCase().contains('extra pay')) return true;
+    return false;
+  }
+
+
   /// Helper to parse standard date strings ("dd/MM/yyyy", "dd-MM-yyyy", "yyyy-MM-dd")
   static DateTime? _parseDateString(String str) {
     try {

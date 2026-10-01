@@ -2877,6 +2877,44 @@ class SupabaseService {
     }
   }
 
+  /// Delete all missing payment records for a specific collection ID
+  Future<bool> deleteMissingPaymentRecordsForCollection(String collectionId) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return false;
+
+      await supaClient.from('missing_payment_records').delete().match({'collection_id': collectionId});
+      return true;
+    } catch (e) {
+      debugPrint('⚠️ Error deleting missing payment records for collection $collectionId: $e');
+      return false;
+    }
+  }
+
+  /// Update an existing missing payment record by ID
+  Future<bool> updateMissingPaymentRecord(MissingPaymentRecord record) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return false;
+
+      final payload = record.toJson();
+      try {
+        await supaClient.from('missing_payment_records').update(payload).match({'id': record.id});
+        return true;
+      } catch (err) {
+        if (err.toString().contains('paid_date')) {
+          final fallback = Map<String, dynamic>.from(payload)..remove('paid_date');
+          await supaClient.from('missing_payment_records').update(fallback).match({'id': record.id});
+          return true;
+        }
+        rethrow;
+      }
+    } catch (e) {
+      debugPrint('ℹ️ Note on updateMissingPaymentRecord: $e');
+      return false;
+    }
+  }
+
   /// Clean confirmed old PAY-LATE records from ro_collection_payments
   /// Only cleans records that represent the old fake-payment mechanism
   Future<int> cleanupOldPayLateFromRoCollectionPayments({List<String>? specificCollectionIds}) async {

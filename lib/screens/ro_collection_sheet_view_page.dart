@@ -247,7 +247,7 @@ class _RoCollectionSheetViewPageState
   // SweetAlert style Success Dialog for Payment Entry Insertion
   void _showSweetSuccessDialog(
       BuildContext context, RoCollectionEntry entry, double paymentAmount,
-      {String? roOfficerName}) {
+      {String? roOfficerName, bool isExtraPay = false}) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -260,20 +260,23 @@ class _RoCollectionSheetViewPageState
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: isExtraPay ? Colors.purple.shade50 : Colors.green.shade50,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.green.shade300, width: 2),
+                border: Border.all(
+                  color: isExtraPay ? Colors.purple.shade300 : Colors.green.shade300,
+                  width: 2,
+                ),
               ),
               child: Icon(
-                Icons.check_circle_rounded,
+                isExtraPay ? Icons.stars_rounded : Icons.check_circle_rounded,
                 size: 56,
-                color: Colors.green.shade600,
+                color: isExtraPay ? Colors.purple.shade700 : Colors.green.shade600,
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Payment Entry Recorded!',
-              style: TextStyle(
+            Text(
+              isExtraPay ? 'Extra Payment Recorded!' : 'Payment Entry Recorded!',
+              style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
                 color: Color(0xFF1E1E1E),
@@ -281,7 +284,9 @@ class _RoCollectionSheetViewPageState
             ),
             const SizedBox(height: 8),
             Text(
-              'Successfully recorded payment collection for ${entry.loaneeName}.',
+              isExtraPay
+                  ? 'Successfully recorded extra pay collection for ${entry.loaneeName}.'
+                  : 'Successfully recorded payment collection for ${entry.loaneeName}.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
             ),
@@ -295,8 +300,12 @@ class _RoCollectionSheetViewPageState
               ),
               child: Column(
                 children: [
-                  _buildSummaryRow('Payment Collected',
-                      '₹ ${paymentAmount.toStringAsFixed(2)}'),
+                  _buildSummaryRow(
+                    isExtraPay ? 'Extra Pay Collected' : 'Payment Collected',
+                    '₹ ${paymentAmount.toStringAsFixed(2)}',
+                  ),
+                  const Divider(height: 12),
+                  _buildSummaryRow('Status', isExtraPay ? 'Success (Extra Pay)' : 'Success'),
                   const Divider(height: 12),
                   _buildSummaryRow('Customer ID', entry.customerId),
                   const Divider(height: 12),
@@ -559,17 +568,20 @@ class _RoCollectionSheetViewPageState
       final double paidAmt = (result['paymentAmount'] ?? 0.0).toDouble();
       final RoCollectionEntry updatedEntry = result['updatedEntry'] ?? entry;
       final String? roName = result['roName']?.toString();
+      final bool isExtraPay = result['isExtraPay'] == true;
 
       _showSweetSuccessDialog(context, updatedEntry, paidAmt,
-          roOfficerName: roName);
+          roOfficerName: roName, isExtraPay: isExtraPay);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '✅ ₹${paidAmt.toStringAsFixed(2)} recorded by $roName for ${updatedEntry.loaneeName}!',
+            isExtraPay
+                ? '✅ ₹${paidAmt.toStringAsFixed(2)} Extra Pay recorded by $roName for ${updatedEntry.loaneeName}!'
+                : '✅ ₹${paidAmt.toStringAsFixed(2)} recorded by $roName for ${updatedEntry.loaneeName}!',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          backgroundColor: Colors.green.shade700,
+          backgroundColor: isExtraPay ? Colors.purple.shade700 : Colors.green.shade700,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -924,6 +936,32 @@ class _RoCollectionSheetViewPageState
                                         );
                                       },
                                     ),
+                                    if (p.isExtraPay) ...[
+                                      const SizedBox(width: 5),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.purple.shade50,
+                                          borderRadius: BorderRadius.circular(5),
+                                          border: Border.all(color: Colors.purple.shade300),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.stars_rounded, size: 10, color: Colors.purple.shade800),
+                                            const SizedBox(width: 3),
+                                            Text(
+                                              'Extra Pay',
+                                              style: TextStyle(
+                                                fontSize: 9.5,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.purple.shade900,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                     if (p.isMissingDateClearance) ...[
                                       const SizedBox(width: 5),
                                       Container(
@@ -1287,10 +1325,44 @@ class _RoCollectionSheetViewPageState
                               ),
                             ],
                             const SizedBox(height: 6),
-                            Text(
-                              'Date: ${p.createdAt.toString().split('.')[0]}',
-                              style: TextStyle(
-                                  fontSize: 11, color: Colors.grey.shade600),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Date: ${p.createdAt.toString().split('.')[0]}',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Colors.grey.shade600),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: p.isExtraPay ? Colors.purple.shade50 : Colors.green.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: p.isExtraPay ? Colors.purple.shade300 : Colors.green.shade300,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        p.isExtraPay ? Icons.stars_rounded : Icons.check_circle_rounded,
+                                        size: 11,
+                                        color: p.isExtraPay ? Colors.purple.shade700 : Colors.green.shade700,
+                                      ),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        p.status,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: p.isExtraPay ? Colors.purple.shade800 : Colors.green.shade800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -5776,7 +5848,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                         color: Colors.white,
                                       ),
                                       child: DropdownButton<String>(
-                                        value: ['Success', 'Pending', 'Failed', 'Cancelled'].contains(_editStatus)
+                                        value: ['Success', 'Success (Extra Pay)', 'Pending', 'Failed', 'Cancelled'].contains(_editStatus)
                                             ? _editStatus
                                             : 'Success',
                                         isDense: true,
@@ -5784,9 +5856,9 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                         style: TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.bold,
-                                          color: _editStatus == 'Success' ? Colors.green.shade800 : Colors.red.shade800,
+                                          color: _editStatus.contains('Success') ? Colors.green.shade800 : Colors.red.shade800,
                                         ),
-                                        items: ['Success', 'Pending', 'Failed', 'Cancelled'].map((st) {
+                                        items: ['Success', 'Success (Extra Pay)', 'Pending', 'Failed', 'Cancelled'].map((st) {
                                           return DropdownMenuItem(value: st, child: Text(st));
                                         }).toList(),
                                         onChanged: (val) {
@@ -5797,15 +5869,18 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                   : Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(Icons.check_circle_rounded,
-                                            size: 12, color: Colors.green.shade700),
+                                        Icon(
+                                          p.isExtraPay ? Icons.stars_rounded : Icons.check_circle_rounded,
+                                          size: 12,
+                                          color: p.isExtraPay ? Colors.purple.shade700 : Colors.green.shade700,
+                                        ),
                                         const SizedBox(width: 4),
                                         Text(
                                           p.status,
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
-                                            color: Colors.green.shade800,
+                                            color: p.isExtraPay ? Colors.purple.shade900 : Colors.green.shade800,
                                           ),
                                         ),
                                       ],
@@ -5995,7 +6070,9 @@ class __AddPaymentEntryModalContentState
 
   late TextEditingController _remainingBalanceController;
   late TextEditingController _paymentAmountController;
+  late TextEditingController _extraPayAmountController;
   late TextEditingController _roPasscodeController;
+  bool _isExtraPay = false;
 
   double _currentDueBalance = 0.0;
   bool _initializedBalance = false;
@@ -6095,13 +6172,34 @@ class __AddPaymentEntryModalContentState
     super.initState();
     _remainingBalanceController = TextEditingController(text: '0.00');
     _paymentAmountController = TextEditingController();
+    _extraPayAmountController = TextEditingController();
     _missingAllocationController = TextEditingController();
     _roPasscodeController = TextEditingController();
     _selectedPaymentType = 'Cash';
 
     _paymentAmountController.addListener(_updateRemainingBalanceDisplay);
+    _extraPayAmountController.addListener(_updateRemainingBalanceDisplay);
     _missingAllocationController.addListener(_updateRemainingBalanceDisplay);
     _loadMissingRecords();
+  }
+
+  void _toggleExtraPay(bool val) {
+    setState(() {
+      _isExtraPay = val;
+      if (_isExtraPay) {
+        _selectedPastMissingRecord = null;
+        _missingAllocationController.clear();
+        _paymentAmountController.text = '0.00';
+        _extraPayAmountController.clear();
+      } else {
+        _extraPayAmountController.clear();
+        final breakdown = _payableBreakdown;
+        if (breakdown != null) {
+          _paymentAmountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
+        }
+      }
+    });
+    _updateRemainingBalanceDisplay();
   }
 
   Future<void> _loadMissingRecords() async {
@@ -6198,15 +6296,27 @@ class __AddPaymentEntryModalContentState
   }
 
   void _updateRemainingBalanceDisplay() {
-    final payment =
-        double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
-
     final breakdown = _payableBreakdown;
     final totalMissingBalance = Provider.of<CollectionSheetProvider>(context, listen: false)
         .getTotalMissingBalanceForCollection(widget.entry.id);
     final double baseTarget = (breakdown?.isPastMaturity == true)
         ? (breakdown!.totalPayableAmount + totalMissingBalance)
         : _currentDueBalance;
+
+    if (_isExtraPay) {
+      final extraAmt = double.tryParse(_extraPayAmountController.text.trim()) ?? 0.0;
+      final calculatedBal = (baseTarget >= extraAmt)
+          ? (baseTarget - extraAmt)
+          : 0.0;
+      _remainingBalanceController.text = calculatedBal.toStringAsFixed(2);
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+
+    final payment =
+        double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
 
     final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
     final isPastMaturity = breakdown?.isPastMaturity == true;
@@ -6247,9 +6357,11 @@ class __AddPaymentEntryModalContentState
   void dispose() {
     _disposeHybridEntries();
     _paymentAmountController.removeListener(_updateRemainingBalanceDisplay);
+    _extraPayAmountController.removeListener(_updateRemainingBalanceDisplay);
     _missingAllocationController.removeListener(_updateRemainingBalanceDisplay);
     _remainingBalanceController.dispose();
     _paymentAmountController.dispose();
+    _extraPayAmountController.dispose();
     _missingAllocationController.dispose();
     _roPasscodeController.dispose();
     super.dispose();
@@ -6428,12 +6540,28 @@ class __AddPaymentEntryModalContentState
       return;
     }
 
-    final paymentAmount =
-        double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
+    final double extraPayAmount =
+        double.tryParse(_extraPayAmountController.text.trim()) ?? 0.0;
+    if (_isExtraPay && extraPayAmount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Please enter a valid Extra Pay Amount.'),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final paymentAmount = _isExtraPay
+        ? extraPayAmount
+        : (double.tryParse(_paymentAmountController.text.trim()) ?? 0.0);
     if (paymentAmount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Please enter a valid Payment Amount.'),
+          content: Text(_isExtraPay
+              ? 'Please enter a valid Extra Pay Amount.'
+              : 'Please enter a valid Payment Amount.'),
           backgroundColor: Colors.red.shade700,
           behavior: SnackBarBehavior.floating,
         ),
@@ -6655,7 +6783,30 @@ class __AddPaymentEntryModalContentState
 
     bool success = false;
 
-    if (pastMissingRecord != null && amountForMissing > 0) {
+    if (_isExtraPay) {
+      final String finalRemarks = remarks != null
+          ? '$remarks | Extra Pay: ₹${extraPayAmount.toStringAsFixed(2)}$hybridNote'
+          : 'Extra Pay: ₹${extraPayAmount.toStringAsFixed(2)}$hybridNote';
+
+      final payment = CollectionPaymentModel(
+        id: 'PAY-${now.millisecondsSinceEpoch}',
+        collectionId: widget.entry.id,
+        paymentAmount: extraPayAmount,
+        remainingBalance: newRemainingBalance,
+        lateFine: 0.0,
+        interest: 0.0,
+        paymentType: paymentTypeToSave,
+        roPasscode: enteredPasscode,
+        roName: realRoName,
+        roId: realRoId,
+        roRoute: roAssignedRoute,
+        createdAt: now,
+        status: 'Success (Extra Pay)',
+        remarks: finalRemarks,
+      );
+
+      success = await collectionProvider.addCollectionPayment(payment);
+    } else if (pastMissingRecord != null && amountForMissing > 0) {
       // Case 2: Payment is dedicated to clearing the past missing date.
       // In payment history, the payment date MUST be the date picked up from dropdown!
       final double remBalAfterMissing = (baseTarget >= amountForMissing)
@@ -6789,6 +6940,7 @@ class __AddPaymentEntryModalContentState
       navigator.pop({
         'success': true,
         'paymentAmount': paymentAmount,
+        'isExtraPay': _isExtraPay,
         'updatedEntry': widget.entry,
         'roName': realRoName,
         'roId': realRoId,
@@ -7362,6 +7514,87 @@ class __AddPaymentEntryModalContentState
 
               const SizedBox(height: 16),
 
+              // Extra Pay Feature Toggle
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _isExtraPay ? Colors.purple.shade50 : Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _isExtraPay ? Colors.purple.shade300 : Colors.grey.shade300,
+                    width: _isExtraPay ? 1.5 : 1.0,
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _isExtraPay ? Icons.stars_rounded : Icons.add_circle_outline_rounded,
+                          size: 18,
+                          color: _isExtraPay ? Colors.purple.shade700 : Colors.grey.shade700,
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  'Extra Pay',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: _isExtraPay ? Colors.purple.shade900 : Colors.grey.shade800,
+                                  ),
+                                ),
+                                if (_isExtraPay) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: Colors.purple.shade100,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      'ACTIVE',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.purple.shade900,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            Text(
+                              _isExtraPay
+                                  ? 'Regular payment amount set to 0. Enter extra amount below.'
+                                  : 'Enable to make an extra payment directly towards loan balance',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: _isExtraPay ? Colors.purple.shade700 : Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    Transform.scale(
+                      scale: 0.8,
+                      child: Switch.adaptive(
+                        value: _isExtraPay,
+                        activeTrackColor: Colors.purple.shade700,
+                        onChanged: _toggleExtraPay,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
               // Field 1: Remaining Balance (Auto-calculated, Read-only) & Field 2: Payment Amount
               Row(
                 children: [
@@ -7437,10 +7670,11 @@ class __AddPaymentEntryModalContentState
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildFieldLabel('Payment Amount (₹) *'),
+                        _buildFieldLabel(_isExtraPay ? 'Regular Amount (₹) [0.00]' : 'Payment Amount (₹) *'),
                         const SizedBox(height: 4),
                         TextFormField(
                           controller: _paymentAmountController,
+                          readOnly: _isExtraPay,
                           keyboardType:
                               const TextInputType.numberWithOptions(
                                   decimal: true),
@@ -7451,27 +7685,52 @@ class __AddPaymentEntryModalContentState
                           style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
-                              color: Colors.green.shade800),
+                              color: _isExtraPay ? Colors.grey.shade600 : Colors.green.shade800),
                           decoration: InputDecoration(
                             isDense: true,
                             filled: true,
-                            fillColor:
-                                Colors.green.shade50.withOpacity(0.3),
+                            fillColor: _isExtraPay
+                                ? Colors.grey.shade100
+                                : Colors.green.shade50.withValues(alpha: 0.3),
                             hintText: '0.00',
                             prefixText: '₹ ',
                             prefixStyle: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.green.shade800),
+                                color: _isExtraPay ? Colors.grey.shade600 : Colors.green.shade800),
+                            suffixIcon: _isExtraPay
+                                ? Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                    margin: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey.shade200,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.lock_rounded, size: 10, color: Colors.grey.shade700),
+                                        const SizedBox(width: 2),
+                                        Text('ZERO', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.grey.shade700)),
+                                      ],
+                                    ),
+                                  )
+                                : null,
                             contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 10, vertical: 10),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
                               borderSide: BorderSide(
-                                  color: Colors.green.shade300),
+                                  color: _isExtraPay ? Colors.grey.shade300 : Colors.green.shade300),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                  color: _isExtraPay ? Colors.grey.shade300 : Colors.green.shade300),
                             ),
                           ),
                           validator: (val) {
+                            if (_isExtraPay) return null;
                             if (val == null || val.trim().isEmpty) {
                               return 'Enter amount';
                             }
@@ -7488,8 +7747,66 @@ class __AddPaymentEntryModalContentState
                 ],
               ),
 
+              // Dedicated Input Field for Extra Pay Amount
+              if (_isExtraPay) ...[
+                const SizedBox(height: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildFieldLabel('Extra Pay Amount (₹) *'),
+                    const SizedBox(height: 4),
+                    TextFormField(
+                      controller: _extraPayAmountController,
+                      autofocus: true,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                      ],
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.purple.shade900,
+                      ),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        filled: true,
+                        fillColor: Colors.purple.shade50.withValues(alpha: 0.35),
+                        hintText: 'Enter extra amount to pay',
+                        prefixText: '₹ ',
+                        prefixStyle: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.purple.shade900,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.purple.shade300),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(color: Colors.purple.shade700, width: 1.5),
+                        ),
+                      ),
+                      validator: (val) {
+                        if (!_isExtraPay) return null;
+                        if (val == null || val.trim().isEmpty) {
+                          return 'Enter extra pay amount';
+                        }
+                        final amt = double.tryParse(val.trim());
+                        if (amt == null || amt <= 0) {
+                          return 'Enter valid amount > 0';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ],
+
               Builder(
                 builder: (context) {
+                  if (_isExtraPay) return const SizedBox.shrink();
                   final enteredAmt = double.tryParse(_paymentAmountController.text.trim()) ?? 0.0;
                   final breakdown = _payableBreakdown;
                   final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
@@ -7557,7 +7874,7 @@ class __AddPaymentEntryModalContentState
               ),
 
               // Case 2: Past Missing Payment Clearance Section (Select date matched from missing records)
-              if (_unclearedMissing.isNotEmpty) ...[
+              if (_unclearedMissing.isNotEmpty && !_isExtraPay) ...[
                 const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.all(12),

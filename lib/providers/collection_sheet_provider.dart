@@ -298,6 +298,90 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
   }
 
+  /// Delete a single missing payment record
+  Future<bool> deleteMissingPaymentRecord(String recordId) async {
+    try {
+      final success = await SupabaseService.instance.deleteMissingPaymentRecordsBatch([recordId]);
+      _missingRecords.removeWhere((m) => m.id == recordId);
+      notifyListeners();
+      return success;
+    } catch (e) {
+      debugPrint('⚠️ Error in deleteMissingPaymentRecord: $e');
+      _missingRecords.removeWhere((m) => m.id == recordId);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Batch delete missing payment records by IDs
+  Future<bool> deleteMissingPaymentRecordsBatch(List<String> recordIds) async {
+    if (recordIds.isEmpty) return true;
+    try {
+      final success = await SupabaseService.instance.deleteMissingPaymentRecordsBatch(recordIds);
+      final idSet = recordIds.toSet();
+      _missingRecords.removeWhere((m) => idSet.contains(m.id));
+      notifyListeners();
+      return success;
+    } catch (e) {
+      debugPrint('⚠️ Error in deleteMissingPaymentRecordsBatch: $e');
+      final idSet = recordIds.toSet();
+      _missingRecords.removeWhere((m) => idSet.contains(m.id));
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Delete all missing payment records for a specific collection ID
+  Future<bool> deleteAllMissingRecordsForCollection(String collectionId) async {
+    final cleanId = collectionId.trim().toLowerCase();
+    final idsToDelete = _missingRecords
+        .where((m) => m.collectionId.trim().toLowerCase() == cleanId)
+        .map((m) => m.id)
+        .where((id) => id.isNotEmpty)
+        .toList();
+    try {
+      bool success = await SupabaseService.instance.deleteMissingPaymentRecordsForCollection(collectionId);
+      if (!success && idsToDelete.isNotEmpty) {
+        success = await SupabaseService.instance.deleteMissingPaymentRecordsBatch(idsToDelete);
+      } else if (success && idsToDelete.isNotEmpty) {
+        await SupabaseService.instance.deleteMissingPaymentRecordsBatch(idsToDelete);
+      }
+      _missingRecords.removeWhere((m) => m.collectionId.trim().toLowerCase() == cleanId || idsToDelete.contains(m.id));
+      notifyListeners();
+      return success;
+    } catch (e) {
+      debugPrint('⚠️ Error in deleteAllMissingRecordsForCollection: $e');
+      _missingRecords.removeWhere((m) => m.collectionId.trim().toLowerCase() == cleanId || idsToDelete.contains(m.id));
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Update an existing missing payment record
+  Future<bool> updateMissingPaymentRecord(MissingPaymentRecord record) async {
+    try {
+      final success = await SupabaseService.instance.updateMissingPaymentRecord(record);
+      final idx = _missingRecords.indexWhere((m) => m.id == record.id);
+      if (idx >= 0) {
+        _missingRecords[idx] = record;
+      } else {
+        _missingRecords.add(record);
+      }
+      notifyListeners();
+      return success;
+    } catch (e) {
+      debugPrint('⚠️ Error in updateMissingPaymentRecord: $e');
+      final idx = _missingRecords.indexWhere((m) => m.id == record.id);
+      if (idx >= 0) {
+        _missingRecords[idx] = record;
+      } else {
+        _missingRecords.add(record);
+      }
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<void> _loadAuthorizedMissingEntryIds() async {
     try {
       final prefs = await SharedPreferences.getInstance();

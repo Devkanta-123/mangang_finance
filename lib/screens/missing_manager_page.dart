@@ -1086,7 +1086,10 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     SettingsProvider settingsProvider,
     LoaneeProvider loaneeProvider,
   ) {
-    const double tableWidth = 1135;
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final bool isAdmin = authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin;
+    final double tableWidth = isAdmin ? 1235 : 1135;
 
     return Container(
       width: double.infinity,
@@ -1113,17 +1116,17 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
               // FIX:
               // Do NOT use FlexColumnWidth here.
               // Every column gets a deterministic width.
-              columnWidths: const {
-                0: FixedColumnWidth(45),
-                1: FixedColumnWidth(160),
-                2: FixedColumnWidth(105),
-                3: FixedColumnWidth(115),
-                4: FixedColumnWidth(80),
-                5: FixedColumnWidth(105),
-                6: FixedColumnWidth(100),
-                7: FixedColumnWidth(105),
-                8: FixedColumnWidth(105),
-                9: FixedColumnWidth(215),
+              columnWidths: {
+                0: const FixedColumnWidth(45),
+                1: const FixedColumnWidth(160),
+                2: const FixedColumnWidth(105),
+                3: const FixedColumnWidth(115),
+                4: const FixedColumnWidth(80),
+                5: const FixedColumnWidth(105),
+                6: const FixedColumnWidth(100),
+                7: const FixedColumnWidth(105),
+                8: const FixedColumnWidth(105),
+                9: FixedColumnWidth(isAdmin ? 315 : 215),
               },
 
               children: [
@@ -1513,6 +1516,44 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                                     ),
                                   ),
                                 ),
+                                if (isAdmin && missingCount > 0) ...[
+                                  const SizedBox(width: 6),
+                                  SizedBox(
+                                    height: 28,
+                                    child: Tooltip(
+                                      message: 'Delete All Missing Records (Admin Only)',
+                                      child: OutlinedButton.icon(
+                                        onPressed: () => _confirmDeleteAllFromMain(entry, missingCount),
+                                        icon: Icon(
+                                          Icons.delete_sweep_rounded,
+                                          size: 13,
+                                          color: Colors.red.shade700,
+                                        ),
+                                        label: Text(
+                                          'Delete All',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.red.shade700,
+                                          ),
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: Colors.red.shade700,
+                                          side: BorderSide(color: Colors.red.shade300),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2,
+                                          ),
+                                          minimumSize: const Size(0, 28),
+                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -1615,6 +1656,9 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     final bool hasPastData = _hasPastMissingRecords(provider, entry);
     final bool isRunningAuto = _runningAutoEntryIds.contains(entry.id);
     final bool canStartAuto = hasPastData && !isRunningAuto;
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final bool isAdmin = authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin;
 
     return Card(
       elevation: 1,
@@ -1827,6 +1871,39 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                       ),
                     ),
                   ),
+                  if (isAdmin && missingCount > 0)
+                    SizedBox(
+                      height: 32,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _confirmDeleteAllFromMain(entry, missingCount),
+                        icon: Icon(
+                          Icons.delete_sweep_rounded,
+                          size: 14,
+                          color: Colors.red.shade700,
+                        ),
+                        label: Text(
+                          'Delete All',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade700,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.red.shade700,
+                          side: BorderSide(color: Colors.red.shade300),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1865,6 +1942,82 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
         ),
       ],
     );
+  }
+
+  // ============================================================
+  // ADMIN DELETE ALL MISSING RECORDS (MAIN TABLE / CARD)
+  // ============================================================
+
+  Future<void> _confirmDeleteAllFromMain(
+    RoCollectionEntry entry,
+    int missingCount,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.delete_forever_rounded, color: Colors.red.shade700, size: 24),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Delete All Missing Records',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to permanently delete ALL $missingCount missing payment record(s) for ${entry.loaneeName} (Account: ${entry.accountNumber})?\n\nThis action cannot be undone and can only be performed by an Admin.',
+          style: const TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete All', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+      final success = await cp.deleteAllMissingRecordsForCollection(entry.id);
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('All missing records for ${entry.loaneeName} deleted successfully.'),
+              backgroundColor: Colors.red.shade800,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to delete missing records.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 
   // ============================================================
@@ -2042,8 +2195,21 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
   final int _pageSize = 5;
   bool _isExporting = false;
   bool _isRunningAuto = false;
+  bool _isDeletingAll = false;
   bool _sortAscending = true; // true = asc (oldest first), false = desc (newest first)
   String _sourceFilter = 'All'; // 'All', 'excel', 'system', 'collection'
+
+  // Inline row editing state
+  String? _editingRecordId;
+  DateTime? _editMissedDate;
+  DateTime? _editPaidDate;
+  String _editStatus = 'missing';
+  TextEditingController? _editPayCtrl;
+  TextEditingController? _editFineCtrl;
+  TextEditingController? _editWeekCtrl;
+  TextEditingController? _editBalanceCtrl;
+  TextEditingController? _editRemarksCtrl;
+  bool _isSavingInline = false;
 
   bool _isExcelUpload(MissingPaymentRecord record) {
     final src = record.source.toLowerCase().trim();
@@ -2173,6 +2339,11 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
 
   @override
   void dispose() {
+    _editPayCtrl?.dispose();
+    _editFineCtrl?.dispose();
+    _editWeekCtrl?.dispose();
+    _editBalanceCtrl?.dispose();
+    _editRemarksCtrl?.dispose();
     widget.collectionProvider.removeListener(_onProviderChange);
     super.dispose();
   }
@@ -2294,6 +2465,310 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
     }
   }
 
+  // ============================================================
+  // ADMIN DELETE SINGLE MISSING RECORD
+  // ============================================================
+
+  Future<void> _confirmDeleteRecord(
+    BuildContext context,
+    MissingPaymentRecord record,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final dateStr =
+        '${record.missedDate.day.toString().padLeft(2, '0')}-'
+        '${record.missedDate.month.toString().padLeft(2, '0')}-'
+        '${record.missedDate.year}';
+    final double amount = record.missingPay > 0
+        ? record.missingPay
+        : (record.dayPayment > 0 ? record.dayPayment : 0.0);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.delete_outline_rounded, color: Colors.red.shade700, size: 24),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Delete Missing Record',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to permanently delete the missing payment record for $dateStr (₹${amount.toStringAsFixed(2)})?\n\nThis action can only be performed by an Admin.',
+          style: const TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final success = await widget.collectionProvider.deleteMissingPaymentRecord(record.id);
+      if (mounted) {
+        if (success) {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text('Missing record for $dateStr deleted successfully.'),
+              backgroundColor: Colors.red.shade800,
+            ),
+          );
+        } else {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Failed to delete missing record.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  // ============================================================
+  // ADMIN DELETE ALL MISSING RECORDS (IN DIALOG)
+  // ============================================================
+
+  Future<void> _confirmDeleteAll(
+    BuildContext context,
+    List<MissingPaymentRecord> records,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.delete_forever_rounded, color: Colors.red.shade700, size: 24),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Delete All Missing Records',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to permanently delete ALL ${records.length} missing payment record(s) for ${widget.entry.loaneeName} (Account: ${widget.entry.accountNumber})?\n\nThis action cannot be undone and can only be performed by an Admin.',
+          style: const TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete All', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() => _isDeletingAll = true);
+      try {
+        final success = await widget.collectionProvider.deleteAllMissingRecordsForCollection(widget.entry.id);
+        if (mounted) {
+          if (success) {
+            setState(() {
+              _page = 1;
+            });
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text('All missing payment records for ${widget.entry.loaneeName} deleted successfully.'),
+                backgroundColor: Colors.red.shade800,
+              ),
+            );
+          } else {
+            messenger.showSnackBar(
+              const SnackBar(
+                content: Text('Failed to delete missing records.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          messenger.showSnackBar(
+            SnackBar(content: Text('Error deleting missing records: $e'), backgroundColor: Colors.red),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isDeletingAll = false);
+        }
+      }
+    }
+  }
+
+  // ============================================================
+  // MANAGER / ADMIN INLINE EDITING METHODS
+  // ============================================================
+
+  void _startEditing(MissingPaymentRecord record) {
+    _editPayCtrl?.dispose();
+    _editFineCtrl?.dispose();
+    _editWeekCtrl?.dispose();
+    _editBalanceCtrl?.dispose();
+    _editRemarksCtrl?.dispose();
+
+    final double initialPay = record.missingPay > 0
+        ? record.missingPay
+        : (record.dayPayment > 0 ? record.dayPayment : 0.0);
+
+    setState(() {
+      _editingRecordId = record.id;
+      _editMissedDate = record.missedDate;
+      _editPaidDate = record.paidDate;
+
+      final lowerStatus = record.status.toLowerCase().trim();
+      if (lowerStatus == 'resolved' || lowerStatus == 'cleared' || lowerStatus == 'paid') {
+        _editStatus = 'resolved';
+      } else if (lowerStatus == 'partially_resolved' ||
+          lowerStatus == 'partial' ||
+          lowerStatus == 'partial paid' ||
+          lowerStatus == 'partially paid') {
+        _editStatus = 'partially_resolved';
+      } else if (lowerStatus == 'paused') {
+        _editStatus = 'paused';
+      } else {
+        _editStatus = 'missing';
+      }
+
+      _editPayCtrl = TextEditingController(text: initialPay.toStringAsFixed(2));
+      _editFineCtrl = TextEditingController(text: record.missingFine.toStringAsFixed(2));
+      _editWeekCtrl = TextEditingController(text: record.missingWeek.toString());
+      _editBalanceCtrl = TextEditingController(text: record.missingBalance.toStringAsFixed(2));
+      _editRemarksCtrl = TextEditingController(text: record.remarks ?? '');
+    });
+  }
+
+  void _cancelEditing() {
+    setState(() {
+      _editingRecordId = null;
+      _editPayCtrl?.dispose();
+      _editPayCtrl = null;
+      _editFineCtrl?.dispose();
+      _editFineCtrl = null;
+      _editWeekCtrl?.dispose();
+      _editWeekCtrl = null;
+      _editBalanceCtrl?.dispose();
+      _editBalanceCtrl = null;
+      _editRemarksCtrl?.dispose();
+      _editRemarksCtrl = null;
+    });
+  }
+
+  Future<void> _saveEditing(MissingPaymentRecord record) async {
+    final double? parsedPay = double.tryParse(_editPayCtrl?.text.trim() ?? '');
+    final double? parsedFine = double.tryParse(_editFineCtrl?.text.trim() ?? '');
+    final int? parsedWeek = int.tryParse(_editWeekCtrl?.text.trim() ?? '');
+    final double? parsedBalance = double.tryParse(_editBalanceCtrl?.text.trim() ?? '');
+
+    if (parsedPay == null || parsedFine == null || parsedBalance == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please enter valid numeric amounts for Pay, Fine, and Balance."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSavingInline = true);
+    final messenger = ScaffoldMessenger.of(context);
+
+    final updatedRecord = record.copyWith(
+      missedDate: _editMissedDate ?? record.missedDate,
+      paidDate: _editPaidDate,
+      clearPaidDate: _editPaidDate == null,
+      status: _editStatus,
+      missingPay: parsedPay,
+      dayPayment: parsedPay,
+      missingFine: parsedFine,
+      missingWeek: parsedWeek ?? record.missingWeek,
+      missingBalance: parsedBalance,
+      remarks: _editRemarksCtrl?.text.trim().isEmpty ?? true ? null : _editRemarksCtrl!.text.trim(),
+      updatedAt: DateTime.now(),
+    );
+
+    final success = await widget.collectionProvider.updateMissingPaymentRecord(updatedRecord);
+
+    if (mounted) {
+      setState(() {
+        _isSavingInline = false;
+        if (success) {
+          _editingRecordId = null;
+          _editPayCtrl?.dispose();
+          _editPayCtrl = null;
+          _editFineCtrl?.dispose();
+          _editFineCtrl = null;
+          _editWeekCtrl?.dispose();
+          _editWeekCtrl = null;
+          _editBalanceCtrl?.dispose();
+          _editBalanceCtrl = null;
+          _editRemarksCtrl?.dispose();
+          _editRemarksCtrl = null;
+        }
+      });
+      if (success) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text("Missing log row updated successfully!"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text("Failed to update record in database."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildMetricItem({
     required String label,
     required String value,
@@ -2321,6 +2796,13 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final bool isAdmin = authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin;
+    final bool isManager = authProvider.activeRole == UserType.manager ||
+        authProvider.currentUser?.userType == UserType.manager ||
+        isAdmin;
+
     final entry = widget.entry;
     final cp = widget.collectionProvider;
     final missingRecords = cp.getMissingRecordsForCollection(entry.id);
@@ -2642,6 +3124,44 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                           ),
                         ),
                       ),
+                      if (isAdmin && missingRecords.isNotEmpty)
+                        OutlinedButton.icon(
+                          onPressed: _isDeletingAll ? null : () => _confirmDeleteAll(context, missingRecords),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red.shade700,
+                            side: BorderSide(color: Colors.red.shade400),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            minimumSize: const Size(0, 32),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          icon: _isDeletingAll
+                              ? const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.red,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.delete_sweep_rounded,
+                                  size: 15,
+                                  color: Colors.red.shade700,
+                                ),
+                          label: Text(
+                            _isDeletingAll ? "Deleting..." : "Delete All",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade700,
+                            ),
+                          ),
+                        ),
                       IconButton(
                         icon: const Icon(Icons.close_rounded, size: 20),
                         tooltip: 'Close',
@@ -2907,7 +3427,9 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                       scrollDirection: Axis.horizontal,
                       child: ExcludeSemantics(
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(minWidth: 920),
+                          constraints: BoxConstraints(
+                            minWidth: (isManager || isAdmin) ? 1160 : 920,
+                          ),
                           child: DataTable(
                         headingRowColor:
                             WidgetStateProperty.all(const Color(0xFF8B1A1A)),
@@ -2916,8 +3438,8 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                           color: Colors.white,
                           fontSize: 11,
                         ),
-                        dataRowMaxHeight: 52,
-                        dataRowMinHeight: 40,
+                        dataRowMaxHeight: _editingRecordId != null ? 58 : 52,
+                        dataRowMinHeight: 42,
                         columnSpacing: 14,
                         horizontalMargin: 12,
                         sortColumnIndex: 0,
@@ -2942,10 +3464,13 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                           const DataColumn(label: Text("Missing Balance")),
                           const DataColumn(label: Text("Status")),
                           const DataColumn(label: Text("Source")),
+                          if (isManager || isAdmin)
+                            const DataColumn(label: Text("Action")),
                         ],
                         rows: pagedRecords.asMap().entries.map((mapEntry) {
                           final int idx = mapEntry.key;
                           final m = mapEntry.value;
+                          final bool isEditing = _editingRecordId == m.id;
                           final dateString =
                               '${m.missedDate.day.toString().padLeft(2, '0')}-'
                               '${m.missedDate.month.toString().padLeft(2, '0')}-'
@@ -2959,6 +3484,9 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
 
                           return DataRow(
                             color: WidgetStateProperty.resolveWith<Color?>((states) {
+                              if (isEditing) {
+                                return Colors.amber.shade50;
+                              }
                               if (isPaid) {
                                 return const Color(0xFFF1F5F9); // Frozen / locked row style
                               }
@@ -2966,182 +3494,491 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                             }),
                             cells: [
                               DataCell(
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (isPaid) ...[
-                                      Container(
-                                        padding: const EdgeInsets.all(2.5),
-                                        margin: const EdgeInsets.only(right: 5),
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey.shade200,
-                                          borderRadius: BorderRadius.circular(4),
-                                          border: Border.all(color: Colors.grey.shade400),
-                                        ),
-                                        child: Tooltip(
-                                          message: m.paidDate != null
-                                              ? 'Paid & Frozen on ${m.paidDate!.day.toString().padLeft(2, '0')}-${m.paidDate!.month.toString().padLeft(2, '0')}-${m.paidDate!.year} - Row is locked'
-                                              : 'Paid & Frozen - Row is locked',
-                                          child: Icon(
-                                            Icons.lock_rounded,
-                                            size: 11,
-                                            color: Colors.grey.shade800,
+                                isEditing
+                                    ? InkWell(
+                                        onTap: _isSavingInline
+                                            ? null
+                                            : () async {
+                                                final picked = await showDatePicker(
+                                                  context: context,
+                                                  initialDate: _editMissedDate ?? m.missedDate,
+                                                  firstDate: DateTime(2020),
+                                                  lastDate: DateTime.now().add(const Duration(days: 365)),
+                                                );
+                                                if (picked != null) {
+                                                  setState(() => _editMissedDate = picked);
+                                                }
+                                              },
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.shade50,
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(color: Colors.blue.shade300),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.calendar_month_rounded, size: 12, color: Colors.blue.shade800),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                '${(_editMissedDate ?? m.missedDate).day.toString().padLeft(2, '0')}-'
+                                                '${(_editMissedDate ?? m.missedDate).month.toString().padLeft(2, '0')}-'
+                                                '${(_editMissedDate ?? m.missedDate).year}',
+                                                style: TextStyle(
+                                                  fontSize: 10.5,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.blue.shade900,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
+                                      )
+                                    : Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (isPaid) ...[
+                                            Container(
+                                              padding: const EdgeInsets.all(2.5),
+                                              margin: const EdgeInsets.only(right: 5),
+                                              decoration: BoxDecoration(
+                                                color: Colors.grey.shade200,
+                                                borderRadius: BorderRadius.circular(4),
+                                                border: Border.all(color: Colors.grey.shade400),
+                                              ),
+                                              child: Tooltip(
+                                                message: m.paidDate != null
+                                                    ? 'Paid & Frozen on ${m.paidDate!.day.toString().padLeft(2, '0')}-${m.paidDate!.month.toString().padLeft(2, '0')}-${m.paidDate!.year} - Row is locked'
+                                                    : 'Paid & Frozen - Row is locked',
+                                                child: Icon(
+                                                  Icons.lock_rounded,
+                                                  size: 11,
+                                                  color: Colors.grey.shade800,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          Text(
+                                            dateString,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: isPaid ? Colors.grey.shade800 : Colors.black87,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                    Text(
-                                      dateString,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: isPaid ? Colors.grey.shade800 : Colors.black87,
-                                      ),
-                                    ),
-                                  ],
-                                ),
                               ),
                               DataCell(
-                                m.paidDate != null
+                                isEditing
+                                    ? Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          InkWell(
+                                            onTap: _isSavingInline
+                                                ? null
+                                                : () async {
+                                                    final picked = await showDatePicker(
+                                                      context: context,
+                                                      initialDate: _editPaidDate ?? DateTime.now(),
+                                                      firstDate: DateTime(2020),
+                                                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                                                    );
+                                                    if (picked != null) {
+                                                      setState(() {
+                                                        _editPaidDate = picked;
+                                                        if (_editStatus == 'missing') _editStatus = 'resolved';
+                                                      });
+                                                    }
+                                                  },
+                                            borderRadius: BorderRadius.circular(6),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: _editPaidDate != null ? Colors.green.shade50 : Colors.grey.shade100,
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(
+                                                  color: _editPaidDate != null ? Colors.green.shade300 : Colors.grey.shade300,
+                                                ),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.event_available_rounded,
+                                                    size: 12,
+                                                    color: _editPaidDate != null ? Colors.green.shade700 : Colors.grey.shade600,
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    _editPaidDate != null
+                                                        ? '${_editPaidDate!.day.toString().padLeft(2, '0')}-${_editPaidDate!.month.toString().padLeft(2, '0')}-${_editPaidDate!.year}'
+                                                        : 'Set Date',
+                                                    style: TextStyle(
+                                                      fontSize: 10.5,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: _editPaidDate != null ? Colors.green.shade900 : Colors.grey.shade700,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                          if (_editPaidDate != null) ...[
+                                            const SizedBox(width: 4),
+                                            InkWell(
+                                              onTap: _isSavingInline
+                                                  ? null
+                                                  : () {
+                                                      setState(() {
+                                                        _editPaidDate = null;
+                                                        if (_editStatus == 'resolved') _editStatus = 'missing';
+                                                      });
+                                                    },
+                                              child: Tooltip(
+                                                message: 'Clear Paid Date',
+                                                child: Icon(Icons.cancel_rounded, size: 14, color: Colors.red.shade600),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      )
+                                    : (m.paidDate != null
+                                        ? Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                            decoration: BoxDecoration(
+                                              color: Colors.green.shade50,
+                                              borderRadius: BorderRadius.circular(4),
+                                              border: Border.all(color: Colors.green.shade300),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.check_circle_rounded, size: 10, color: Colors.green.shade700),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  '${m.paidDate!.day.toString().padLeft(2, '0')}-${m.paidDate!.month.toString().padLeft(2, '0')}-${m.paidDate!.year}',
+                                                  style: TextStyle(
+                                                    fontSize: 10.5,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.green.shade800,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          )
+                                        : Text(
+                                            '—',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey.shade400,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          )),
+                              ),
+                              DataCell(
+                                isEditing
+                                    ? SizedBox(
+                                        width: 85,
+                                        height: 32,
+                                        child: TextField(
+                                          controller: _editPayCtrl,
+                                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                          decoration: InputDecoration(
+                                            contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                            prefixText: '₹ ',
+                                            prefixStyle: const TextStyle(fontSize: 10, color: Colors.grey),
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                            isDense: true,
+                                          ),
+                                        ),
+                                      )
+                                    : Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '₹ ${displayBasicPay.toStringAsFixed(2)}',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: isPaid ? Colors.grey.shade800 : Colors.orange.shade900,
+                                            ),
+                                          ),
+                                          if (isPaid) ...[
+                                            const SizedBox(width: 4),
+                                            Tooltip(
+                                              message: 'Settled Basic Pay Amount (Preserved & Frozen)',
+                                              child: Icon(
+                                                Icons.lock_clock_rounded,
+                                                size: 11,
+                                                color: Colors.grey.shade600,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                              ),
+                              DataCell(
+                                isEditing
+                                    ? SizedBox(
+                                        width: 80,
+                                        height: 32,
+                                        child: TextField(
+                                          controller: _editFineCtrl,
+                                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                          style: const TextStyle(fontSize: 11),
+                                          decoration: InputDecoration(
+                                            contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                            prefixText: '₹ ',
+                                            prefixStyle: const TextStyle(fontSize: 10, color: Colors.grey),
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                            isDense: true,
+                                          ),
+                                        ),
+                                      )
+                                    : Text(
+                                        '₹ ${m.missingFine.toStringAsFixed(2)}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isPaid ? Colors.grey.shade700 : Colors.black87,
+                                        ),
+                                      ),
+                              ),
+                              DataCell(
+                                isEditing
+                                    ? SizedBox(
+                                        width: 55,
+                                        height: 32,
+                                        child: TextField(
+                                          controller: _editWeekCtrl,
+                                          keyboardType: TextInputType.number,
+                                          style: const TextStyle(fontSize: 11),
+                                          decoration: InputDecoration(
+                                            contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                            isDense: true,
+                                          ),
+                                        ),
+                                      )
+                                    : Text(
+                                        '${m.missingWeek}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isPaid ? Colors.grey.shade700 : Colors.black87,
+                                        ),
+                                      ),
+                              ),
+                              DataCell(
+                                isEditing
+                                    ? SizedBox(
+                                        width: 85,
+                                        height: 32,
+                                        child: TextField(
+                                          controller: _editBalanceCtrl,
+                                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.red.shade900,
+                                          ),
+                                          decoration: InputDecoration(
+                                            contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                            prefixText: '₹ ',
+                                            prefixStyle: const TextStyle(fontSize: 10, color: Colors.grey),
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                            isDense: true,
+                                          ),
+                                        ),
+                                      )
+                                    : Text(
+                                        '₹ ${m.missingBalance.toStringAsFixed(2)}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: isPaid ? Colors.grey.shade600 : Colors.red.shade900,
+                                        ),
+                                      ),
+                              ),
+                              DataCell(
+                                isEditing
                                     ? Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                        height: 32,
+                                        padding: const EdgeInsets.symmetric(horizontal: 6),
                                         decoration: BoxDecoration(
-                                          color: Colors.green.shade50,
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: Colors.grey.shade400),
+                                          color: Colors.white,
+                                        ),
+                                        child: DropdownButtonHideUnderline(
+                                          child: DropdownButton<String>(
+                                            value: _editStatus,
+                                            isDense: true,
+                                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                            items: const [
+                                              DropdownMenuItem(value: 'missing', child: Text('MISSING', style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold))),
+                                              DropdownMenuItem(value: 'partially_resolved', child: Text('PARTIAL', style: TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.bold))),
+                                              DropdownMenuItem(value: 'resolved', child: Text('PAID', style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold))),
+                                              DropdownMenuItem(value: 'paused', child: Text('PAUSED', style: TextStyle(color: Colors.blue, fontSize: 10, fontWeight: FontWeight.bold))),
+                                            ],
+                                            onChanged: _isSavingInline
+                                                ? null
+                                                : (val) {
+                                                    if (val != null) {
+                                                      setState(() {
+                                                        _editStatus = val;
+                                                        if (val == 'resolved' && _editPaidDate == null) {
+                                                          _editPaidDate = DateTime.now();
+                                                        } else if (val == 'missing') {
+                                                          _editPaidDate = null;
+                                                        }
+                                                      });
+                                                    }
+                                                  },
+                                          ),
+                                        ),
+                                      )
+                                    : Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: isPaid
+                                              ? Colors.green.shade50
+                                              : (isPartial
+                                                  ? Colors.amber.shade50
+                                                  : Colors.red.shade50),
                                           borderRadius: BorderRadius.circular(4),
-                                          border: Border.all(color: Colors.green.shade300),
+                                          border: Border.all(
+                                            color: isPaid
+                                                ? Colors.green.shade300
+                                                : (isPartial
+                                                    ? Colors.amber.shade300
+                                                    : Colors.red.shade300),
+                                          ),
                                         ),
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Icon(Icons.check_circle_rounded, size: 10, color: Colors.green.shade700),
+                                            Icon(
+                                              isPaid
+                                                  ? Icons.lock_rounded
+                                                  : (isPartial
+                                                      ? Icons.hourglass_bottom_rounded
+                                                      : (m.isPaused ? Icons.pause_circle_rounded : Icons.pending_actions_rounded)),
+                                              size: 11,
+                                              color: isPaid
+                                                  ? Colors.green.shade700
+                                                  : (isPartial
+                                                      ? Colors.amber.shade900
+                                                      : (m.isPaused ? Colors.blue.shade700 : Colors.red.shade700)),
+                                            ),
                                             const SizedBox(width: 4),
                                             Text(
-                                              '${m.paidDate!.day.toString().padLeft(2, '0')}-${m.paidDate!.month.toString().padLeft(2, '0')}-${m.paidDate!.year}',
+                                              isPaid
+                                                  ? "PAID (LOCKED)"
+                                                  : (isPartial
+                                                      ? "PARTIAL PAID"
+                                                      : (m.isPaused ? "PAUSED" : "MISSING")),
                                               style: TextStyle(
-                                                fontSize: 10.5,
+                                                fontSize: 9.5,
                                                 fontWeight: FontWeight.bold,
-                                                color: Colors.green.shade800,
+                                                color: isPaid
+                                                    ? Colors.green.shade800
+                                                    : (isPartial
+                                                        ? Colors.amber.shade900
+                                                        : (m.isPaused ? Colors.blue.shade900 : Colors.red.shade800)),
                                               ),
                                             ),
                                           ],
                                         ),
-                                      )
-                                    : Text(
-                                        '—',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.grey.shade400,
-                                          fontWeight: FontWeight.bold,
-                                        ),
                                       ),
-                              ),
-                              DataCell(
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      '₹ ${displayBasicPay.toStringAsFixed(2)}',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: isPaid ? Colors.grey.shade800 : Colors.orange.shade900,
-                                      ),
-                                    ),
-                                    if (isPaid) ...[
-                                      const SizedBox(width: 4),
-                                      Tooltip(
-                                        message: 'Settled Basic Pay Amount (Preserved & Frozen)',
-                                        child: Icon(
-                                          Icons.lock_clock_rounded,
-                                          size: 11,
-                                          color: Colors.grey.shade600,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                              DataCell(Text(
-                                '₹ ${m.missingFine.toStringAsFixed(2)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isPaid ? Colors.grey.shade700 : Colors.black87,
-                                ),
-                              )),
-                              DataCell(Text(
-                                '${m.missingWeek}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isPaid ? Colors.grey.shade700 : Colors.black87,
-                                ),
-                              )),
-                              DataCell(Text(
-                                '₹ ${m.missingBalance.toStringAsFixed(2)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: isPaid ? Colors.grey.shade600 : Colors.red.shade900,
-                                ),
-                              )),
-                              DataCell(
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isPaid
-                                        ? Colors.green.shade50
-                                        : (isPartial
-                                            ? Colors.amber.shade50
-                                            : Colors.red.shade50),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                      color: isPaid
-                                          ? Colors.green.shade300
-                                          : (isPartial
-                                              ? Colors.amber.shade300
-                                              : Colors.red.shade300),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        isPaid
-                                            ? Icons.lock_rounded
-                                            : (isPartial
-                                                ? Icons.hourglass_bottom_rounded
-                                                : (m.isPaused ? Icons.pause_circle_rounded : Icons.pending_actions_rounded)),
-                                        size: 11,
-                                        color: isPaid
-                                            ? Colors.green.shade700
-                                            : (isPartial
-                                                ? Colors.amber.shade900
-                                                : (m.isPaused ? Colors.blue.shade700 : Colors.red.shade700)),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        isPaid
-                                            ? "PAID (LOCKED)"
-                                            : (isPartial
-                                                ? "PARTIAL PAID"
-                                                : (m.isPaused ? "PAUSED" : "MISSING")),
-                                        style: TextStyle(
-                                          fontSize: 9.5,
-                                          fontWeight: FontWeight.bold,
-                                          color: isPaid
-                                              ? Colors.green.shade800
-                                              : (isPartial
-                                                  ? Colors.amber.shade900
-                                                  : (m.isPaused ? Colors.blue.shade900 : Colors.red.shade800)),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
                               ),
                               DataCell(_buildSourceBadge(m)),
+                              if (isManager || isAdmin)
+                                DataCell(
+                                  isEditing
+                                      ? Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (_isSavingInline)
+                                              const SizedBox(
+                                                width: 22,
+                                                height: 22,
+                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.green),
+                                              )
+                                            else ...[
+                                              Tooltip(
+                                                message: 'Save Changes',
+                                                child: IconButton(
+                                                  icon: const Icon(Icons.check_circle_rounded, size: 22, color: Colors.green),
+                                                  splashRadius: 16,
+                                                  padding: EdgeInsets.zero,
+                                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                                  onPressed: () => _saveEditing(m),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Tooltip(
+                                                message: 'Cancel Edit',
+                                                child: IconButton(
+                                                  icon: Icon(Icons.cancel_rounded, size: 22, color: Colors.grey.shade600),
+                                                  splashRadius: 16,
+                                                  padding: EdgeInsets.zero,
+                                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                                  onPressed: _cancelEditing,
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        )
+                                      : Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (isManager || isAdmin)
+                                              Tooltip(
+                                                message: 'Edit Missing Record (Manager/Admin)',
+                                                child: IconButton(
+                                                  icon: const Icon(
+                                                    Icons.edit_note_rounded,
+                                                    size: 19,
+                                                    color: Color(0xFF1E3A8A),
+                                                  ),
+                                                  splashRadius: 16,
+                                                  padding: const EdgeInsets.all(4),
+                                                  constraints: const BoxConstraints(
+                                                    minWidth: 28,
+                                                    minHeight: 28,
+                                                  ),
+                                                  onPressed: _editingRecordId != null ? null : () => _startEditing(m),
+                                                ),
+                                              ),
+                                            if (isAdmin) ...[
+                                              const SizedBox(width: 4),
+                                              Tooltip(
+                                                message: 'Delete Missing Record (Admin Only)',
+                                                child: IconButton(
+                                                  icon: Icon(
+                                                    Icons.delete_outline_rounded,
+                                                    size: 17,
+                                                    color: Colors.red.shade700,
+                                                  ),
+                                                  splashRadius: 16,
+                                                  padding: const EdgeInsets.all(4),
+                                                  constraints: const BoxConstraints(
+                                                    minWidth: 28,
+                                                    minHeight: 28,
+                                                  ),
+                                                  onPressed: _editingRecordId != null ? null : () => _confirmDeleteRecord(context, m),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                ),
                             ],
                           );
                         }).toList(),
