@@ -1690,8 +1690,11 @@ class CollectionSheetProvider extends ChangeNotifier {
         for (int w = 1; w <= weeksToAssess; w++) {
           final candidate = DateTime(cleanBaseDate.year, cleanBaseDate.month, cleanBaseDate.day + (w * 7));
           if (candidate.isBefore(cleanToday)) {
+            final isHoliday = settingsProvider.isHoliday(candidate);
             final isPaused = settingsProvider.isLateFinePaused(entry.id, candidate, customerId: entry.customerId);
-            if (isPaused) {
+            if (isHoliday) {
+              skippedHolidays.add(candidate);
+            } else if (isPaused) {
               skippedPausedDates.add(candidate);
             } else {
               candidateDates.add(candidate);

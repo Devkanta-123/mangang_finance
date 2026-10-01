@@ -250,6 +250,11 @@ class SettingsProvider extends ChangeNotifier {
       .map((h) => DateTime(h.date.year, h.date.month, h.date.day))
       .toList();
 
+  @visibleForTesting
+  void setHolidaysForTesting(List<Holiday> list) {
+    _holidays = List<Holiday>.from(list);
+  }
+
   /// Check if a specific date is a registered holiday
   bool isHoliday(DateTime date) {
     return _holidays.any((h) =>
@@ -762,22 +767,95 @@ class SettingsProvider extends ChangeNotifier {
         ? (totalPaid / weeklyInstallmentToUse).floor()
         : 0;
 
-    final int daysSinceStart = today.difference(entryDate).inDays;
-    final int weeksElapsed = (daysSinceStart ~/ 7);
     final int maxTenureWeeks = _weeklyTenureWeeks.ceil(); // e.g. 18 weeks for 17.5
-    final int expectedWeeks = weeksElapsed.clamp(0, maxTenureWeeks);
 
-    int pausedWeeksCount = 0;
-    if (expectedWeeks > weeksPaid) {
-      for (int w = weeksPaid + 1; w <= expectedWeeks; w++) {
-        final d = entryDate.add(Duration(days: w * 7));
-        if (isLateFinePaused(entry.id, d, customerId: entry.customerId)) {
-          pausedWeeksCount++;
-        }
+    // Determine the scheduled collection weekday (e.g. Tuesday = 2)
+    int? targetWeekday;
+    final normType = entry.collectionType.toLowerCase().trim();
+    if (normType.startsWith('mon')) {
+      targetWeekday = DateTime.monday;
+    } else if (normType.startsWith('tue')) {
+      targetWeekday = DateTime.tuesday;
+    } else if (normType.startsWith('wed')) {
+      targetWeekday = DateTime.wednesday;
+    } else if (normType.startsWith('thu')) {
+      targetWeekday = DateTime.thursday;
+    } else if (normType.startsWith('fri')) {
+      targetWeekday = DateTime.friday;
+    } else if (normType.startsWith('sat')) {
+      targetWeekday = DateTime.saturday;
+    } else if (normType.startsWith('sun')) {
+      targetWeekday = DateTime.sunday;
+    }
+
+    if (targetWeekday == null) {
+      final realPayments = payments.where((p) {
+        final s = p.status.toLowerCase().trim();
+        return s != 'failed' && s != 'cancelled' && p.paymentAmount > 0;
+      }).toList();
+      if (realPayments.isNotEmpty) {
+        final sorted = List<CollectionPaymentModel>.from(realPayments)
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        targetWeekday = sorted.first.createdAt.weekday;
+      } else {
+        targetWeekday = entryDate.weekday;
       }
     }
 
-    final int lateWeeks = (expectedWeeks - weeksPaid - pausedWeeksCount).clamp(0, maxTenureWeeks);
+    // Determine first scheduled collection date on or after entryDate
+    DateTime firstCollectionDate;
+    int daysToAdd = (targetWeekday - entryDate.weekday) % 7;
+    if (daysToAdd < 0) daysToAdd += 7;
+    if (daysToAdd == 0) {
+      final hasPaymentOnEntryDate = payments.any((p) {
+        final pDate = DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day);
+        return pDate == entryDate && p.paymentAmount > 0;
+      });
+      firstCollectionDate = hasPaymentOnEntryDate ? entryDate : entryDate.add(const Duration(days: 7));
+    } else {
+      firstCollectionDate = entryDate.add(Duration(days: daysToAdd));
+    }
+
+    // If borrower paid earlier matching targetWeekday, start from that payment date
+    final earliestPayment = payments
+        .where((p) => p.paymentAmount > 0)
+        .map((p) => DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day))
+        .fold<DateTime?>(null, (min, d) => min == null || d.isBefore(min) ? d : min);
+    if (earliestPayment != null && earliestPayment.isBefore(firstCollectionDate) && !earliestPayment.isBefore(entryDate)) {
+      firstCollectionDate = earliestPayment;
+    }
+
+    // Collect all scheduled weekly collection dates up to today (clamped to maxTenureWeeks)
+    final List<DateTime> scheduledDates = [];
+    DateTime cur = firstCollectionDate;
+    while (!cur.isAfter(today) && scheduledDates.length < maxTenureWeeks) {
+      scheduledDates.add(cur);
+      cur = cur.add(const Duration(days: 7));
+    }
+
+    // Fallback if today is before firstCollectionDate or scheduledDates is empty
+    int totalScheduledWeeks = scheduledDates.length;
+    if (scheduledDates.isEmpty && today.isAfter(entryDate)) {
+      final int daysSinceStart = today.difference(entryDate).inDays;
+      totalScheduledWeeks = (daysSinceStart ~/ 7).clamp(0, maxTenureWeeks);
+      for (int w = 1; w <= totalScheduledWeeks; w++) {
+        scheduledDates.add(entryDate.add(Duration(days: w * 7)));
+      }
+    }
+
+    // Exclude official holidays (e.g. curfew) and paused weeks from overdue expectation
+    int holidayWeeksCount = 0;
+    int pausedWeeksCount = 0;
+    for (final d in scheduledDates) {
+      if (isHoliday(d)) {
+        holidayWeeksCount++;
+      } else if (isLateFinePaused(entry.id, d, customerId: entry.customerId)) {
+        pausedWeeksCount++;
+      }
+    }
+
+    final int expectedWeeks = (totalScheduledWeeks - holidayWeeksCount - pausedWeeksCount).clamp(0, maxTenureWeeks);
+    final int lateWeeks = (expectedWeeks - weeksPaid).clamp(0, maxTenureWeeks);
     final double totalExpected = expectedWeeks * weeklyInstallmentToUse;
     final double totalUnpaid = (totalExpected - totalPaid).clamp(0.0, totalTenureAmount).toDouble();
     // Apply late fine percentage (3% of base installment) to each overdue week
