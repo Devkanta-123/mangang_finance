@@ -2579,6 +2579,7 @@ class _RoCollectionSheetViewPageState
                             name: entry.loaneeName,
                           );
                           final payments = provider.getPaymentsForCollection(entry.id);
+                          final totalMissingBal = provider.getTotalMissingBalanceForCollection(entry.id);
                           final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                             entry: entry,
                             payments: payments,
@@ -2586,6 +2587,7 @@ class _RoCollectionSheetViewPageState
                             loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
                             maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
                             sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
+                            overrideLateFine: totalMissingBal,
                           );
                           final postMaturity = breakdown.postMaturityBreakdown;
 
@@ -2695,6 +2697,7 @@ class _RoCollectionSheetViewPageState
                             name: entry.loaneeName,
                           );
                           final payments = provider.getPaymentsForCollection(entry.id);
+                          final totalMissingBal = provider.getTotalMissingBalanceForCollection(entry.id);
                           final breakdown = settingsProvider.getLatePayableBreakdownForEntry(
                             entry: entry,
                             payments: payments,
@@ -2702,6 +2705,7 @@ class _RoCollectionSheetViewPageState
                             loaneeDueAmount: (loanee != null && loanee.dueAmount > 0) ? loanee.dueAmount : null,
                             maturityDate: loanee?.effectiveMaturityDate ?? loanee?.loanMaturityDate,
                             sanctionDate: loanee?.loanSanctionDate ?? entry.createdAt,
+                            overrideLateFine: totalMissingBal,
                           );
                           final postMaturity = breakdown.postMaturityBreakdown;
 
@@ -2728,20 +2732,37 @@ class _RoCollectionSheetViewPageState
                             );
                           }
 
-                          if (breakdown.lateUnits > 0) {
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.red.shade300),
-                              ),
-                              child: Text(
-                                "${breakdown.lateUnits}${entry.isDaily ? "d" : "w"} (₹${breakdown.totalPayableAmount.toStringAsFixed(0)})",
-                                style: TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.red.shade900,
+                          final effectiveLateFee = totalMissingBal > 0 ? totalMissingBal : breakdown.calculatedLateFine;
+                          final missingRecords = provider.getMissingRecordsForCollection(entry.id);
+                          final activeMissing = missingRecords.where((m) => !m.isResolved).toList();
+                          final displayUnits = activeMissing.isNotEmpty
+                              ? activeMissing.length
+                              : (breakdown.lateUnits > 0 ? breakdown.lateUnits : (effectiveLateFee > 0 ? 1 : 0));
+
+                          if (displayUnits > 0 || effectiveLateFee > 0) {
+                            final feeStr = effectiveLateFee % 1 == 0
+                                ? effectiveLateFee.toInt().toString()
+                                : effectiveLateFee.toStringAsFixed(2);
+                            final unitStr = "$displayUnits${entry.isDaily ? "d" : "w"}";
+                            final unitLabel = entry.isDaily
+                                ? (displayUnits == 1 ? "day" : "days")
+                                : (displayUnits == 1 ? "wk" : "wks");
+                            return Tooltip(
+                              message: "Late Payment Fee ($displayUnits missed $unitLabel)${effectiveLateFee > 0 ? ": +₹$feeStr" : ""}",
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.red.shade300),
+                                ),
+                                child: Text(
+                                  effectiveLateFee > 0 ? "$unitStr (₹$feeStr)" : unitStr,
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red.shade900,
+                                  ),
                                 ),
                               ),
                             );
