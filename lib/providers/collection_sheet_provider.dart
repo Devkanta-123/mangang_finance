@@ -1403,7 +1403,7 @@ class CollectionSheetProvider extends ChangeNotifier {
     bool saveToRemote = true,
     bool forceAuthorize = false,
   }) async {
-    // Ensure this entry's missing records are up to date from remote before evaluation
+    // Ensure this entry's missing records and payment history are up to date from remote before evaluation
     // to prevent cross-device/model race conditions and duplicate inserts
     if (saveToRemote && SupabaseService.instance.isInitialized) {
       try {
@@ -1420,6 +1420,11 @@ class CollectionSheetProvider extends ChangeNotifier {
         }
       } catch (e) {
         debugPrint('Note refreshing remote missing records prior to auto check: $e');
+      }
+      try {
+        await fetchAllPaymentsForCollection(entry.id);
+      } catch (e) {
+        debugPrint('Note refreshing remote collection payments prior to auto check: $e');
       }
     }
 
@@ -1594,17 +1599,24 @@ class CollectionSheetProvider extends ChangeNotifier {
     final effectiveSanction = sanctionDate ?? loanee?.loanSanctionDate;
 
     if (nonAutoTx.isNotEmpty) {
-      final sorted = List<CollectionPaymentModel>.from(nonAutoTx)
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      final baseDate = sorted.first.createdAt;
-      cleanBaseDate = DateTime(baseDate.year, baseDate.month, baseDate.day);
+      // Find the latest payment date across all transactions in transaction history
+      DateTime latestTxDate = nonAutoTx.first.effectiveSortDate;
+      for (final p in nonAutoTx) {
+        final d = p.effectiveSortDate;
+        if (d.isAfter(latestTxDate)) {
+          latestTxDate = d;
+        }
+        if (p.createdAt.isAfter(latestTxDate)) {
+          latestTxDate = p.createdAt;
+        }
+      }
+      cleanBaseDate = DateTime(latestTxDate.year, latestTxDate.month, latestTxDate.day);
     } else if (auditEndDate != null) {
       cleanBaseDate = DateTime(auditEndDate.year, auditEndDate.month, auditEndDate.day);
     } else if (latestExistingMissingDate != null) {
       cleanBaseDate = latestExistingMissingDate;
-    } else if (effectiveSanction != null) {
-      cleanBaseDate = DateTime(effectiveSanction.year, effectiveSanction.month, effectiveSanction.day);
     } else {
+      // Strictly do NOT insert from beginning (sanction date) when there is no transaction history or missing record!
       return [];
     }
 
@@ -1739,11 +1751,14 @@ class CollectionSheetProvider extends ChangeNotifier {
     for (final candidate in candidateDates) {
       final paymentsOnDate = cardPayments.where((p) {
         final s = p.status.toLowerCase().trim();
-        return p.createdAt.year == candidate.year &&
-            p.createdAt.month == candidate.month &&
-            p.createdAt.day == candidate.day &&
-            s != 'failed' &&
-            s != 'cancelled';
+        final pDate = p.effectiveSortDate;
+        final matches = (pDate.year == candidate.year &&
+                pDate.month == candidate.month &&
+                pDate.day == candidate.day) ||
+            (p.createdAt.year == candidate.year &&
+                p.createdAt.month == candidate.month &&
+                p.createdAt.day == candidate.day);
+        return matches && s != 'failed' && s != 'cancelled';
       }).toList();
 
       final double dayPayment = paymentsOnDate.fold(0.0, (sum, p) => sum + p.paymentAmount);
@@ -1810,11 +1825,14 @@ class CollectionSheetProvider extends ChangeNotifier {
     for (final pDate in skippedPausedDates) {
       final paymentsOnDate = cardPayments.where((p) {
         final s = p.status.toLowerCase().trim();
-        return p.createdAt.year == pDate.year &&
-            p.createdAt.month == pDate.month &&
-            p.createdAt.day == pDate.day &&
-            s != 'failed' &&
-            s != 'cancelled';
+        final pSortDate = p.effectiveSortDate;
+        final matches = (pSortDate.year == pDate.year &&
+                pSortDate.month == pDate.month &&
+                pSortDate.day == pDate.day) ||
+            (p.createdAt.year == pDate.year &&
+                p.createdAt.month == pDate.month &&
+                p.createdAt.day == pDate.day);
+        return matches && s != 'failed' && s != 'cancelled';
       }).toList();
 
       final double dayPayment = paymentsOnDate.fold(0.0, (sum, p) => sum + p.paymentAmount);

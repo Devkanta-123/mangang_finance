@@ -68,33 +68,6 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     });
   }
 
-  bool _hasPastMissingRecords(
-    CollectionSheetProvider provider,
-    RoCollectionEntry entry,
-  ) {
-    if (provider.isMissingAutomationAuthorized(
-      entry.id,
-      entry.accountNumber,
-      entry.customerId,
-    )) {
-      return true;
-    }
-    final records = provider.getMissingRecordsForCollection(entry.id);
-    return records.any((m) {
-      final src = m.source.toLowerCase().trim();
-      if (src == 'excel_import' ||
-          src == 'excel' ||
-          src == 'past' ||
-          src == 'excel_upload') {
-        return true;
-      }
-      final rem = (m.remarks ?? '').toLowerCase();
-      return rem.contains('excel') ||
-          rem.contains('imported') ||
-          rem.contains('historical') ||
-          rem.contains('past');
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1159,10 +1132,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                     final bool isRunningAuto =
                         _runningAutoEntryIds.contains(entry.id);
 
-                    final bool hasPastData =
-                        _hasPastMissingRecords(provider, entry);
-
-                    final bool canStartAuto = hasPastData && !isRunningAuto;
+                    final bool canStartAuto = !isRunningAuto;
 
                     final int missingCount =
                         provider
@@ -1455,11 +1425,9 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                                 SizedBox(
                                   height: 28,
                                   child: Tooltip(
-                                    message: !hasPastData
-                                        ? 'System Auto disabled: Past missing records (Excel) must exist first'
-                                        : (isRunningAuto
-                                            ? 'Syncing...'
-                                            : 'Start Auto'),
+                                    message: isRunningAuto
+                                        ? 'Syncing...'
+                                        : 'Start Auto (Calculates from latest payment date)',
                                     child: ElevatedButton.icon(
                                       onPressed: canStartAuto
                                           ? () => _handleStartSystemAuto(entry)
@@ -1653,9 +1621,8 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       entry.id,
     );
 
-    final bool hasPastData = _hasPastMissingRecords(provider, entry);
     final bool isRunningAuto = _runningAutoEntryIds.contains(entry.id);
-    final bool canStartAuto = hasPastData && !isRunningAuto;
+    final bool canStartAuto = !isRunningAuto;
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final bool isAdmin = authProvider.activeRole == UserType.admin ||
         authProvider.currentUser?.userType == UserType.admin;
@@ -1788,9 +1755,9 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                   SizedBox(
                     height: 32,
                     child: Tooltip(
-                      message: !hasPastData
-                          ? 'System Auto disabled: Past missing records (Excel) must exist first'
-                          : (isRunningAuto ? 'Syncing...' : 'Start Auto'),
+                      message: isRunningAuto
+                          ? 'Syncing...'
+                          : 'Start Auto (Calculates from latest payment date)',
                       child: ElevatedButton.icon(
                         onPressed: canStartAuto
                             ? () => _handleStartSystemAuto(entry)
@@ -2055,23 +2022,6 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       return;
     }
 
-    final isAuthorized = collectionProvider.isMissingAutomationAuthorized(
-      entry.id,
-      entry.accountNumber,
-      entry.customerId,
-    );
-
-    if (!isAuthorized) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Please upload historical missing records Excel from the top header first for ${entry.loaneeName}.',
-          ),
-          backgroundColor: Colors.orange.shade800,
-        ),
-      );
-      return;
-    }
 
     setState(() {
       _runningAutoEntryIds.add(entry.id);
@@ -2373,23 +2323,6 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
       return;
     }
 
-    final isAuthorized = collectionProvider.isMissingAutomationAuthorized(
-      entry.id,
-      entry.accountNumber,
-      entry.customerId,
-    );
-
-    if (!isAuthorized) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Please upload historical missing records Excel from the top header first for ${entry.loaneeName}.',
-          ),
-          backgroundColor: Colors.orange.shade800,
-        ),
-      );
-      return;
-    }
 
     setState(() {
       _isRunningAuto = true;
@@ -2862,14 +2795,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         ? displayRecords.sublist(startIndex, endIndex)
         : <MissingPaymentRecord>[];
 
-    final bool hasPastData = excelCount > 0 ||
-        cp.isMissingAutomationAuthorized(
-          entry.id,
-          entry.accountNumber,
-          entry.customerId,
-        ) ||
-        missingRecords.any(_isExcelUpload);
-    final bool canStartAutoInDialog = hasPastData && !_isRunningAuto;
+    final bool canStartAutoInDialog = !_isRunningAuto;
 
     // Determine overall status label & colors
     final String overallStatusLabel;
@@ -2891,11 +2817,11 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
         overallStatusText = Colors.green.shade800;
         overallStatusIcon = Icons.check_circle_outline_rounded;
       } else {
-        overallStatusLabel = "Pending Excel Upload";
-        overallStatusBg = Colors.grey.shade100;
-        overallStatusBorder = Colors.grey.shade300;
-        overallStatusText = Colors.grey.shade700;
-        overallStatusIcon = Icons.pending_outlined;
+        overallStatusLabel = "Ready for System Auto";
+        overallStatusBg = Colors.blue.shade50;
+        overallStatusBorder = Colors.blue.shade300;
+        overallStatusText = Colors.blue.shade800;
+        overallStatusIcon = Icons.bolt_rounded;
       }
     } else if (excelCount > 0 && systemCount > 0) {
       overallStatusLabel =
@@ -3075,9 +3001,9 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                         ),
                       ),
                       Tooltip(
-                        message: !hasPastData
-                            ? 'System Auto disabled: Past missing records (Excel) must exist first'
-                            : (_isRunningAuto ? 'Running...' : 'Start System Auto'),
+                        message: _isRunningAuto
+                            ? 'Running...'
+                            : 'Start System Auto (Calculates from latest payment date)',
                         child: ElevatedButton.icon(
                           onPressed: canStartAutoInDialog ? _runSystemAutoInDialog : null,
                           style: ElevatedButton.styleFrom(
@@ -3208,7 +3134,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                               ? "Excel Upload"
                               : (systemCount > 0
                                   ? "System Auto"
-                                  : (totalCount == 0 ? "Pending" : "Collection"))),
+                                  : (totalCount == 0 ? "Up to Date" : "Collection"))),
                       valueColor: excelCount > 0
                           ? Colors.teal.shade800
                           : (systemCount > 0
