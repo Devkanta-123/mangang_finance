@@ -1,6 +1,8 @@
 // lib/services/supabase_service.dart
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/loanee_model.dart';
 import '../models/ro_model.dart';
@@ -2257,6 +2259,97 @@ class SupabaseService {
       return true;
     } catch (e) {
       debugPrint('⚠️ Error deleting system setting $key: $e');
+      return false;
+    }
+  }
+
+  // ==========================================
+  // SINGLE DEVICE SESSION RESTRICTION
+  // ==========================================
+
+  /// Generate or retrieve persistent local device ID for single-device login enforcement
+  Future<String> getDeviceId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      String? devId = prefs.getString('app_device_id');
+      if (devId == null || devId.trim().isEmpty) {
+        final rand = Random.secure();
+        final randPart = List.generate(4, (_) => rand.nextInt(0xFFFFFF).toRadixString(16).padLeft(6, '0')).join();
+        devId = 'dev_${DateTime.now().millisecondsSinceEpoch}_$randPart';
+        await prefs.setString('app_device_id', devId);
+      }
+      return devId;
+    } catch (_) {
+      return 'dev_${DateTime.now().millisecondsSinceEpoch}';
+    }
+  }
+
+  /// Check if this user account is already active on another device.
+  /// Returns {'isBlocked': bool, 'activeDeviceId': String?, 'message': String}
+  Future<Map<String, dynamic>> checkDeviceSession({
+    required String mobileNo,
+    required UserType userType,
+    required String currentDeviceId,
+  }) async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) {
+        return {'isBlocked': false, 'activeDeviceId': null};
+      }
+      final cleanMobile = mobileNo.trim();
+      final key = 'active_device_${cleanMobile}_${userType.name}';
+
+      final row = await supaClient
+          .from('system_settings')
+          .select('setting_value')
+          .eq('setting_key', key)
+          .maybeSingle();
+
+      if (row != null) {
+        final activeDevId = row['setting_value']?.toString().trim() ?? '';
+        if (activeDevId.isNotEmpty && activeDevId != currentDeviceId) {
+          return {
+            'isBlocked': true,
+            'activeDeviceId': activeDevId,
+            'message':
+                'This account is currently logged in on another device. Simultaneous logins across multiple devices are blocked. Please sign out from that device first.',
+          };
+        }
+      }
+      return {'isBlocked': false, 'activeDeviceId': null};
+    } catch (e) {
+      debugPrint('⚠️ Error checking device session: $e');
+      return {'isBlocked': false, 'activeDeviceId': null};
+    }
+  }
+
+  /// Register current device as active session in Supabase system_settings
+  Future<bool> registerDeviceSession({
+    required String mobileNo,
+    required UserType userType,
+    required String currentDeviceId,
+  }) async {
+    try {
+      final cleanMobile = mobileNo.trim();
+      final key = 'active_device_${cleanMobile}_${userType.name}';
+      return await setSystemSetting(key, currentDeviceId);
+    } catch (e) {
+      debugPrint('⚠️ Error registering device session: $e');
+      return false;
+    }
+  }
+
+  /// Clear active device session in Supabase system_settings upon logout
+  Future<bool> clearDeviceSession({
+    required String mobileNo,
+    required UserType userType,
+  }) async {
+    try {
+      final cleanMobile = mobileNo.trim();
+      final key = 'active_device_${cleanMobile}_${userType.name}';
+      return await deleteSystemSetting(key);
+    } catch (e) {
+      debugPrint('⚠️ Error clearing device session: $e');
       return false;
     }
   }

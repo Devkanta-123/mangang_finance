@@ -84,10 +84,14 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
         authProvider.activeRole == UserType.ro ||
         authProvider.currentUser?.userType == UserType.ro;
 
+    final bool isLoanee =
+        authProvider.activeRole == UserType.loanee ||
+        authProvider.currentUser?.userType == UserType.loanee;
+
     final List<String> availableRoutes = collectionProvider.routeNames;
 
     // ------------------------------------------------------------
-    // Automatically select RO route.
+    // Automatically select RO route or Loanee route.
     // ------------------------------------------------------------
     if (isRo && _selectedRoute == null) {
       final userRoute = authProvider.currentUser?.accountName;
@@ -102,21 +106,63 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     // ------------------------------------------------------------
     // FILTER ENTRIES
     // ------------------------------------------------------------
-    List<RoCollectionEntry> filteredEntries =
-        List<RoCollectionEntry>.from(
-      collectionProvider.collectionEntries,
-    );
+    List<RoCollectionEntry> filteredEntries;
 
-    // Route filter.
-    if (_selectedRoute != null &&
-        _selectedRoute!.isNotEmpty &&
-        _selectedRoute != 'All Routes') {
-      final selectedRouteLower =
-          _selectedRoute!.trim().toLowerCase();
+    if (isLoanee) {
+      // For Loanee: strictly scope data to their own matching loan cards
+      final loaneeUser = authProvider.currentUser;
+      final loaneeAccount = loaneeProvider.getLoaneeForUser(
+        customerId: loaneeUser?.customerId,
+        mobileNo: loaneeUser?.mobileNo,
+        name: loaneeUser?.name,
+      );
 
-      filteredEntries = filteredEntries.where((entry) {
-        return entry.route.trim().toLowerCase() == selectedRouteLower;
-      }).toList();
+      var matched = collectionProvider.getEntriesForLoanee(
+        loaneeUser?.mobileNo ?? '',
+        loaneeUser?.name ?? '',
+        loaneeUser?.customerId ?? (loaneeAccount?.customerId ?? ''),
+      );
+
+      if (matched.isEmpty && loaneeAccount != null) {
+        matched = collectionProvider.collectionEntries.where((e) {
+          final mPhone = loaneeUser?.mobileNo.isNotEmpty == true &&
+              e.mobileNo.trim() == loaneeUser!.mobileNo.trim();
+          final mCust = (loaneeAccount.customerId.isNotEmpty &&
+                  e.customerId.trim().toLowerCase() ==
+                      loaneeAccount.customerId.trim().toLowerCase()) ||
+              (loaneeUser?.customerId?.isNotEmpty == true &&
+                  e.customerId.trim().toLowerCase() ==
+                      loaneeUser!.customerId!.trim().toLowerCase());
+          final mAcc = loaneeAccount.accountNumber.isNotEmpty &&
+              e.accountNumber.trim().toLowerCase() ==
+                  loaneeAccount.accountNumber.trim().toLowerCase();
+          return mPhone || mCust || mAcc;
+        }).toList();
+      }
+
+      filteredEntries = List<RoCollectionEntry>.from(matched);
+
+      if (_selectedRoute == null && matched.isNotEmpty) {
+        _selectedRoute = matched.first.route;
+      } else if (_selectedRoute == null) {
+        _selectedRoute = 'My Account';
+      }
+    } else {
+      filteredEntries = List<RoCollectionEntry>.from(
+        collectionProvider.collectionEntries,
+      );
+
+      // Route filter for staff.
+      if (_selectedRoute != null &&
+          _selectedRoute!.isNotEmpty &&
+          _selectedRoute != 'All Routes') {
+        final selectedRouteLower =
+            _selectedRoute!.trim().toLowerCase();
+
+        filteredEntries = filteredEntries.where((entry) {
+          return entry.route.trim().toLowerCase() == selectedRouteLower;
+        }).toList();
+      }
     }
 
     // Collection type filter.
@@ -236,6 +282,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
               _buildTopHeader(
                 collectionProvider,
                 isRo,
+                isLoanee,
               ),
 
               Padding(
@@ -249,6 +296,8 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                     _buildRouteSelectionCardsSection(
                       collectionProvider,
                       availableRoutes,
+                      isLoanee,
+                      filteredEntries,
                     ),
 
                     const SizedBox(height: 14),
@@ -290,6 +339,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
   Widget _buildTopHeader(
     CollectionSheetProvider provider,
     bool isRo,
+    bool isLoanee,
   ) {
     return Container(
       width: double.infinity,
@@ -333,13 +383,13 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
 
                 const SizedBox(width: 10),
 
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
+                      const Text(
                         'Missing Manager',
                         style: TextStyle(
                           fontSize: 16,
@@ -349,8 +399,10 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        'Route-mapped missing payment ledger & audit logs (MISSING ≠ PAYMENT)',
-                        style: TextStyle(
+                        isLoanee
+                            ? 'Missing payment logs & audit trail for transparency'
+                            : 'Route-mapped missing payment ledger & audit logs (MISSING ≠ PAYMENT)',
+                        style: const TextStyle(
                           fontSize: 10.5,
                           color: Colors.white70,
                         ),
@@ -380,23 +432,24 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                   onPressed: _resetFilters,
                 ),
 
-              IconButton(
-                icon: const Icon(
-                  Icons.upload_file_rounded,
-                  size: 18,
-                  color: Colors.white,
+              if (!isLoanee)
+                IconButton(
+                  icon: const Icon(
+                    Icons.upload_file_rounded,
+                    size: 18,
+                    color: Colors.white,
+                  ),
+                  tooltip: 'Upload Missing Old Records (Excel)',
+                  onPressed: () async {
+                    final imported =
+                        await MissingRecordsExcelUploadDialog.pickAndShow(context);
+                    if (imported == true && mounted) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) setState(() {});
+                      });
+                    }
+                  },
                 ),
-                tooltip: 'Upload Missing Old Records (Excel)',
-                onPressed: () async {
-                  final imported =
-                      await MissingRecordsExcelUploadDialog.pickAndShow(context);
-                  if (imported == true && mounted) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) setState(() {});
-                    });
-                  }
-                },
-              ),
 
               IconButton(
                 icon: provider.isSyncing
@@ -432,21 +485,38 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
   Widget _buildRouteSelectionCardsSection(
     CollectionSheetProvider provider,
     List<String> availableRoutes,
+    bool isLoanee,
+    List<RoCollectionEntry> loaneeEntries,
   ) {
+    final routesToShow = isLoanee
+        ? (loaneeEntries
+                .map((e) => e.route.trim())
+                .where((r) => r.isNotEmpty)
+                .toSet()
+                .toList()
+                .isNotEmpty
+            ? loaneeEntries
+                .map((e) => e.route.trim())
+                .where((r) => r.isNotEmpty)
+                .toSet()
+                .toList()
+            : [if (_selectedRoute != null) _selectedRoute! else 'My Account'])
+        : availableRoutes;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Row(
+        Row(
           children: [
-            Icon(
+            const Icon(
               Icons.alt_route_rounded,
               size: 15,
               color: Color(0xFF8B1A1A),
             ),
-            SizedBox(width: 5),
+            const SizedBox(width: 5),
             Text(
-              'ROUTE ZONES',
-              style: TextStyle(
+              isLoanee ? 'YOUR ROUTE / ZONE' : 'ROUTE ZONES',
+              style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
                 letterSpacing: 0.5,
@@ -461,11 +531,19 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
         Wrap(
           spacing: 6,
           runSpacing: 6,
-          children: availableRoutes.map((routeName) {
+          children: routesToShow.map((routeName) {
               final isSelected =
                   _selectedRoute == routeName;
 
-              final entryCount = provider.collectionEntries
+              final entryCount = isLoanee
+                  ? loaneeEntries
+                      .where(
+                        (entry) =>
+                            entry.route.trim().toLowerCase() ==
+                            routeName.trim().toLowerCase(),
+                      )
+                      .length
+                  : provider.collectionEntries
                   .where(
                     (entry) =>
                         entry.route.trim().toLowerCase() ==
@@ -1060,9 +1138,11 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     LoaneeProvider loaneeProvider,
   ) {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final bool isAdmin = authProvider.activeRole == UserType.admin ||
-        authProvider.currentUser?.userType == UserType.admin;
-    final double tableWidth = isAdmin ? 1235 : 1135;
+    final bool isLoanee = authProvider.activeRole == UserType.loanee ||
+        authProvider.currentUser?.userType == UserType.loanee;
+    final bool isAdmin = (authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin) && !isLoanee;
+    final double tableWidth = isLoanee ? 1015 : (isAdmin ? 1235 : 1135);
 
     return Container(
       width: double.infinity,
@@ -1099,7 +1179,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                 6: const FixedColumnWidth(100),
                 7: const FixedColumnWidth(105),
                 8: const FixedColumnWidth(105),
-                9: FixedColumnWidth(isAdmin ? 315 : 215),
+                9: FixedColumnWidth(isLoanee ? 95 : (isAdmin ? 315 : 215)),
               },
 
               children: [
@@ -1421,106 +1501,108 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 6),
-                                SizedBox(
-                                  height: 28,
-                                  child: Tooltip(
-                                    message: isRunningAuto
-                                        ? 'Syncing...'
-                                        : 'Start Auto (Calculates from latest payment date)',
-                                    child: ElevatedButton.icon(
-                                      onPressed: canStartAuto
-                                          ? () => _handleStartSystemAuto(entry)
-                                          : null,
-                                      icon: isRunningAuto
-                                          ? const SizedBox(
-                                              width: 12,
-                                              height: 12,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: Colors.white,
-                                              ),
-                                            )
-                                          : Icon(
-                                              Icons.bolt_rounded,
-                                              size: 13,
-                                              color: canStartAuto
-                                                  ? Colors.white
-                                                  : Colors.grey.shade600,
-                                            ),
-                                      label: Text(
-                                        isRunningAuto
-                                            ? 'Syncing...'
-                                            : 'Start Auto',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: canStartAuto
-                                              ? Colors.white
-                                              : Colors.grey.shade600,
-                                        ),
-                                      ),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: canStartAuto
-                                            ? const Color(0xFF1E7E34)
-                                            : Colors.grey.shade300,
-                                        foregroundColor: Colors.white,
-                                        disabledBackgroundColor:
-                                            Colors.grey.shade300,
-                                        disabledForegroundColor:
-                                            Colors.grey.shade600,
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 2,
-                                        ),
-                                        minimumSize: const Size(0, 28),
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(6),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                if (isAdmin && missingCount > 0) ...[
+                                if (!isLoanee) ...[
                                   const SizedBox(width: 6),
                                   SizedBox(
                                     height: 28,
                                     child: Tooltip(
-                                      message: 'Delete All Missing Records (Admin Only)',
-                                      child: OutlinedButton.icon(
-                                        onPressed: () => _confirmDeleteAllFromMain(entry, missingCount),
-                                        icon: Icon(
-                                          Icons.delete_sweep_rounded,
-                                          size: 13,
-                                          color: Colors.red.shade700,
-                                        ),
+                                      message: isRunningAuto
+                                          ? 'Syncing...'
+                                          : 'Start Auto (Calculates from latest payment date)',
+                                      child: ElevatedButton.icon(
+                                        onPressed: canStartAuto
+                                            ? () => _handleStartSystemAuto(entry)
+                                            : null,
+                                        icon: isRunningAuto
+                                            ? const SizedBox(
+                                                width: 12,
+                                                height: 12,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: Colors.white,
+                                                ),
+                                              )
+                                            : Icon(
+                                                Icons.bolt_rounded,
+                                                size: 13,
+                                                color: canStartAuto
+                                                    ? Colors.white
+                                                    : Colors.grey.shade600,
+                                              ),
                                         label: Text(
-                                          'Delete All',
+                                          isRunningAuto
+                                              ? 'Syncing...'
+                                              : 'Start Auto',
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
-                                            color: Colors.red.shade700,
+                                            color: canStartAuto
+                                                ? Colors.white
+                                                : Colors.grey.shade600,
                                           ),
                                         ),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.red.shade700,
-                                          side: BorderSide(color: Colors.red.shade300),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: canStartAuto
+                                              ? const Color(0xFF1E7E34)
+                                              : Colors.grey.shade300,
+                                          foregroundColor: Colors.white,
+                                          disabledBackgroundColor:
+                                              Colors.grey.shade300,
+                                          disabledForegroundColor:
+                                              Colors.grey.shade600,
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 8,
                                             vertical: 2,
                                           ),
                                           minimumSize: const Size(0, 28),
-                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          tapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
                                           shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(6),
+                                            borderRadius:
+                                                BorderRadius.circular(6),
                                           ),
                                         ),
                                       ),
                                     ),
                                   ),
+                                  if (isAdmin && missingCount > 0) ...[
+                                    const SizedBox(width: 6),
+                                    SizedBox(
+                                      height: 28,
+                                      child: Tooltip(
+                                        message: 'Delete All Missing Records (Admin Only)',
+                                        child: OutlinedButton.icon(
+                                          onPressed: () => _confirmDeleteAllFromMain(entry, missingCount),
+                                          icon: Icon(
+                                            Icons.delete_sweep_rounded,
+                                            size: 13,
+                                            color: Colors.red.shade700,
+                                          ),
+                                          label: Text(
+                                            'Delete All',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.red.shade700,
+                                            ),
+                                          ),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.red.shade700,
+                                            side: BorderSide(color: Colors.red.shade300),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 2,
+                                            ),
+                                            minimumSize: const Size(0, 28),
+                                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ],
                             ),
@@ -1624,8 +1706,10 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     final bool isRunningAuto = _runningAutoEntryIds.contains(entry.id);
     final bool canStartAuto = !isRunningAuto;
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final bool isAdmin = authProvider.activeRole == UserType.admin ||
-        authProvider.currentUser?.userType == UserType.admin;
+    final bool isLoanee = authProvider.activeRole == UserType.loanee ||
+        authProvider.currentUser?.userType == UserType.loanee;
+    final bool isAdmin = (authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin) && !isLoanee;
 
     return Card(
       elevation: 1,
@@ -1752,62 +1836,63 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                 alignment: WrapAlignment.end,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  SizedBox(
-                    height: 32,
-                    child: Tooltip(
-                      message: isRunningAuto
-                          ? 'Syncing...'
-                          : 'Start Auto (Calculates from latest payment date)',
-                      child: ElevatedButton.icon(
-                        onPressed: canStartAuto
-                            ? () => _handleStartSystemAuto(entry)
-                            : null,
-                        icon: isRunningAuto
-                            ? const SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
+                  if (!isLoanee)
+                    SizedBox(
+                      height: 32,
+                      child: Tooltip(
+                        message: isRunningAuto
+                            ? 'Syncing...'
+                            : 'Start Auto (Calculates from latest payment date)',
+                        child: ElevatedButton.icon(
+                          onPressed: canStartAuto
+                              ? () => _handleStartSystemAuto(entry)
+                              : null,
+                          icon: isRunningAuto
+                              ? const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.bolt_rounded,
+                                  size: 14,
+                                  color: canStartAuto
+                                      ? Colors.white
+                                      : Colors.grey.shade600,
                                 ),
-                              )
-                            : Icon(
-                                Icons.bolt_rounded,
-                                size: 14,
-                                color: canStartAuto
-                                    ? Colors.white
-                                    : Colors.grey.shade600,
-                              ),
-                        label: Text(
-                          isRunningAuto ? 'Syncing...' : 'Start Auto',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: canStartAuto
-                                ? Colors.white
-                                : Colors.grey.shade600,
+                          label: Text(
+                            isRunningAuto ? 'Syncing...' : 'Start Auto',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: canStartAuto
+                                  ? Colors.white
+                                  : Colors.grey.shade600,
+                            ),
                           ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: canStartAuto
-                              ? const Color(0xFF1E7E34)
-                              : Colors.grey.shade300,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: Colors.grey.shade300,
-                          disabledForegroundColor: Colors.grey.shade600,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          minimumSize: const Size(0, 32),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: canStartAuto
+                                ? const Color(0xFF1E7E34)
+                                : Colors.grey.shade300,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.grey.shade300,
+                            disabledForegroundColor: Colors.grey.shade600,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            minimumSize: const Size(0, 32),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
                   SizedBox(
                     height: 32,
                     child: ElevatedButton.icon(
@@ -2730,11 +2815,13 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    final bool isAdmin = authProvider.activeRole == UserType.admin ||
-        authProvider.currentUser?.userType == UserType.admin;
-    final bool isManager = authProvider.activeRole == UserType.manager ||
-        authProvider.currentUser?.userType == UserType.manager ||
-        isAdmin;
+    final bool isLoanee = authProvider.activeRole == UserType.loanee ||
+        authProvider.currentUser?.userType == UserType.loanee;
+    final bool isAdmin = (authProvider.activeRole == UserType.admin ||
+        authProvider.currentUser?.userType == UserType.admin) && !isLoanee;
+    final bool isManager = ((authProvider.activeRole == UserType.manager ||
+        authProvider.currentUser?.userType == UserType.manager) ||
+        isAdmin) && !isLoanee;
 
     final entry = widget.entry;
     final cp = widget.collectionProvider;
@@ -3000,7 +3087,8 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
                           ),
                         ),
                       ),
-                      Tooltip(
+                      if (!isLoanee)
+                        Tooltip(
                         message: _isRunningAuto
                             ? 'Running...'
                             : 'Start System Auto (Calculates from latest payment date)',

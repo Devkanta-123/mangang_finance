@@ -431,9 +431,6 @@ class _MainPageState extends State<MainPage> {
     if (effectiveIndex == 14 && authProvider.activeRole != UserType.admin) {
       effectiveIndex = 0;
     }
-    if (effectiveIndex == 15 && authProvider.activeRole == UserType.loanee) {
-      effectiveIndex = 0;
-    }
 
     return Scaffold(
       key: _scaffoldKey,

@@ -358,6 +358,12 @@ class AppDrawer extends StatelessWidget {
           subtitle: 'Loan card & repayment overview',
         ),
         DrawerMenuItemData(
+          index: 15,
+          icon: Icons.assignment_late_rounded,
+          title: 'Missing Manager',
+          subtitle: 'Missing-payment logs & audit trail',
+        ),
+        DrawerMenuItemData(
           index: 8,
           icon: Icons.badge_outlined,
           title: 'Loanee Profile',

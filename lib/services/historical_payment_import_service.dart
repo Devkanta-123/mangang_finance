@@ -1715,9 +1715,12 @@ class HistoricalPaymentImportService {
         return null;
       }
 
-      if (loaneeProvider.loanees.isEmpty) {
+      if (loaneeProvider.loanees.isEmpty || collectionProvider.collectionEntries.isEmpty) {
         try {
-          await loaneeProvider.fetchFromSupabase();
+          await Future.wait([
+            if (loaneeProvider.loanees.isEmpty) loaneeProvider.fetchFromSupabase(),
+            if (collectionProvider.collectionEntries.isEmpty) collectionProvider.fetchFromSupabase(),
+          ]);
         } catch (_) {}
       }
 

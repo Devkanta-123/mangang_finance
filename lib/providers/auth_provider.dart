@@ -381,6 +381,7 @@ class AuthProvider extends ChangeNotifier {
           await prefs.remove('user_pin');
           await prefs.remove('user_data');
           await prefs.remove('user_role');
+          await prefs.remove('is_logged_in');
 
           return const LoginResult(
             success: false,
@@ -389,6 +390,32 @@ class AuthProvider extends ChangeNotifier {
                 'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
           );
         }
+
+        // Enforce single device login: block from second device
+        final currentDeviceId = await SupabaseService.instance.getDeviceId();
+        final sessionCheck = await SupabaseService.instance.checkDeviceSession(
+          mobileNo: supaUser.mobileNo,
+          userType: supaUser.userType,
+          currentDeviceId: currentDeviceId,
+        );
+
+        if (sessionCheck['isBlocked'] == true) {
+          debugPrint(
+              '🚫 Login rejected: Account for ${supaUser.name} is already logged in on another device');
+          return LoginResult(
+            success: false,
+            isInactive: false,
+            message: sessionCheck['message'] ??
+                'This account is currently logged in on another device. Simultaneous logins across multiple devices are blocked. Please log out from that device first.',
+          );
+        }
+
+        // Register this device as the active session in DB
+        await SupabaseService.instance.registerDeviceSession(
+          mobileNo: supaUser.mobileNo,
+          userType: supaUser.userType,
+          currentDeviceId: currentDeviceId,
+        );
 
         _currentUser = supaUser.toUser();
         _activeRole = supaUser.userType;
@@ -399,6 +426,7 @@ class AuthProvider extends ChangeNotifier {
         await prefs.setString('user_pin', cleanPin);
         await prefs.setString('user_role', supaUser.userType.name);
         await prefs.setString('user_data', jsonEncode(_currentUser!.toJson()));
+        await prefs.setBool('is_logged_in', true);
 
         notifyListeners();
         return LoginResult(
@@ -508,6 +536,7 @@ class AuthProvider extends ChangeNotifier {
           await prefs.remove('user_pin');
           await prefs.remove('user_data');
           await prefs.remove('user_role');
+          await prefs.remove('is_logged_in');
 
           return const LoginResult(
             success: false,
@@ -516,6 +545,32 @@ class AuthProvider extends ChangeNotifier {
                 'Your account is INACTIVE. Login access has been deactivated by the Administrator. Please contact admin to reactivate.',
           );
         }
+
+        // Enforce single device login: block from second device
+        final currentDeviceId = await SupabaseService.instance.getDeviceId();
+        final sessionCheck = await SupabaseService.instance.checkDeviceSession(
+          mobileNo: supaUser.mobileNo,
+          userType: supaUser.userType,
+          currentDeviceId: currentDeviceId,
+        );
+
+        if (sessionCheck['isBlocked'] == true) {
+          debugPrint(
+              '🚫 Login rejected: Account for ${supaUser.name} is already logged in on another device');
+          return LoginResult(
+            success: false,
+            isInactive: false,
+            message: sessionCheck['message'] ??
+                'This account is currently logged in on another device. Simultaneous logins across multiple devices are blocked. Please log out from that device first.',
+          );
+        }
+
+        // Register this device as active session in DB
+        await SupabaseService.instance.registerDeviceSession(
+          mobileNo: supaUser.mobileNo,
+          userType: supaUser.userType,
+          currentDeviceId: currentDeviceId,
+        );
 
         _currentUser = supaUser.toUser();
         _activeRole = supaUser.userType;
@@ -526,6 +581,7 @@ class AuthProvider extends ChangeNotifier {
         await prefs.setString('user_pin', cleanPin);
         await prefs.setString('user_role', supaUser.userType.name);
         await prefs.setString('user_data', jsonEncode(_currentUser!.toJson()));
+        await prefs.setBool('is_logged_in', true);
 
         notifyListeners();
         return LoginResult(
@@ -756,7 +812,90 @@ class AuthProvider extends ChangeNotifier {
     return success;
   }
 
-  Future<void> logout() async {
+  /// Restore authenticated session when app opens / resumes after being cleared
+  Future<bool> tryAutoLogin() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+      final savedData = prefs.getString('user_data');
+      final savedPin = prefs.getString('user_pin');
+
+      if (!isLoggedIn || savedData == null || savedData.trim().isEmpty) {
+        return false;
+      }
+
+      final userJson = jsonDecode(savedData);
+      final cachedUser = User.fromJson(userJson);
+      final currentDeviceId = await SupabaseService.instance.getDeviceId();
+
+      // 1. Verify with live database if online
+      if (cachedUser.mobileNo.isNotEmpty) {
+        final supaUser = await SupabaseService.instance.fetchUserAuthByMobileAndRole(
+          mobileNo: cachedUser.mobileNo,
+          userType: cachedUser.userType,
+        );
+
+        if (supaUser != null) {
+          if (!supaUser.isActive) {
+            debugPrint('🚫 Auto-login cancelled: Account is marked inactive');
+            await logout(clearRemoteDevice: false);
+            return false;
+          }
+          _currentUser = supaUser.toUser();
+        } else {
+          _currentUser = cachedUser;
+        }
+
+        // 2. Check if device session in DB matches this device
+        final sessionCheck = await SupabaseService.instance.checkDeviceSession(
+          mobileNo: cachedUser.mobileNo,
+          userType: cachedUser.userType,
+          currentDeviceId: currentDeviceId,
+        );
+
+        if (sessionCheck['isBlocked'] == true) {
+          debugPrint('🚫 Auto-login cancelled: Account active on another device');
+          await logout(clearRemoteDevice: false);
+          return false;
+        }
+
+        // Re-register / ensure active device in DB
+        await SupabaseService.instance.registerDeviceSession(
+          mobileNo: cachedUser.mobileNo,
+          userType: cachedUser.userType,
+          currentDeviceId: currentDeviceId,
+        );
+      } else {
+        _currentUser = cachedUser;
+      }
+
+      _activeRole = _currentUser!.userType;
+      _userPin = savedPin;
+      _isLoggedIn = true;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('⚠️ Error in tryAutoLogin: $e');
+      return false;
+    }
+  }
+
+  Future<void> logout({bool clearRemoteDevice = true}) async {
+    try {
+      if (clearRemoteDevice && _currentUser != null && _currentUser!.mobileNo.isNotEmpty) {
+        await SupabaseService.instance.clearDeviceSession(
+          mobileNo: _currentUser!.mobileNo,
+          userType: _currentUser!.userType,
+        );
+      }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_pin');
+      await prefs.remove('user_data');
+      await prefs.remove('user_role');
+      await prefs.remove('is_logged_in');
+    } catch (e) {
+      debugPrint('⚠️ Error during logout: $e');
+    }
     _isLoggedIn = false;
     _currentUser = null;
     notifyListeners();

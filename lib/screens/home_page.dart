@@ -6,6 +6,7 @@ import '../models/ro_model.dart';
 import '../models/ro_collection_entry_model.dart';
 import '../models/collection_payment_model.dart';
 import '../models/loanee_model.dart';
+import '../models/missing_payment_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/loanee_provider.dart';
 import '../providers/ro_provider.dart';
@@ -1225,6 +1226,16 @@ class HomePage extends StatelessWidget {
         onNavigateToMenu: onNavigateToMenu,
       ),
 
+      const SizedBox(height: 16),
+
+      // Missing Manager Transparency Section (Loanee View-Only)
+      _LoaneeMissingManagerSection(
+        user: user,
+        loaneeAccount: loaneeAccount,
+        loaneeEntries: loaneeEntries,
+        onNavigateToMenu: onNavigateToMenu,
+      ),
+
       const SizedBox(height: 20),
 
       // 3. Payment History Ledger with Date Filtering
@@ -2439,6 +2450,508 @@ class _LoaneeLateFineAcknowledgmentSectionState
           ),
         );
       },
+    );
+  }
+}
+
+/// Dedicated Missing Manager Section for Loanees (View-Only / Transparency)
+class _LoaneeMissingManagerSection extends StatelessWidget {
+  final User? user;
+  final LoaneeAccount? loaneeAccount;
+  final List<RoCollectionEntry> loaneeEntries;
+  final Function(int)? onNavigateToMenu;
+
+  const _LoaneeMissingManagerSection({
+    required this.user,
+    required this.loaneeAccount,
+    required this.loaneeEntries,
+    this.onNavigateToMenu,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final collectionProvider = Provider.of<CollectionSheetProvider>(context);
+
+    // Aggregate all missing records across this loanee's collection entries
+    final List<MissingPaymentRecord> allMissing = [];
+    double totalMissingPay = 0.0;
+    double totalMissingBalance = 0.0;
+    int unclearedCount = 0;
+
+    for (final entry in loaneeEntries) {
+      final records = collectionProvider.getMissingRecordsForCollection(entry.id);
+      allMissing.addAll(records);
+      totalMissingPay += collectionProvider.getTotalMissingPayForCollection(entry.id);
+      totalMissingBalance += collectionProvider.getTotalMissingBalanceForCollection(entry.id);
+      unclearedCount += collectionProvider.getUnclearedMissingCountForCollection(entry.id);
+    }
+
+    // Sort missing records descending (most recent missed date first)
+    allMissing.sort((a, b) => b.missedDate.compareTo(a.missedDate));
+
+    final totalCount = allMissing.length;
+    final hasMissing = totalCount > 0;
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: hasMissing
+              ? const Color(0xFF8B1A1A).withValues(alpha: 0.35)
+              : Colors.teal.shade200,
+          width: hasMissing ? 1.5 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: hasMissing
+                ? const Color(0xFF8B1A1A).withValues(alpha: 0.08)
+                : Colors.grey.withValues(alpha: 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 1. Header Banner
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: hasMissing
+                    ? [const Color(0xFF8B1A1A), const Color(0xFF6B1414)]
+                    : [Colors.teal.shade800, Colors.teal.shade900],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(17)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      hasMissing
+                          ? Icons.rule_folder_rounded
+                          : Icons.verified_user_rounded,
+                      color: hasMissing ? Colors.amber.shade300 : Colors.white,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'MISSING PAYMENT MANAGER',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        hasMissing ? Icons.visibility_rounded : Icons.check_circle_outline_rounded,
+                        size: 12,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        hasMissing ? '$totalCount LOGGED' : 'ALL CLEAR',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 2. Body Content
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: hasMissing
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Subtitle / Transparency note
+                      Row(
+                        children: [
+                          Icon(Icons.info_outline_rounded, size: 14, color: Colors.grey.shade600),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Transparency Record: Historical & auto-detected missed installment logs (View-Only).',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: Colors.grey.shade700,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Metrics Row
+                      Row(
+                        children: [
+                          // Total Missed
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Missed Count',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      color: Colors.grey.shade600,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    '$totalCount Record${totalCount > 1 ? 's' : ''}',
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1E1E1E),
+                                    ),
+                                  ),
+                                  if (unclearedCount > 0) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '$unclearedCount Pending',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.red.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+
+                          // Missed Pay Due
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.amber.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Missed Pay Due',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      color: Colors.amber.shade900,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    '₹ ${totalMissingPay.toStringAsFixed(2)}',
+                                    style: TextStyle(
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.amber.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+
+                          // Missing Balance / Fine
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.red.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Missing Balance',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      color: Colors.red.shade700,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    '₹ ${totalMissingBalance.toStringAsFixed(2)}',
+                                    style: TextStyle(
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.red.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      // Preview list of latest missing records (up to 3)
+                      const Text(
+                        'Recent Missing Records (View Only)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E1E1E),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      ...allMissing.take(3).map((record) => _buildMissingRecordTile(record)),
+
+                      const SizedBox(height: 12),
+
+                      // Navigation Button to Full Missing Manager View
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            if (onNavigateToMenu != null) {
+                              onNavigateToMenu!(15);
+                            }
+                          },
+                          icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                          label: Text(
+                            'Open Full Missing Manager View (${allMissing.length} Records)',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF8B1A1A),
+                            side: const BorderSide(color: Color(0xFF8B1A1A), width: 1.2),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.teal.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle_rounded, color: Colors.teal.shade800, size: 22),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'No Missing Records Found',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.teal.shade900,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Your account has zero missing payment deductions. Everything is clear and transparent.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.teal.shade800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (onNavigateToMenu != null)
+                          TextButton(
+                            onPressed: () => onNavigateToMenu!(15),
+                            child: const Text('View All', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMissingRecordTile(MissingPaymentRecord record) {
+    final bool isResolved = record.isResolved || record.paidDate != null;
+    final dateStr =
+        '${record.missedDate.day.toString().padLeft(2, '0')}-'
+        '${record.missedDate.month.toString().padLeft(2, '0')}-'
+        '${record.missedDate.year}';
+
+    final isExcel = record.source.toLowerCase().trim() == 'excel_import' ||
+        record.source.toLowerCase().trim() == 'excel' ||
+        (record.remarks ?? '').toLowerCase().contains('excel');
+
+    final isAuto = record.source.toLowerCase().trim() == 'system' ||
+        record.source.toLowerCase().trim() == 'system_auto' ||
+        record.source.toLowerCase().trim() == 'auto';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: isResolved ? Colors.teal.shade50 : Colors.red.shade50,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isResolved ? Icons.check_circle_outline_rounded : Icons.history_toggle_off_rounded,
+              size: 16,
+              color: isResolved ? Colors.teal.shade700 : Colors.red.shade700,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      dateStr,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E1E1E),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Wk ${record.missingWeek}',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    // Source tag
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: isExcel
+                            ? Colors.teal.shade50
+                            : (isAuto ? Colors.blue.shade50 : Colors.purple.shade50),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: isExcel
+                              ? Colors.teal.shade200
+                              : (isAuto ? Colors.blue.shade200 : Colors.purple.shade200),
+                        ),
+                      ),
+                      child: Text(
+                        isExcel ? 'Excel' : (isAuto ? 'Auto' : 'Collection'),
+                        style: TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.bold,
+                          color: isExcel
+                              ? Colors.teal.shade800
+                              : (isAuto ? Colors.blue.shade800 : Colors.purple.shade800),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Text(
+                      'Pay: ₹${record.missingPay > 0 ? record.missingPay.toStringAsFixed(2) : record.dayPayment.toStringAsFixed(2)}',
+                      style: TextStyle(fontSize: 10.5, color: Colors.grey.shade700),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Bal: ₹${record.missingBalance.toStringAsFixed(2)}',
+                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.red.shade800),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: isResolved ? Colors.teal.shade50 : Colors.red.shade50,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: isResolved ? Colors.teal.shade200 : Colors.red.shade200,
+              ),
+            ),
+            child: Text(
+              isResolved ? 'Resolved' : 'Missing',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: isResolved ? Colors.teal.shade800 : Colors.red.shade800,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
