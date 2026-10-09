@@ -165,8 +165,8 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       }
     }
 
-    // Collection type filter.
-    if (_selectedType != 'All') {
+    // Collection type filter (Staff only; loanees see all records directly).
+    if (!isLoanee && _selectedType != 'All') {
       final selectedType =
           _selectedType.toLowerCase().trim();
 
@@ -293,23 +293,27 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildRouteSelectionCardsSection(
-                      collectionProvider,
-                      availableRoutes,
-                      isLoanee,
-                      filteredEntries,
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    if (_selectedRoute != null) ...[
-                      _buildSelectedRouteHeader(),
-
-                      const SizedBox(height: 10),
-
-                      _buildCollectionTypeFilterCards(),
+                    if (!isLoanee) ...[
+                      _buildRouteSelectionCardsSection(
+                        collectionProvider,
+                        availableRoutes,
+                        isLoanee,
+                        filteredEntries,
+                      ),
 
                       const SizedBox(height: 14),
+                    ],
+
+                    if (_selectedRoute != null || isLoanee) ...[
+                      if (!isLoanee) ...[
+                        _buildSelectedRouteHeader(),
+
+                        const SizedBox(height: 10),
+
+                        _buildCollectionTypeFilterCards(),
+
+                        const SizedBox(height: 14),
+                      ],
 
                       _buildDataTableSection(
                         filteredEntries,
@@ -319,6 +323,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
                         totalMissingLoanees,
                         totalMissingAmount,
                         totalMissingBalance,
+                        isLoanee,
                       ),
                     ] else
                       _buildNoRouteSelectedState(),
@@ -807,8 +812,9 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     LoaneeProvider loaneeProvider,
     int totalMissingLoanees,
     double totalMissingAmount,
-    double totalMissingBalance,
-  ) {
+    double totalMissingBalance, [
+    bool isLoanee = false,
+  ]) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -986,8 +992,9 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
             runSpacing: 6,
             children: [
               Text(
-                'Showing ${entries.length} Records in ${_selectedRoute!} '
-                '($totalMissingLoanees with Missing Logs)',
+                isLoanee
+                    ? 'Showing ${entries.length} Account Record${entries.length == 1 ? "" : "s"} ($totalMissingLoanees with Missing Logs)'
+                    : 'Showing ${entries.length} Records in ${_selectedRoute ?? "All"} ($totalMissingLoanees with Missing Logs)',
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.bold,
@@ -1056,7 +1063,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
         const SizedBox(height: 12),
 
         if (entries.isEmpty)
-          _buildEmptyEntriesState()
+          _buildEmptyEntriesState(isLoanee)
         else if (_isTableView)
           _buildDataTableWidget(
             entries,
@@ -1075,7 +1082,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     );
   }
 
-  Widget _buildEmptyEntriesState() {
+  Widget _buildEmptyEntriesState([bool isLoanee = false]) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(32),
@@ -1090,19 +1097,21 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       child: Column(
         children: [
           Icon(
-            Icons.search_off_rounded,
+            isLoanee ? Icons.verified_user_rounded : Icons.search_off_rounded,
             size: 42,
-            color: Colors.grey.shade400,
+            color: isLoanee ? Colors.teal.shade400 : Colors.grey.shade400,
           ),
 
           const SizedBox(height: 10),
 
           Text(
-            'No Entries Found in $_selectedRoute ($_selectedType)',
+            isLoanee
+                ? 'No Missing Records Found'
+                : 'No Entries Found in ${_selectedRoute ?? ""} ($_selectedType)',
             style: TextStyle(
               fontSize: 13.5,
               fontWeight: FontWeight.bold,
-              color: Colors.grey.shade700,
+              color: isLoanee ? Colors.teal.shade800 : Colors.grey.shade700,
             ),
             textAlign: TextAlign.center,
           ),
@@ -1110,7 +1119,9 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
           const SizedBox(height: 4),
 
           Text(
-            'Try clearing search filters or changing collection type.',
+            isLoanee
+                ? 'Your account has zero missing payment deductions. Everything is clear and up to date.'
+                : 'Try clearing search filters or changing collection type.',
             style: TextStyle(
               fontSize: 11,
               color: Colors.grey.shade500,

@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
 import '../models/ro_model.dart';
 import '../models/loanee_model.dart';
+import '../models/locked_device_session_model.dart';
 import '../services/supabase_service.dart';
 
 class LoginResult {
@@ -424,6 +425,7 @@ class AuthProvider extends ChangeNotifier {
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('user_pin', cleanPin);
+        await prefs.setString('user_mobile', supaUser.mobileNo);
         await prefs.setString('user_role', supaUser.userType.name);
         await prefs.setString('user_data', jsonEncode(_currentUser!.toJson()));
         await prefs.setBool('is_logged_in', true);
@@ -579,6 +581,7 @@ class AuthProvider extends ChangeNotifier {
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('user_pin', cleanPin);
+        await prefs.setString('user_mobile', supaUser.mobileNo);
         await prefs.setString('user_role', supaUser.userType.name);
         await prefs.setString('user_data', jsonEncode(_currentUser!.toJson()));
         await prefs.setBool('is_logged_in', true);
@@ -865,6 +868,7 @@ class AuthProvider extends ChangeNotifier {
           userType: cachedUser.userType,
           currentDeviceId: currentDeviceId,
         );
+        await prefs.setString('user_mobile', cachedUser.mobileNo);
       } else {
         _currentUser = cachedUser;
       }
@@ -882,16 +886,36 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> logout({bool clearRemoteDevice = true}) async {
     try {
-      if (clearRemoteDevice && _currentUser != null && _currentUser!.mobileNo.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      String mobile = _currentUser?.mobileNo ?? '';
+      UserType role = _currentUser?.userType ?? _activeRole;
+
+      if (mobile.isEmpty) {
+        final savedMobile = prefs.getString('user_mobile');
+        if (savedMobile != null && savedMobile.isNotEmpty) {
+          mobile = savedMobile;
+        }
+      }
+      if (mobile.isEmpty) {
+        final savedData = prefs.getString('user_data');
+        if (savedData != null && savedData.isNotEmpty) {
+          try {
+            final u = jsonDecode(savedData);
+            mobile = u['mobileNo']?.toString() ?? u['mobile_no']?.toString() ?? '';
+          } catch (_) {}
+        }
+      }
+
+      if (clearRemoteDevice && mobile.isNotEmpty) {
         await SupabaseService.instance.clearDeviceSession(
-          mobileNo: _currentUser!.mobileNo,
-          userType: _currentUser!.userType,
+          mobileNo: mobile,
+          userType: role,
         );
       }
-      final prefs = await SharedPreferences.getInstance();
       await prefs.remove('user_pin');
       await prefs.remove('user_data');
       await prefs.remove('user_role');
+      await prefs.remove('user_mobile');
       await prefs.remove('is_logged_in');
     } catch (e) {
       debugPrint('⚠️ Error during logout: $e');
@@ -899,5 +923,102 @@ class AuthProvider extends ChangeNotifier {
     _isLoggedIn = false;
     _currentUser = null;
     notifyListeners();
+  }
+
+  /// Fetch all currently locked device sessions from Supabase system_settings with matched user details
+  Future<List<LockedDeviceSession>> fetchLockedDeviceSessions() async {
+    try {
+      final rawSettings = await SupabaseService.instance.fetchActiveDeviceSettings();
+
+      // Ensure we have user auth records loaded for matching names/IDs
+      if (_adminUsers.isEmpty) {
+        try {
+          await fetchAdminUsers();
+        } catch (_) {}
+      }
+
+      final List<LockedDeviceSession> list = [];
+      for (final s in rawSettings) {
+        final key = s['setting_key'] as String;
+        final devId = s['setting_value'] as String;
+        final updatedStr = s['updated_at'] as String?;
+        DateTime? updatedAt;
+        if (updatedStr != null) {
+          try {
+            updatedAt = DateTime.parse(updatedStr);
+          } catch (_) {}
+        }
+
+        // Key pattern: active_device_${mobile}_${role} or active_device_${mobile}
+        final suffix = key.replaceFirst('active_device_', '');
+        final lastUnderscore = suffix.lastIndexOf('_');
+
+        String mobile = suffix;
+        UserType role = UserType.loanee;
+
+        if (lastUnderscore > 0) {
+          mobile = suffix.substring(0, lastUnderscore);
+          final roleStr = suffix.substring(lastUnderscore + 1);
+          role = UserAuthRecord.parseUserType(roleStr);
+        }
+
+        String? name;
+        String? customerId;
+
+        final normMobile = SupabaseService.normalizeSessionMobile(mobile);
+
+        // Match against _adminUsers
+        final matchAuth = _adminUsers.firstWhere(
+          (u) => SupabaseService.normalizeSessionMobile(u.mobileNo) == normMobile && u.userType == role,
+          orElse: () => _adminUsers.firstWhere(
+            (u) => SupabaseService.normalizeSessionMobile(u.mobileNo) == normMobile,
+            orElse: () => UserAuthRecord(
+              id: '',
+              mobileNo: mobile,
+              userType: role,
+              pin: '',
+              name: '',
+            ),
+          ),
+        );
+
+        if (matchAuth.name.isNotEmpty) {
+          name = matchAuth.name;
+          customerId = matchAuth.customerId;
+        }
+
+        list.add(LockedDeviceSession(
+          settingKey: key,
+          mobileNo: mobile,
+          userType: role,
+          deviceId: devId,
+          updatedAt: updatedAt,
+          userName: name,
+          customerId: customerId,
+        ));
+      }
+      return list;
+    } catch (e) {
+      debugPrint('⚠️ Error fetching locked device sessions: $e');
+      return [];
+    }
+  }
+
+  /// Manager unblock action: resets device lock in Supabase so user can log in on a new device
+  Future<bool> unblockDeviceSession(LockedDeviceSession session) async {
+    try {
+      final ok = await SupabaseService.instance.clearDeviceSession(
+        mobileNo: session.mobileNo,
+        userType: session.userType,
+      );
+      // Guarantee exact key is set to logged_out and deleted
+      await SupabaseService.instance.setSystemSetting(session.settingKey, 'logged_out');
+      await SupabaseService.instance.deleteSystemSetting(session.settingKey);
+      notifyListeners();
+      return ok;
+    } catch (e) {
+      debugPrint('⚠️ Error unblocking device session: $e');
+      return false;
+    }
   }
 }

@@ -285,7 +285,77 @@ class HomePage extends StatelessWidget {
             grandTotalCollected: grandTotalCollected,
             remainingBalance: remainingBalance,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+
+          // Broken/Lost Device Session Unblock Banner
+          InkWell(
+            onTap: () => onNavigateToMenu?.call(16),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: const Color(0xFF8B1A1A).withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF8B1A1A).withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B1A1A).withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.phonelink_lock_rounded, color: Color(0xFF8B1A1A), size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Locked Device Sessions',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E1E1E),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Unblock accounts locked by old, lost, or broken devices',
+                          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B1A1A),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.lock_open_rounded, size: 14, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text(
+                          'Manage',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
 
           // Monitoring Metrics Grid (Small & Responsive, Tap to view relevant pages)
           Builder(

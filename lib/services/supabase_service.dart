@@ -2284,6 +2284,12 @@ class SupabaseService {
     }
   }
 
+  /// Normalize phone number to last 10 digits for consistent cross-device session tracking
+  static String normalizeSessionMobile(String mobile) {
+    final digits = mobile.replaceAll(RegExp(r'\D'), '');
+    return digits.length >= 10 ? digits.substring(digits.length - 10) : digits;
+  }
+
   /// Check if this user account is already active on another device.
   /// Returns {'isBlocked': bool, 'activeDeviceId': String?, 'message': String}
   Future<Map<String, dynamic>> checkDeviceSession({
@@ -2297,23 +2303,34 @@ class SupabaseService {
         return {'isBlocked': false, 'activeDeviceId': null};
       }
       final cleanMobile = mobileNo.trim();
-      final key = 'active_device_${cleanMobile}_${userType.name}';
+      final normMobile = normalizeSessionMobile(cleanMobile);
 
-      final row = await supaClient
-          .from('system_settings')
-          .select('setting_value')
-          .eq('setting_key', key)
-          .maybeSingle();
+      // Check keys: normalized 10-digit key and raw mobile key
+      final keysToCheck = [
+        'active_device_${normMobile}_${userType.name}',
+        if (normMobile != cleanMobile) 'active_device_${cleanMobile}_${userType.name}',
+      ];
 
-      if (row != null) {
-        final activeDevId = row['setting_value']?.toString().trim() ?? '';
-        if (activeDevId.isNotEmpty && activeDevId != currentDeviceId) {
-          return {
-            'isBlocked': true,
-            'activeDeviceId': activeDevId,
-            'message':
-                'This account is currently logged in on another device. Simultaneous logins across multiple devices are blocked. Please sign out from that device first.',
-          };
+      for (final key in keysToCheck) {
+        final row = await supaClient
+            .from('system_settings')
+            .select('setting_value')
+            .eq('setting_key', key)
+            .maybeSingle();
+
+        if (row != null) {
+          final activeDevId = row['setting_value']?.toString().trim() ?? '';
+          if (activeDevId.isNotEmpty &&
+              activeDevId != 'logged_out' &&
+              activeDevId != 'none' &&
+              activeDevId != currentDeviceId) {
+            return {
+              'isBlocked': true,
+              'activeDeviceId': activeDevId,
+              'message':
+                  'This account is currently logged in on another device. Simultaneous logins across multiple devices are blocked. Please sign out from that device first.',
+            };
+          }
         }
       }
       return {'isBlocked': false, 'activeDeviceId': null};
@@ -2331,8 +2348,13 @@ class SupabaseService {
   }) async {
     try {
       final cleanMobile = mobileNo.trim();
-      final key = 'active_device_${cleanMobile}_${userType.name}';
-      return await setSystemSetting(key, currentDeviceId);
+      final normMobile = normalizeSessionMobile(cleanMobile);
+      final key = 'active_device_${normMobile}_${userType.name}';
+      final ok = await setSystemSetting(key, currentDeviceId);
+      if (normMobile != cleanMobile) {
+        await setSystemSetting('active_device_${cleanMobile}_${userType.name}', currentDeviceId);
+      }
+      return ok;
     } catch (e) {
       debugPrint('⚠️ Error registering device session: $e');
       return false;
@@ -2346,11 +2368,55 @@ class SupabaseService {
   }) async {
     try {
       final cleanMobile = mobileNo.trim();
-      final key = 'active_device_${cleanMobile}_${userType.name}';
-      return await deleteSystemSetting(key);
+      final normMobile = normalizeSessionMobile(cleanMobile);
+
+      final keysToClear = {
+        'active_device_${normMobile}_${userType.name}',
+        'active_device_${cleanMobile}_${userType.name}',
+      };
+
+      for (final key in keysToClear) {
+        // 1. UPDATE value to 'logged_out' via setSystemSetting (guaranteed to succeed with UPDATE RLS policy)
+        await setSystemSetting(key, 'logged_out');
+        // 2. Also try delete row (in case DELETE RLS policy is present)
+        await deleteSystemSetting(key);
+      }
+      return true;
     } catch (e) {
       debugPrint('⚠️ Error clearing device session: $e');
       return false;
+    }
+  }
+
+  /// Fetch all active device session rows from system_settings that are currently locked
+  Future<List<Map<String, dynamic>>> fetchActiveDeviceSettings() async {
+    try {
+      final supaClient = client;
+      if (supaClient == null) return [];
+
+      final rows = await supaClient
+          .from('system_settings')
+          .select('setting_key, setting_value, updated_at')
+          .like('setting_key', 'active_device_%');
+
+      final List<Map<String, dynamic>> locked = [];
+      for (final r in rows) {
+        final key = r['setting_key']?.toString().trim() ?? '';
+        final val = r['setting_value']?.toString().trim() ?? '';
+        final updated = r['updated_at']?.toString().trim();
+
+        if (val.isNotEmpty && val != 'logged_out' && val != 'none') {
+          locked.add({
+            'setting_key': key,
+            'setting_value': val,
+            'updated_at': updated,
+          });
+        }
+      }
+      return locked;
+    } catch (e) {
+      debugPrint('⚠️ Error fetching active device settings: $e');
+      return [];
     }
   }
 

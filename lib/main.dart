@@ -23,6 +23,7 @@ import 'screens/admin_users_list_page.dart';
 import 'screens/collection_performance_page.dart';
 import 'screens/holiday_management_page.dart';
 import 'screens/missing_manager_page.dart';
+import 'screens/locked_devices_list_page.dart';
 import 'providers/auth_provider.dart';
 import 'providers/loanee_provider.dart';
 import 'providers/ro_provider.dart';
@@ -419,9 +420,11 @@ class _MainPageState extends State<MainPage> {
       const HolidayManagementPage(),
       // Index 15: Missing Manager (Admin, Manager, and RO)
       const MissingManagerPage(),
+      // Index 16: Locked Device Logins (Manager & Admin only)
+      const LockedDeviceListPage(),
     ];
 
-    // Access control protection: Only Admin and Manager can access index 13, Admin for 14
+    // Access control protection: Only Admin and Manager can access index 13 and 16, Admin for 14
     int effectiveIndex = _selectedIndex;
     if (effectiveIndex == 13 &&
         authProvider.activeRole != UserType.admin &&
@@ -429,6 +432,11 @@ class _MainPageState extends State<MainPage> {
       effectiveIndex = 0;
     }
     if (effectiveIndex == 14 && authProvider.activeRole != UserType.admin) {
+      effectiveIndex = 0;
+    }
+    if (effectiveIndex == 16 &&
+        authProvider.activeRole != UserType.admin &&
+        authProvider.activeRole != UserType.manager) {
       effectiveIndex = 0;
     }
 
@@ -582,6 +590,8 @@ class _MainPageState extends State<MainPage> {
         return 'Official Holiday Management';
       case 15:
         return 'Missing Manager';
+      case 16:
+        return 'Locked Device Logins';
       default:
         return 'Mangang Finance';
     }

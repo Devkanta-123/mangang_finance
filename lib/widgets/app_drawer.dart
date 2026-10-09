@@ -237,6 +237,14 @@ class AppDrawer extends StatelessWidget {
           badgeColor: Colors.deepOrange.shade800,
         ),
         DrawerMenuItemData(
+          index: 16,
+          icon: Icons.phonelink_lock_rounded,
+          title: 'Locked Device Logins',
+          subtitle: 'Unblock broken or lost device sessions',
+          badge: 'SECURITY',
+          badgeColor: const Color(0xFF8B1A1A),
+        ),
+        DrawerMenuItemData(
           index: 8,
           icon: Icons.account_circle_rounded,
           title: 'Admin Profile',
@@ -311,6 +319,14 @@ class AppDrawer extends StatelessWidget {
           icon: Icons.timer_off_rounded,
           title: 'Late Fines & Penalties',
           subtitle: 'Live overdue & penalty tracking',
+        ),
+        DrawerMenuItemData(
+          index: 16,
+          icon: Icons.phonelink_lock_rounded,
+          title: 'Locked Device Logins',
+          subtitle: 'Unblock broken or lost device sessions',
+          badge: 'MANAGER',
+          badgeColor: const Color(0xFF8B1A1A),
         ),
         DrawerMenuItemData(
           index: 8,
