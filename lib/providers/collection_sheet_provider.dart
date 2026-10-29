@@ -1715,6 +1715,53 @@ class CollectionSheetProvider extends ChangeNotifier {
         }
       }
 
+      // Also collect any past payment dates (for both daily and weekly loans) where the loanee made a partial installment
+      // (e.g. paid 1500 out of 1950 base installment on 12/10/2026) so that the remaining shortfall (450) and its 3%
+      // late fine/interest are assessed into missing payment records when auto runs.
+      for (final p in nonAutoTx) {
+        final datesToCheck = <DateTime>{
+          DateTime(p.effectiveSortDate.year, p.effectiveSortDate.month, p.effectiveSortDate.day),
+          DateTime(p.createdAt.year, p.createdAt.month, p.createdAt.day),
+        };
+        for (final d in datesToCheck) {
+          if (!d.isBefore(cleanToday)) continue;
+          if (effectiveSanction != null) {
+            final cleanSanction = DateTime(effectiveSanction.year, effectiveSanction.month, effectiveSanction.day);
+            if (d.isBefore(cleanSanction)) continue;
+          }
+          if (auditEndDate != null) {
+            final cleanAudit = DateTime(auditEndDate.year, auditEndDate.month, auditEndDate.day);
+            if (!d.isAfter(cleanAudit)) continue;
+          }
+
+          final isPaused = settingsProvider.isLateFinePaused(entry.id, d, customerId: entry.customerId);
+          if (isPaused) {
+            if (!skippedPausedDates.any((spd) => spd.year == d.year && spd.month == d.month && spd.day == d.day)) {
+              skippedPausedDates.add(d);
+            }
+          } else {
+            // Check if total non-auto payments on date d were a partial payment (< baseInstallment)
+            final paymentsOnD = cardPayments.where((cp) {
+              final s = cp.status.toLowerCase().trim();
+              final cpDate = cp.effectiveSortDate;
+              final matches = (cpDate.year == d.year && cpDate.month == d.month && cpDate.day == d.day) ||
+                  (cp.createdAt.year == d.year && cp.createdAt.month == d.month && cp.createdAt.day == d.day);
+              return matches && s != 'failed' && s != 'cancelled';
+            }).toList();
+
+            final double totalOnD = paymentsOnD.fold(0.0, (sum, cp) => sum + cp.paymentAmount);
+            if (totalOnD > 0 && totalOnD < baseInstallment) {
+              if (!candidateDates.any((c) => c.year == d.year && c.month == d.month && c.day == d.day)) {
+                candidateDates.add(d);
+              }
+            }
+          }
+        }
+      }
+
+      // Chronologically sort all candidate dates so evaluation runs in order
+      candidateDates.sort((a, b) => a.compareTo(b));
+
       // Purge any orphan weekly auto-records that do not match the valid candidate dates
       // (e.g. records created beyond remaining tenure or on paused weeks)
       final candidateDateKeys = candidateDates.map((d) => '${d.year}-${d.month}-${d.day}').toSet();
@@ -1771,7 +1818,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       final recordId = 'MISS-${entry.id}-$dateStr';
 
       // Check if missing payment record already exists for this exact date or deterministic ID
-      final alreadyAssessed = _missingRecords.any((m) {
+      final existingIdx = _missingRecords.indexWhere((m) {
         if (m.id == recordId) return true;
         final matches = m.collectionId.trim().toLowerCase() == entryIdClean ||
             (entryAccClean.isNotEmpty && (m.accountNo ?? '').trim().toLowerCase() == entryAccClean) ||
@@ -1781,7 +1828,37 @@ class CollectionSheetProvider extends ChangeNotifier {
             m.missedDate.month == candidate.month &&
             m.missedDate.day == candidate.day;
       });
-      if (alreadyAssessed) {
+
+      if (existingIdx >= 0) {
+        final existing = _missingRecords[existingIdx];
+        if (existing.isPaidOrLocked) {
+          alreadyAssessedDates.add(candidate);
+          continue;
+        }
+
+        // If the record exists but was previously recorded with 0 payment or a different payment amount,
+        // update it so the partial payment and remaining shortfall with 3% interest are correctly reflected.
+        final double missingPay = double.parse((baseInstallment - dayPayment).clamp(0.0, double.infinity).toStringAsFixed(2));
+        final double missingFine = double.parse((missingPay * (settingsProvider.lateFinePercentage / 100.0)).toStringAsFixed(2));
+        final int missingWeek = MissingPaymentRecord.calculateWeeks(missedDate: candidate, asOfDate: cleanToday);
+        final double missingBalance = double.parse((missingFine * missingWeek).toStringAsFixed(2));
+
+        if ((existing.dayPayment - dayPayment).abs() > 0.01 ||
+            (existing.missingPay - missingPay).abs() > 0.01 ||
+            (existing.missingFine - missingFine).abs() > 0.01) {
+          final updated = existing.copyWith(
+            dayPayment: dayPayment,
+            missingPay: missingPay,
+            missingFine: missingFine,
+            missingWeek: missingWeek,
+            missingBalance: missingBalance,
+            status: dayPayment > 0 ? 'partially_resolved' : 'missing',
+            remarks: '${isDaily ? "Daily" : "Weekly"} Missing Payment: ₹${missingPay.toStringAsFixed(2)}, Fine: ₹${missingFine.toStringAsFixed(2)} (Auto assessed for ${SettingsProvider.formatDate(candidate)})',
+            updatedAt: DateTime.now(),
+          );
+          _missingRecords[existingIdx] = updated;
+          newlyCreatedRecords.add(updated);
+        }
         alreadyAssessedDates.add(candidate);
         continue;
       }
@@ -1953,11 +2030,44 @@ class CollectionSheetProvider extends ChangeNotifier {
         }
 
         final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: rec.missedDate, asOfDate: cleanToday);
-        final currentBal = double.parse((rec.missingFine * currentWeek).toStringAsFixed(2));
-        if (rec.missingWeek != currentWeek || rec.missingBalance != currentBal) {
+
+        // Check if there was any real payment made on this missed date
+        final paymentsOnMissed = cardPayments.where((cp) {
+          final s = cp.status.toLowerCase().trim();
+          final cpDate = cp.effectiveSortDate;
+          final matches = (cpDate.year == rec.missedDate.year && cpDate.month == rec.missedDate.month && cpDate.day == rec.missedDate.day) ||
+              (cp.createdAt.year == rec.missedDate.year && cp.createdAt.month == rec.missedDate.month && cp.createdAt.day == rec.missedDate.day);
+          return matches && s != 'failed' && s != 'cancelled';
+        }).toList();
+
+        final double dayPayment = paymentsOnMissed.fold(0.0, (sum, cp) => sum + cp.paymentAmount);
+        double effectiveMissingPay = rec.missingPay;
+        double effectiveFine = rec.missingFine;
+        double effectiveDayPayment = rec.dayPayment;
+        String effectiveStatus = rec.status;
+
+        if (dayPayment > 0 && baseInstallment > 0 && dayPayment < baseInstallment &&
+            ((rec.dayPayment - dayPayment).abs() > 0.01 || rec.missingPay > (baseInstallment - dayPayment))) {
+          effectiveDayPayment = dayPayment;
+          effectiveMissingPay = double.parse((baseInstallment - dayPayment).clamp(0.0, double.infinity).toStringAsFixed(2));
+          effectiveFine = double.parse((effectiveMissingPay * (settingsProvider.lateFinePercentage / 100.0)).toStringAsFixed(2));
+          effectiveStatus = 'partially_resolved';
+        }
+
+        final currentBal = double.parse((effectiveFine * currentWeek).toStringAsFixed(2));
+        if (rec.missingWeek != currentWeek ||
+            rec.missingBalance != currentBal ||
+            rec.missingFine != effectiveFine ||
+            rec.missingPay != effectiveMissingPay ||
+            rec.dayPayment != effectiveDayPayment ||
+            rec.status != effectiveStatus) {
           final updated = rec.copyWith(
+            dayPayment: effectiveDayPayment,
+            missingPay: effectiveMissingPay,
+            missingFine: effectiveFine,
             missingWeek: currentWeek,
             missingBalance: currentBal,
+            status: effectiveStatus,
             updatedAt: DateTime.now(),
           );
           _missingRecords[i] = updated;
@@ -1982,12 +2092,16 @@ class CollectionSheetProvider extends ChangeNotifier {
                 m.missedDate.month == rec.missedDate.month &&
                 m.missedDate.day == rec.missedDate.day));
         if (existingIdx >= 0) {
-          if (newlyCreatedRecords.any((n) => n.id == rec.id)) {
-            // Same date can't insert: skip duplicate!
+          final isSameRecord = _missingRecords[existingIdx].id == rec.id;
+          if (!isSameRecord && newlyCreatedRecords.any((n) => n.id == rec.id)) {
+            // Different record ID for same date can't insert: skip duplicate!
             continue;
           }
           _missingRecords[existingIdx] = rec;
           finalPersistList.add(rec);
+          if (newlyCreatedRecords.any((n) => n.id == rec.id)) {
+            actuallyInsertedRecords.add(rec);
+          }
         } else {
           _missingRecords.add(rec);
           finalPersistList.add(rec);
