@@ -187,8 +187,7 @@ class RealtimeSyncService {
             }
           }
         } else {
-          _collectionProvider?.fetchFromSupabase();
-          _loaneeProvider?.fetchFromSupabase();
+          debugPrint('⚠️ Realtime payment delete event missing ID. Skipped full-table download to conserve egress.');
         }
       }
     } catch (e) {
@@ -214,7 +213,7 @@ class RealtimeSyncService {
         if (id != null && id.isNotEmpty) {
           _collectionProvider?.handleRealtimeEntryDelete(id);
         } else {
-          _collectionProvider?.fetchFromSupabase();
+          debugPrint('⚠️ Realtime entry delete event missing ID. Skipped full-table download to conserve egress.');
         }
       }
     } catch (e) {
@@ -243,7 +242,7 @@ class RealtimeSyncService {
         if (custId != null && custId.isNotEmpty) {
           _loaneeProvider?.handleRealtimeLoaneeDelete(custId);
         } else {
-          _loaneeProvider?.fetchFromSupabase();
+          debugPrint('⚠️ Realtime loanee delete event missing customerId. Skipped full-table download to conserve egress.');
         }
       }
     } catch (e) {

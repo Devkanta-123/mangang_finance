@@ -6,6 +6,7 @@ import '../models/ro_model.dart';
 import '../models/loanee_model.dart';
 import '../models/locked_device_session_model.dart';
 import '../services/supabase_service.dart';
+import '../services/realtime_sync_service.dart';
 
 class LoginResult {
   final bool success;
@@ -739,7 +740,24 @@ class AuthProvider extends ChangeNotifier {
     return true;
   }
 
-  Future<void> fetchAdminUsers() async {
+  Future<void>? _pendingAdminUsersFuture;
+
+  Future<void> fetchAdminUsers({bool forceRefresh = false}) async {
+    if (_pendingAdminUsersFuture != null) {
+      return _pendingAdminUsersFuture!;
+    }
+    _pendingAdminUsersFuture = _doFetchAdminUsers(forceRefresh: forceRefresh);
+    try {
+      await _pendingAdminUsersFuture;
+    } finally {
+      _pendingAdminUsersFuture = null;
+    }
+  }
+
+  Future<void> _doFetchAdminUsers({bool forceRefresh = false}) async {
+    if (!forceRefresh && _adminUsers.isNotEmpty) {
+      return;
+    }
     _isLoadingAdminUsers = true;
     notifyListeners();
     try {
@@ -917,6 +935,11 @@ class AuthProvider extends ChangeNotifier {
       await prefs.remove('user_role');
       await prefs.remove('user_mobile');
       await prefs.remove('is_logged_in');
+
+      // Stop Realtime subscriptions upon logging out to avoid lingering WebSocket egress
+      try {
+        await RealtimeSyncService.instance.stopRealtimeSubscription();
+      } catch (_) {}
     } catch (e) {
       debugPrint('⚠️ Error during logout: $e');
     }

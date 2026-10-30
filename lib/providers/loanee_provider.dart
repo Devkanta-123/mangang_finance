@@ -165,18 +165,40 @@ class LoaneeProvider extends ChangeNotifier {
     }
   }
 
+  Future<void>? _pendingFetchFuture;
+
   /// Sync/Fetch live accounts directly from Supabase 'loanee_accounts' table
-  Future<void> fetchFromSupabase() async {
+  Future<void> fetchFromSupabase({bool forceRefresh = false}) async {
+    if (_pendingFetchFuture != null) {
+      return _pendingFetchFuture!;
+    }
+    _pendingFetchFuture = _doFetchFromSupabase(forceRefresh: forceRefresh);
+    try {
+      await _pendingFetchFuture;
+    } finally {
+      _pendingFetchFuture = null;
+    }
+  }
+
+  Future<void> _doFetchFromSupabase({bool forceRefresh = false}) async {
+    if (!forceRefresh && _loanees.isNotEmpty) {
+      return;
+    }
     _isSyncing = true;
     notifyListeners();
 
-    final remoteLoanees = await SupabaseService.instance.fetchLoaneeAccounts();
-    if (remoteLoanees != null) {
-      _loanees.clear();
-      _loanees.addAll(remoteLoanees);
+    try {
+      final remoteLoanees = await SupabaseService.instance.fetchLoaneeAccounts();
+      if (remoteLoanees != null) {
+        _loanees.clear();
+        _loanees.addAll(remoteLoanees);
+      }
+    } catch (e) {
+      debugPrint('❌ Error in LoaneeProvider.fetchFromSupabase: $e');
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
     }
-    _isSyncing = false;
-    notifyListeners();
   }
 
   /// Update account status for a Loanee in-memory & in Supabase table

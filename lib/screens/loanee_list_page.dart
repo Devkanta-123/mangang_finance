@@ -332,7 +332,7 @@ class _LoaneeListPageState extends State<LoaneeListPage> {
       backgroundColor: Colors.grey.shade100,
       body: RefreshIndicator(
         onRefresh: () async {
-          await loaneeProvider.fetchFromSupabase();
+          await loaneeProvider.fetchFromSupabase(forceRefresh: true);
         },
         child: Column(
           children: [

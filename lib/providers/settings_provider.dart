@@ -1362,8 +1362,11 @@ class SettingsProvider extends ChangeNotifier {
         ? overrideTotalPaid
         : inMemPaid;
     final double totalLateFees = payments.fold(0.0, (sum, p) => sum + p.effectiveLateFine);
+    final double effectiveLate = (overrideLateFine != null && overrideLateFine > 0)
+        ? overrideLateFine
+        : totalLateFees;
     final double totalPostMat = payments.fold(0.0, (sum, p) => sum + p.postMaturityInterest);
-    final double totalInterest = totalLateFees + totalPostMat;
+    final double totalInterest = effectiveLate + totalPostMat;
     final double initialLoan = (entry.loanAmount != null && entry.loanAmount! > 0)
         ? entry.loanAmount!
         : ((loaneeLoanAmount != null && loaneeLoanAmount > 0)
@@ -1376,7 +1379,7 @@ class SettingsProvider extends ChangeNotifier {
     final double calculatedBalance = (initialLoan > 0)
         ? (initialLoan + totalInterest - totalPaid).clamp(0.0, double.infinity)
         : (sortedPayments.isNotEmpty && sortedPayments.first.remainingBalance > 0
-            ? sortedPayments.first.remainingBalance
+            ? (sortedPayments.first.remainingBalance + effectiveLate).clamp(0.0, double.infinity)
             : 0.0);
 
     final double remainingBalance = calculatedBalance;
@@ -1450,7 +1453,7 @@ class SettingsProvider extends ChangeNotifier {
       lateUnits = 0;
       currentIntervalFine = 0.0;
       previousUnpaidFee = 0.0;
-      calculatedFine = 0.0;
+      calculatedFine = effectiveLate;
       overdueMissedAmount = 0.0;
       currentInstallment = remainingBalance;
       totalPayable = remainingBalance;

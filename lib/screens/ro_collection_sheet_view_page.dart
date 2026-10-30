@@ -1428,11 +1428,7 @@ class _RoCollectionSheetViewPageState
       backgroundColor: Colors.grey.shade100,
       body: RefreshIndicator(
         onRefresh: () async {
-          await Future.wait([
-            provider.fetchFromSupabase(),
-            loaneeProvider.fetchFromSupabase(),
-            roProvider.fetchFromSupabase(),
-          ]);
+          await provider.fetchFromSupabase(forceRefresh: true);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -3245,54 +3241,18 @@ class _RoCollectionDetailsModalSheetState
     try {
       final supaClient = SupabaseService.instance.client;
       if (supaClient != null && widget.entry.id.isNotEmpty) {
-        // Calculate Total Collected directly from public.ro_collection_payments
-        // Equivalent to:
-        // SELECT COALESCE(SUM(payment_amount), 0)
-        // FROM public.ro_collection_payments
-        // WHERE collection_id = <widget.entry.id>;
-        final sumData = await supaClient
-            .from('ro_collection_payments')
-            .select('payment_amount, interest, late_fine, post_maturity_interest')
-            .eq('collection_id', widget.entry.id) as List<dynamic>?;
-        final paymentsList = await SupabaseService.instance
-            .fetchPaymentsForCollection(widget.entry.id) ?? [];
+        final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
+
+        // Optimized: Single query using fetchAllPaymentsForCollection which checks memory first,
+        // eliminating duplicate sum + list queries against ro_collection_payments.
+        final paymentsList = await cp.fetchAllPaymentsForCollection(widget.entry.id);
 
         double calculatedTotalCollected = 0.0;
         double calculatedInterest = 0.0;
         double calculatedLateFees = 0.0;
         double calculatedPostMat = 0.0;
 
-        if (sumData != null && sumData.isNotEmpty) {
-          for (final row in sumData) {
-            final amt = row['payment_amount'];
-            if (amt != null) {
-              if (amt is num) {
-                calculatedTotalCollected += amt.toDouble();
-              } else {
-                calculatedTotalCollected += double.tryParse(amt.toString()) ?? 0.0;
-              }
-            }
-            final rawInt = row['interest'];
-            final rawLate = row['late_fine'];
-            final rawPost = row['post_maturity_interest'];
-            double rowInt = 0.0;
-            if (rawInt != null) {
-              rowInt = (rawInt is num) ? rawInt.toDouble() : (double.tryParse(rawInt.toString()) ?? 0.0);
-            }
-            double rowLate = 0.0;
-            if (rawLate != null) {
-              rowLate = (rawLate is num) ? rawLate.toDouble() : (double.tryParse(rawLate.toString()) ?? 0.0);
-            }
-            double rowPost = 0.0;
-            if (rawPost != null) {
-              rowPost = (rawPost is num) ? rawPost.toDouble() : (double.tryParse(rawPost.toString()) ?? 0.0);
-            }
-            final rowLateFee = (rowLate > 0.0) ? rowLate : rowInt;
-            calculatedLateFees += rowLateFee;
-            calculatedPostMat += rowPost;
-          }
-          calculatedInterest = calculatedLateFees + calculatedPostMat;
-        } else if (paymentsList.isNotEmpty) {
+        if (paymentsList.isNotEmpty) {
           for (final p in paymentsList) {
             calculatedTotalCollected += p.paymentAmount;
             final lateFeeVal = p.effectiveLateFine;
@@ -3303,7 +3263,6 @@ class _RoCollectionDetailsModalSheetState
         }
 
         if (mounted) {
-          final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
           if (calculatedLateFees == 0.0) {
             calculatedLateFees = cp.getTotalLatePaymentFeesForCollection(widget.entry.id);
           }
@@ -3322,12 +3281,12 @@ class _RoCollectionDetailsModalSheetState
             _isDbLoaded = true;
           });
 
-          // Sync into CollectionSheetProvider so app-wide cache stays in sync
+          // Sync into CollectionSheetProvider in-memory cache directly without firing another network request
           try {
             if (paymentsList.isNotEmpty) {
               cp.mergePayments(paymentsList);
             }
-            cp.fetchTotalCollectedForCollection(widget.entry.id);
+            cp.setDbTotalCollectedCache(widget.entry.id, calculatedTotalCollected);
           } catch (_) {}
         }
         return;
@@ -3432,7 +3391,7 @@ class _RoCollectionDetailsModalSheetState
     final remainingBeforeInterest =
         (totalLoanAmount - totalCollected).clamp(0.0, double.infinity);
     final isCompleted =
-        remainingBal <= 0.01 && collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider);
+        collectionProvider.isEntryCompleted(entry, loaneeProvider: loaneeProvider);
     final now = DateTime.now();
     final todayPayments = payments.where((p) =>
         p.createdAt.year == now.year &&
@@ -3848,18 +3807,18 @@ class _RoCollectionDetailsModalSheetState
                       ),
                       Builder(
                         builder: (context) {
-                          final totalMissingBal = collectionProvider
-                              .getTotalMissingBalanceForCollection(entry.id);
-                          final baseDue = (postMaturity != null && postMaturity.isPastMaturity)
-                              ? postMaturity.remainingBalance
-                              : displayBal;
-                          final dueWithMissing = baseDue + totalMissingBal;
+                          final amountDueTillLastMonth = collectionProvider.getAmountDueTillLastMonth(
+                            entry: entry,
+                            loanee: loanee,
+                            fallbackLateFine: latePayable.calculatedLateFine,
+                            fallbackPostMaturityInterest: postMaturity?.cumulativeInterestAmount,
+                          );
                           return Text(
-                            '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(dueWithMissing)}',
+                            '₹ ${_RoCollectionDetailsModalSheet._formatCurrency(amountDueTillLastMonth)}',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
-                              color: dueWithMissing > 0
+                              color: amountDueTillLastMonth > 0
                                   ? Colors.red.shade800
                                   : Colors.green.shade800,
                             ),
@@ -5775,7 +5734,7 @@ class _LoanPaymentHistoryDialogState extends State<_LoanPaymentHistoryDialog> {
                                       ),
                                       child: Builder(
                                         builder: (context) {
-                                          final editModes = ['Cash', 'Online', 'Bank Transfer', 'UPI', 'Cheque', 'Gpay', 'Phonepay', 'Paytm'];
+                                          final editModes = ['Cash', 'Online', 'Bank Transfer', 'UPI', 'Cheque', 'Gpay', 'Phonepay', 'Paytm','Withdrawal'];
                                           if (!editModes.contains(_editPaymentType)) {
                                             editModes.add(_editPaymentType);
                                           }
@@ -6111,6 +6070,7 @@ class __AddPaymentEntryModalContentState
     'Paytm',
     'Bank Transfer',
     'Cheque',
+    'Withdrawal',
   ];
 
   final List<_HybridPaymentRowEntry> _hybridEntries = [];
@@ -6289,18 +6249,12 @@ class __AddPaymentEntryModalContentState
 
       _payableBreakdown = breakdown;
 
-      final initialBal = (widget.entry.loanAmount != null && widget.entry.loanAmount! > 0)
-          ? widget.entry.loanAmount!
-          : ((loanee != null && loanee.loanAmount > 0)
-              ? loanee.loanAmount
-              : (widget.entry.actualPrincipal ?? widget.entry.initialBalance));
-      final totalPaid =
-          collectionProvider.getTotalPaidForCollection(widget.entry.id);
-      final totalInterest =
-          collectionProvider.getTotalInterestForCollection(widget.entry.id);
-
-      _currentDueBalance =
-          (initialBal + totalInterest - totalPaid + totalMissingBalance).clamp(0.0, double.infinity);
+      _currentDueBalance = collectionProvider.getAmountDueTillLastMonth(
+        entry: widget.entry,
+        loanee: loanee,
+        fallbackLateFine: breakdown.calculatedLateFine,
+        fallbackPostMaturityInterest: breakdown.postMaturityBreakdown?.cumulativeInterestAmount,
+      );
 
       if (_paymentAmountController.text.trim().isEmpty) {
         _paymentAmountController.text = breakdown.totalPayableAmount.toStringAsFixed(2);
@@ -6311,11 +6265,7 @@ class __AddPaymentEntryModalContentState
 
   void _updateRemainingBalanceDisplay() {
     final breakdown = _payableBreakdown;
-    final totalMissingBalance = Provider.of<CollectionSheetProvider>(context, listen: false)
-        .getTotalMissingBalanceForCollection(widget.entry.id);
-    final double baseTarget = (breakdown?.isPastMaturity == true)
-        ? (breakdown!.totalPayableAmount + totalMissingBalance)
-        : _currentDueBalance;
+    final double baseTarget = _currentDueBalance;
 
     if (_isExtraPay) {
       final extraAmt = double.tryParse(_extraPayAmountController.text.trim()) ?? 0.0;
@@ -6711,10 +6661,7 @@ class __AddPaymentEntryModalContentState
     final breakdown = _payableBreakdown;
     final collectionProvider =
         Provider.of<CollectionSheetProvider>(context, listen: false);
-    final double baseTarget = (breakdown?.isPastMaturity == true)
-        ? (breakdown!.totalPayableAmount +
-            collectionProvider.getTotalMissingBalanceForCollection(widget.entry.id))
-        : _currentDueBalance;
+    final double baseTarget = _currentDueBalance;
 
     final isPastMaturity = breakdown?.isPastMaturity == true;
     final double baseInstallment = breakdown?.baseInstallment ?? widget.entry.getCalculatedPayableAmount(
@@ -6942,6 +6889,11 @@ class __AddPaymentEntryModalContentState
         paymentAmount: paymentAmount,
         newRemainingBalance: newRemainingBalance,
       );
+      if (newRemainingBalance <= 0.01) {
+        final completedEntry = widget.entry.copyWith(status: 'Completed');
+        collectionProvider.updateCollectionEntry(completedEntry);
+        loaneeProvider.updateStatus(widget.entry.customerId, 'Closed');
+      }
     }
 
     if (!mounted) return;
@@ -7384,11 +7336,7 @@ class __AddPaymentEntryModalContentState
                                 ),
                                 Builder(
                                   builder: (context) {
-                                    final totalMissingBal = collectionProvider
-                                        .getTotalMissingBalanceForCollection(widget.entry.id);
-                                    final dueVal = (postMaturity != null && postMaturity.isPastMaturity)
-                                        ? (postMaturity.remainingBalance + totalMissingBal)
-                                        : _currentDueBalance;
+                                    final dueVal = _currentDueBalance;
                                     return Text(
                                       '₹ ${dueVal.toStringAsFixed(2)}',
                                       style: TextStyle(

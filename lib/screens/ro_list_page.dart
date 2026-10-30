@@ -53,7 +53,10 @@ class _RoListPageState extends State<RoListPage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        Provider.of<RoProvider>(context, listen: false).fetchFromSupabase();
+        final roProvider = Provider.of<RoProvider>(context, listen: false);
+        if (roProvider.roAccounts.isEmpty) {
+          roProvider.fetchFromSupabase();
+        }
       }
     });
   }
@@ -144,7 +147,7 @@ class _RoListPageState extends State<RoListPage> {
       backgroundColor: Colors.grey.shade100,
       body: RefreshIndicator(
         onRefresh: () async {
-          await roProvider.fetchFromSupabase();
+          await roProvider.fetchFromSupabase(forceRefresh: true);
         },
         child: Column(
           children: [

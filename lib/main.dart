@@ -119,6 +119,7 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> {
   int _selectedIndex = 0;
+  final Set<int> _visitedIndices = {0};
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   StreamSubscription<AppNotification>? _notifSubscription;
 
@@ -310,6 +311,9 @@ class _MainPageState extends State<MainPage> {
   @override
   void dispose() {
     _notifSubscription?.cancel();
+    try {
+      RealtimeSyncService.instance.stopRealtimeSubscription();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -439,6 +443,7 @@ class _MainPageState extends State<MainPage> {
         authProvider.activeRole != UserType.manager) {
       effectiveIndex = 0;
     }
+    _visitedIndices.add(effectiveIndex);
 
     return Scaffold(
       key: _scaffoldKey,
@@ -543,7 +548,15 @@ class _MainPageState extends State<MainPage> {
           Navigator.pop(context); // Close drawer after selection
         },
       ),
-      body: pages[effectiveIndex < pages.length ? effectiveIndex : 0],
+      body: IndexedStack(
+        index: effectiveIndex < pages.length ? effectiveIndex : 0,
+        children: List.generate(pages.length, (i) {
+          if (_visitedIndices.contains(i)) {
+            return pages[i];
+          }
+          return const SizedBox.shrink();
+        }),
+      ),
     );
   }
 

@@ -329,9 +329,7 @@ class _CollectionPerformancePageState extends State<CollectionPerformancePage> {
       body: RefreshIndicator(
         color: const Color(0xFF8B1A1A),
         onRefresh: () async {
-          await collectionProvider.fetchFromSupabase();
-          await roProvider.fetchFromSupabase();
-          await authProvider.fetchAdminUsers();
+          await collectionProvider.fetchFromSupabase(forceRefresh: true);
         },
         child: CustomScrollView(
           slivers: [

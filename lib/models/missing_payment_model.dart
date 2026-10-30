@@ -186,8 +186,17 @@ class MissingPaymentRecord {
     }
 
     final rawRemarks = json['remarks']?.toString();
+    final statusStr = json['status']?.toString() ?? 'missing';
+    final lowerStatus = statusStr.toLowerCase().trim();
+    final bool statusExplicitlyActive = lowerStatus == 'missing' ||
+        lowerStatus == 'partially_resolved' ||
+        lowerStatus == 'partial' ||
+        lowerStatus == 'partial paid' ||
+        lowerStatus == 'partially paid' ||
+        lowerStatus == 'paused';
+
     DateTime? resolvedPaidDate = parseNullableCalendarDate(json['paid_date'] ?? json['paidDate']);
-    if (resolvedPaidDate == null && rawRemarks != null && rawRemarks.contains('PAID_DATE:')) {
+    if (resolvedPaidDate == null && !statusExplicitlyActive && rawRemarks != null && rawRemarks.contains('PAID_DATE:')) {
       final match = RegExp(r'PAID_DATE:([^\s\]]+)').firstMatch(rawRemarks);
       if (match != null) {
         resolvedPaidDate = parseCalendarDate(match.group(1)!);
@@ -196,10 +205,9 @@ class MissingPaymentRecord {
 
     final double dayPaymentVal = parseNum(json['day_payment'] ?? json['dayPayment']);
     double missingPayVal = parseNum(json['missing_pay'] ?? json['missingPay']);
-    final statusStr = json['status']?.toString() ?? 'missing';
-    final isPaidOrResolved = statusStr.toLowerCase().trim() == 'resolved' ||
-        statusStr.toLowerCase().trim() == 'cleared' ||
-        statusStr.toLowerCase().trim() == 'paid' ||
+    final isPaidOrResolved = lowerStatus == 'resolved' ||
+        lowerStatus == 'cleared' ||
+        lowerStatus == 'paid' ||
         resolvedPaidDate != null;
 
     // Requirement: Basic pay must NOT become zero when paid.

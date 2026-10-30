@@ -25,7 +25,11 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<AuthProvider>(context, listen: false).fetchAdminUsers();
+      if (!mounted) return;
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      if (authProvider.adminUsers.isEmpty) {
+        authProvider.fetchAdminUsers();
+      }
     });
   }
 
@@ -329,7 +333,7 @@ class _AdminUsersListPageState extends State<AdminUsersListPage> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async {
-                await authProvider.fetchAdminUsers();
+                await authProvider.fetchAdminUsers(forceRefresh: true);
               },
               child: filteredUsers.isEmpty
                   ? SingleChildScrollView(

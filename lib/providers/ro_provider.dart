@@ -63,7 +63,24 @@ class RoProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchFromSupabase() async {
+  Future<void>? _pendingFetchFuture;
+
+  Future<void> fetchFromSupabase({bool forceRefresh = false}) async {
+    if (_pendingFetchFuture != null) {
+      return _pendingFetchFuture!;
+    }
+    _pendingFetchFuture = _doFetchFromSupabase(forceRefresh: forceRefresh);
+    try {
+      await _pendingFetchFuture;
+    } finally {
+      _pendingFetchFuture = null;
+    }
+  }
+
+  Future<void> _doFetchFromSupabase({bool forceRefresh = false}) async {
+    if (!forceRefresh && _roAccounts.isNotEmpty) {
+      return;
+    }
     _isSyncing = true;
     notifyListeners();
 

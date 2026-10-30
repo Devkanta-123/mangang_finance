@@ -46,7 +46,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final cp = Provider.of<CollectionSheetProvider>(context, listen: false);
-      if (!cp.isSyncing) {
+      if (cp.collectionEntries.isEmpty && !cp.isSyncing) {
         cp.fetchFromSupabase();
       }
     });
@@ -272,7 +272,7 @@ class _MissingManagerPageState extends State<MissingManagerPage> {
       backgroundColor: Colors.grey.shade100,
       body: RefreshIndicator(
         onRefresh: () async {
-          await collectionProvider.fetchFromSupabase();
+          await collectionProvider.fetchFromSupabase(forceRefresh: true);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -2747,6 +2747,14 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
     setState(() => _isSavingInline = true);
     final messenger = ScaffoldMessenger.of(context);
 
+    String? remarksText = _editRemarksCtrl?.text.trim().isEmpty ?? true ? null : _editRemarksCtrl!.text.trim();
+    if (_editStatus == 'missing' || _editPaidDate == null) {
+      if (remarksText != null && remarksText.contains('PAID_DATE:')) {
+        remarksText = remarksText.replaceAll(RegExp(r'\s*\[PAID_DATE:[^\]]+\]'), '').trim();
+        if (remarksText.isEmpty) remarksText = null;
+      }
+    }
+
     final updatedRecord = record.copyWith(
       missedDate: _editMissedDate ?? record.missedDate,
       paidDate: _editPaidDate,
@@ -2757,7 +2765,7 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
       missingFine: parsedFine,
       missingWeek: parsedWeek ?? record.missingWeek,
       missingBalance: parsedBalance,
-      remarks: _editRemarksCtrl?.text.trim().isEmpty ?? true ? null : _editRemarksCtrl!.text.trim(),
+      remarks: remarksText,
       updatedAt: DateTime.now(),
     );
 
@@ -2825,20 +2833,23 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
-    final bool isLoanee = authProvider.activeRole == UserType.loanee ||
-        authProvider.currentUser?.userType == UserType.loanee;
-    final bool isAdmin = (authProvider.activeRole == UserType.admin ||
-        authProvider.currentUser?.userType == UserType.admin) && !isLoanee;
-    final bool isManager = ((authProvider.activeRole == UserType.manager ||
-        authProvider.currentUser?.userType == UserType.manager) ||
-        isAdmin) && !isLoanee;
+    return ListenableBuilder(
+      listenable: widget.collectionProvider,
+      builder: (context, _) {
+        final authProvider = Provider.of<AuthProvider>(context);
+        final bool isLoanee = authProvider.activeRole == UserType.loanee ||
+            authProvider.currentUser?.userType == UserType.loanee;
+        final bool isAdmin = (authProvider.activeRole == UserType.admin ||
+            authProvider.currentUser?.userType == UserType.admin) && !isLoanee;
+        final bool isManager = ((authProvider.activeRole == UserType.manager ||
+            authProvider.currentUser?.userType == UserType.manager) ||
+            isAdmin) && !isLoanee;
 
-    final entry = widget.entry;
-    final cp = widget.collectionProvider;
-    final missingRecords = cp.getMissingRecordsForCollection(entry.id);
-    final totalPayment = cp.getTotalPaidForCollection(entry.id);
-    final totalCount = missingRecords.length;
+        final entry = widget.entry;
+        final cp = widget.collectionProvider;
+        final missingRecords = cp.getMissingRecordsForCollection(entry.id);
+        final totalPayment = cp.getTotalPaidForCollection(entry.id);
+        final totalCount = missingRecords.length;
 
     final totalMissingAmount = cp.getTotalMissingPayForCollection(entry.id);
 
@@ -4090,6 +4101,8 @@ class _MissingDetailsDialogState extends State<_MissingDetailsDialog> {
           ),
         ),
       ),
+    );
+      },
     );
   }
 

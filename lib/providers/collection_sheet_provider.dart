@@ -83,58 +83,61 @@ class CollectionSheetProvider extends ChangeNotifier {
   /// Fetch all missing payment records for a collection card ID (sorted chronological ascending)
   List<MissingPaymentRecord> getMissingRecordsForCollection(String collectionId) {
     final cleanId = collectionId.trim().toLowerCase();
-    final list = _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == cleanId).map((m) {
-      final bool isExcel = m.source.toLowerCase().trim() == 'excel_import' ||
-          m.source.toLowerCase().trim() == 'excel' ||
-          (m.remarks ?? '').toLowerCase().contains('excel');
-      if (isExcel) {
-        // Excel uploaded missing records must always remain 1 week (1-week gap) as per user rule
-        if (m.missingWeek != 1 || m.missingBalance != m.missingFine) {
+    final matching = _missingRecords
+        .where((m) => m.collectionId.trim().toLowerCase() == cleanId)
+        .toList();
+
+    // Deduplicate by ID and composite date/type key (preferring most recently updated)
+    final Map<String, MissingPaymentRecord> deduped = {};
+    for (final m in matching) {
+      final key = m.id.isNotEmpty
+          ? m.id.trim().toLowerCase()
+          : '${m.missedDate.year}-${m.missedDate.month}-${m.missedDate.day}-${m.collectionType.toLowerCase().trim()}';
+      if (!deduped.containsKey(key) || m.updatedAt.isAfter(deduped[key]!.updatedAt)) {
+        deduped[key] = m;
+      }
+    }
+
+    final list = deduped.values.map((m) {
+      // If missingWeek is uninitialized (<= 0), supply default calculation
+      if (m.missingWeek <= 0 && !m.isResolved && !m.isPaused && m.missingFine > 0) {
+        final bool isExcel = m.source.toLowerCase().trim() == 'excel_import' ||
+            m.source.toLowerCase().trim() == 'excel' ||
+            (m.remarks ?? '').toLowerCase().contains('excel');
+        if (isExcel) {
           return m.copyWith(
             missingWeek: 1,
             missingBalance: m.missingFine,
           );
         }
-        return m;
-      }
-
-      if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
         final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate);
         final currentBalance = double.parse((m.missingFine * currentWeek).toStringAsFixed(2));
-        if (m.missingWeek != currentWeek || m.missingBalance != currentBalance) {
-          return m.copyWith(
-            missingWeek: currentWeek,
-            missingBalance: currentBalance,
-          );
-        }
+        return m.copyWith(
+          missingWeek: currentWeek,
+          missingBalance: currentBalance,
+        );
       }
       return m;
     }).toList();
+
     list.sort((a, b) => a.missedDate.compareTo(b.missedDate));
     return list;
   }
 
   /// Total sum of missing pay for a collection card (uncleared/unresolved only)
   double getTotalMissingPayForCollection(String collectionId) {
-    final cleanId = collectionId.trim().toLowerCase();
-    return _missingRecords
-        .where((m) => m.collectionId.trim().toLowerCase() == cleanId && !m.isResolved && m.paidDate == null)
+    final records = getMissingRecordsForCollection(collectionId);
+    return records
+        .where((m) => !m.isResolved && m.paidDate == null)
         .fold(0.0, (sum, m) => sum + (m.missingPay > 0 ? m.missingPay : m.dayPayment));
   }
 
   /// Total sum of missing fine / balance for a collection card
   double getTotalMissingBalanceForCollection(String collectionId, {DateTime? asOfDate}) {
-    final cleanId = collectionId.trim().toLowerCase();
-    return _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == cleanId).fold(0.0, (sum, m) {
-      final bool isExcel = m.source.toLowerCase().trim() == 'excel_import' ||
-          m.source.toLowerCase().trim() == 'excel' ||
-          (m.remarks ?? '').toLowerCase().contains('excel');
-      if (isExcel) {
-        return sum + m.missingFine; // 1 week fine for excel upload
-      }
-      if (!m.isResolved && !m.isPaused && m.missingFine > 0) {
-        final currentWeek = MissingPaymentRecord.calculateWeeks(missedDate: m.missedDate, asOfDate: asOfDate);
-        return sum + double.parse((m.missingFine * currentWeek).toStringAsFixed(2));
+    final records = getMissingRecordsForCollection(collectionId);
+    return records.fold(0.0, (sum, m) {
+      if (m.isResolved || m.paidDate != null) {
+        return sum; // Resolved/paid missing record has 0 unpaid balance
       }
       return sum + m.missingBalance;
     });
@@ -142,21 +145,19 @@ class CollectionSheetProvider extends ChangeNotifier {
 
   /// Total count of all missing records for a collection card
   int getTotalMissingCountForCollection(String collectionId) {
-    final cleanId = collectionId.trim().toLowerCase();
-    return _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == cleanId).length;
+    return getMissingRecordsForCollection(collectionId).length;
   }
 
   /// Count of active uncleared missing records for a collection card
   int getUnclearedMissingCountForCollection(String collectionId) {
-    final cleanId = collectionId.trim().toLowerCase();
-    return _missingRecords.where((m) => m.collectionId.trim().toLowerCase() == cleanId && !m.isResolved && m.paidDate == null).length;
+    return getMissingRecordsForCollection(collectionId)
+        .where((m) => !m.isResolved && m.paidDate == null)
+        .length;
   }
 
   /// Total sum of partial day payments recorded in missing logs for a collection card
   double getTotalDayPaymentForCollection(String collectionId) {
-    final cleanId = collectionId.trim().toLowerCase();
-    return _missingRecords
-        .where((m) => m.collectionId.trim().toLowerCase() == cleanId)
+    return getMissingRecordsForCollection(collectionId)
         .fold(0.0, (sum, m) => sum + m.dayPayment);
   }
   /// Check whether missing records automation is authorized for an entry.
@@ -300,14 +301,15 @@ class CollectionSheetProvider extends ChangeNotifier {
 
   /// Delete a single missing payment record
   Future<bool> deleteMissingPaymentRecord(String recordId) async {
+    final cleanId = recordId.trim().toLowerCase();
     try {
       final success = await SupabaseService.instance.deleteMissingPaymentRecordsBatch([recordId]);
-      _missingRecords.removeWhere((m) => m.id == recordId);
+      _missingRecords.removeWhere((m) => m.id.trim().toLowerCase() == cleanId);
       notifyListeners();
       return success;
     } catch (e) {
       debugPrint('⚠️ Error in deleteMissingPaymentRecord: $e');
-      _missingRecords.removeWhere((m) => m.id == recordId);
+      _missingRecords.removeWhere((m) => m.id.trim().toLowerCase() == cleanId);
       notifyListeners();
       return false;
     }
@@ -316,16 +318,15 @@ class CollectionSheetProvider extends ChangeNotifier {
   /// Batch delete missing payment records by IDs
   Future<bool> deleteMissingPaymentRecordsBatch(List<String> recordIds) async {
     if (recordIds.isEmpty) return true;
+    final cleanSet = recordIds.map((id) => id.trim().toLowerCase()).toSet();
     try {
       final success = await SupabaseService.instance.deleteMissingPaymentRecordsBatch(recordIds);
-      final idSet = recordIds.toSet();
-      _missingRecords.removeWhere((m) => idSet.contains(m.id));
+      _missingRecords.removeWhere((m) => cleanSet.contains(m.id.trim().toLowerCase()));
       notifyListeners();
       return success;
     } catch (e) {
       debugPrint('⚠️ Error in deleteMissingPaymentRecordsBatch: $e');
-      final idSet = recordIds.toSet();
-      _missingRecords.removeWhere((m) => idSet.contains(m.id));
+      _missingRecords.removeWhere((m) => cleanSet.contains(m.id.trim().toLowerCase()));
       notifyListeners();
       return false;
     }
@@ -359,11 +360,47 @@ class CollectionSheetProvider extends ChangeNotifier {
 
   /// Update an existing missing payment record
   Future<bool> updateMissingPaymentRecord(MissingPaymentRecord record) async {
+    final cleanId = record.id.trim().toLowerCase();
+    final cId = record.collectionId.trim().toLowerCase();
+    final cType = record.collectionType.trim().toLowerCase();
+    final rDate = record.missedDate;
+
+    int findIdx() {
+      if (cleanId.isNotEmpty) {
+        final i = _missingRecords.indexWhere((m) => m.id.trim().toLowerCase() == cleanId);
+        if (i >= 0) return i;
+      }
+      if (cId.isNotEmpty) {
+        return _missingRecords.indexWhere((m) =>
+            m.collectionId.trim().toLowerCase() == cId &&
+            m.collectionType.trim().toLowerCase() == cType &&
+            m.missedDate.year == rDate.year &&
+            m.missedDate.month == rDate.month &&
+            m.missedDate.day == rDate.day);
+      }
+      return -1;
+    }
+
     try {
       final success = await SupabaseService.instance.updateMissingPaymentRecord(record);
-      final idx = _missingRecords.indexWhere((m) => m.id == record.id);
+      final idx = findIdx();
       if (idx >= 0) {
         _missingRecords[idx] = record;
+        // Purge any stale duplicate entries that share the same ID or composite key
+        for (int i = _missingRecords.length - 1; i >= 0; i--) {
+          if (i == idx) continue;
+          final m = _missingRecords[i];
+          final bool sameId = cleanId.isNotEmpty && m.id.trim().toLowerCase() == cleanId;
+          final bool sameComposite = cId.isNotEmpty &&
+              m.collectionId.trim().toLowerCase() == cId &&
+              m.collectionType.trim().toLowerCase() == cType &&
+              m.missedDate.year == rDate.year &&
+              m.missedDate.month == rDate.month &&
+              m.missedDate.day == rDate.day;
+          if (sameId || sameComposite) {
+            _missingRecords.removeAt(i);
+          }
+        }
       } else {
         _missingRecords.add(record);
       }
@@ -371,7 +408,7 @@ class CollectionSheetProvider extends ChangeNotifier {
       return success;
     } catch (e) {
       debugPrint('⚠️ Error in updateMissingPaymentRecord: $e');
-      final idx = _missingRecords.indexWhere((m) => m.id == record.id);
+      final idx = findIdx();
       if (idx >= 0) {
         _missingRecords[idx] = record;
       } else {
@@ -533,7 +570,14 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
   /// Ensures all payments for a specific collection card ID are loaded from Supabase into memory
-  Future<List<CollectionPaymentModel>> fetchAllPaymentsForCollection(String collectionId) async {
+  Future<List<CollectionPaymentModel>> fetchAllPaymentsForCollection(
+    String collectionId, {
+    bool forceRefresh = false,
+  }) async {
+    final existing = getPaymentsForCollection(collectionId);
+    if (!forceRefresh && existing.isNotEmpty) {
+      return existing;
+    }
     if (SupabaseService.instance.isInitialized) {
       try {
         final remote = await SupabaseService.instance.fetchPaymentsForCollection(collectionId);
@@ -587,6 +631,11 @@ class CollectionSheetProvider extends ChangeNotifier {
     final total = await SupabaseService.instance.fetchTotalCollectedForCollection(collectionId);
     _dbTotalCollectedCache[collectionId] = total;
     return total;
+  }
+
+  /// Manually update in-memory total collected cache for a collection ID
+  void setDbTotalCollectedCache(String collectionId, double total) {
+    _dbTotalCollectedCache[collectionId] = total;
   }
 
   /// Add or update payments in memory cache from database
@@ -701,12 +750,52 @@ class CollectionSheetProvider extends ChangeNotifier {
     });
   }
 
-  /// Checks whether a collection entry's loan amount and all accrued interest have been fully cleared (remaining balance <= 0).
+  /// Authoritative calculation of Amount Due Till Last Month:
+  /// Formula: (Loan Amount + Post-Maturity Interest + Late Payment Fee - Total Collected).clamp(0.0, double.infinity)
+  /// Prevents premature clamping to 0 before factoring in unpaid late fees or post-maturity interest.
+  double getAmountDueTillLastMonth({
+    required RoCollectionEntry entry,
+    LoaneeAccount? loanee,
+    double? fallbackLateFine,
+    double? fallbackPostMaturityInterest,
+  }) {
+    // 1. Authoritative loan amount
+    final totalLoanAmount = (entry.loanAmount != null && entry.loanAmount! > 0)
+        ? entry.loanAmount!
+        : ((loanee != null && loanee.loanAmount > 0)
+            ? loanee.loanAmount
+            : (entry.actualPrincipal ?? entry.initialBalance));
+
+    // 2. Total collected strictly from valid payment records
+    final totalCollected = getTotalPaidForCollection(entry.id);
+
+    // 3. Post-maturity interest (recorded in payments or fallback)
+    final postMaturityFromPayments = getTotalPostMaturityInterestForCollection(entry.id);
+    final postMaturityInterest = postMaturityFromPayments > 0
+        ? postMaturityFromPayments
+        : (fallbackPostMaturityInterest ?? 0.0);
+
+    // 4. Unpaid late payment fees (from missing records, payment records, or dynamic fallback)
+    final missingBalance = getTotalMissingBalanceForCollection(entry.id);
+    final paymentLateFees = getTotalLatePaymentFeesForCollection(entry.id);
+    final lateFee = missingBalance > 0
+        ? missingBalance
+        : (paymentLateFees > 0 ? paymentLateFees : (fallbackLateFine ?? 0.0));
+
+    if (totalLoanAmount <= 0) {
+      final latestBal = getLatestRemainingBalance(entry.id);
+      return (latestBal + missingBalance).clamp(0.0, double.infinity);
+    }
+
+    final totalObligation = totalLoanAmount + postMaturityInterest + lateFee;
+    return (totalObligation - totalCollected).clamp(0.0, double.infinity);
+  }
+
+  /// Checks whether a collection entry's loan amount, post-maturity interest, and late payment fees have been fully cleared.
   /// A loan is ONLY completed when:
-  /// - Total collected from payment records strictly clears initial loan amount + all interest (remaining <= 0.01)
-  /// - Total payable amount is 0.00
-  /// - Under NO circumstances is a loan completed if there is an outstanding payable balance or unpaid interest,
-  ///   even if the maturity date has passed, even if tenure elapsed, and even if paidAmount >= loanAmount.
+  /// - Amount Due Till Last Month <= 0.01
+  /// - Total collected from payment records > 0
+  /// - Under NO circumstances is a loan completed if there is an outstanding Amount Due Till Last Month (> 0.01).
   bool isEntryCompleted(RoCollectionEntry entry, {LoaneeProvider? loaneeProvider}) {
     // 1. Resolve LoaneeAccount if available
     LoaneeAccount? loanee;
@@ -725,19 +814,20 @@ class CollectionSheetProvider extends ChangeNotifier {
             ? loanee.loanAmount
             : entry.initialBalance);
 
-    // 3. Dynamic payment calculation from ro_collection_payments records
     final totalCollected = getTotalPaidForCollection(entry.id);
-    final totalInterest = getTotalInterestForCollection(entry.id);
+    final amountDueTillLastMonth = getAmountDueTillLastMonth(
+      entry: entry,
+      loanee: loanee,
+    );
 
-    // If there is a loan amount defined
+    // If there is any outstanding Amount Due Till Last Month, loan is NOT completed under any circumstances!
+    if (amountDueTillLastMonth > 0.01) {
+      return false;
+    }
+
+    // 3. Dynamic payment calculation
     if (totalLoanAmount > 0) {
-      final remaining = (totalLoanAmount + totalInterest - totalCollected);
-      // If remaining balance is greater than 0.01, loan is NOT completed under any circumstances!
-      if (remaining > 0.01) {
-        return false;
-      }
-      // If total collected clears the loan + all interest, then it is completed
-      if (totalCollected > 0 && remaining <= 0.01) {
+      if (totalCollected > 0 && amountDueTillLastMonth <= 0.01) {
         return true;
       }
     }
@@ -745,31 +835,23 @@ class CollectionSheetProvider extends ChangeNotifier {
     // 4. Check latest payment in ro_collection_payments
     final cardPayments = getPaymentsForCollection(entry.id);
     if (cardPayments.isNotEmpty) {
-      final sorted = List<CollectionPaymentModel>.from(cardPayments)
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      if (sorted.first.remainingBalance > 0.01) {
-        return false;
-      }
-      if (sorted.first.remainingBalance <= 0.01 && totalCollected > 0) {
+      if (amountDueTillLastMonth <= 0.01 && totalCollected > 0) {
         return true;
       }
     }
 
     // 5. Check loanee dueAmount
     if (loanee != null) {
-      if (loanee.dueAmount > 0.01) {
-        return false;
-      }
-      if (loanee.loanAmount > 0 && loanee.dueAmount <= 0.01 && loanee.paidAmount > 0) {
+      if (loanee.loanAmount > 0 && amountDueTillLastMonth <= 0.01 && loanee.paidAmount > 0) {
         return true;
       }
     }
 
-    // 6. Explicit closed/completed status ONLY if no outstanding due remains
+    // 6. Explicit closed/completed status ONLY if Amount Due Till Last Month <= 0.01
     final entryStatus = entry.status.trim().toLowerCase();
     final loaneeStatus = loanee?.status.trim().toLowerCase() ?? '';
     if (entryStatus == 'closed' || entryStatus == 'completed' || loaneeStatus == 'closed' || loaneeStatus == 'completed') {
-      if (totalCollected > 0) {
+      if (totalCollected > 0 && amountDueTillLastMonth <= 0.01) {
         return true;
       }
     }
@@ -964,6 +1046,11 @@ class CollectionSheetProvider extends ChangeNotifier {
             payment: payment,
             card: parentCard,
           );
+          // Automatically update completion status in Supabase when loan is fully cleared (Amount Due Till Last Month <= 0)
+          if (parentCard.status.toLowerCase() != 'completed' && isEntryCompleted(parentCard)) {
+            final completedEntry = parentCard.copyWith(status: 'Completed');
+            updateCollectionEntry(completedEntry);
+          }
         }
       }
     }
@@ -2151,7 +2238,25 @@ class CollectionSheetProvider extends ChangeNotifier {
     DateTime? startDate,
     DateTime? endDate,
     bool ascending = false,
+    bool forceRemote = false,
   }) async {
+    // If collectionId is specified and we already have payments in memory for this collection,
+    // paginate directly from the in-memory store to eliminate duplicate HTTP queries.
+    if (!forceRemote && collectionId != null && collectionId.isNotEmpty) {
+      final inMem = getPaymentsForCollection(collectionId);
+      if (inMem.isNotEmpty) {
+        return _paginatePaymentsList(
+          source: inMem,
+          page: page,
+          pageSize: pageSize,
+          searchQuery: searchQuery,
+          startDate: startDate,
+          endDate: endDate,
+          ascending: ascending,
+        );
+      }
+    }
+
     // 1. Try fetching via database-level query from Supabase
     if (SupabaseService.instance.isInitialized) {
       try {
@@ -2172,7 +2277,31 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
 
     // 2. In-memory fallback from provider payment store across all dates
-    var filtered = List<CollectionPaymentModel>.from(_payments);
+    return _paginatePaymentsList(
+      source: _payments,
+      page: page,
+      pageSize: pageSize,
+      route: route,
+      collectionId: collectionId,
+      searchQuery: searchQuery,
+      startDate: startDate,
+      endDate: endDate,
+      ascending: ascending,
+    );
+  }
+
+  PaginatedPaymentsResult _paginatePaymentsList({
+    required List<CollectionPaymentModel> source,
+    required int page,
+    required int pageSize,
+    String? route,
+    String? collectionId,
+    String? searchQuery,
+    DateTime? startDate,
+    DateTime? endDate,
+    bool ascending = false,
+  }) {
+    var filtered = List<CollectionPaymentModel>.from(source);
 
     if (collectionId != null && collectionId.isNotEmpty) {
       filtered = filtered.where((p) => p.collectionId == collectionId).toList();
@@ -2210,7 +2339,6 @@ class CollectionSheetProvider extends ChangeNotifier {
     }
 
     // Stable Sort: Payment date ascending or descending, then ID
-    // Uses effectiveSortDate so missing date payments cleared on latest date sort to the top!
     filtered.sort((a, b) {
       final dateCmp = ascending
           ? a.effectiveSortDate.compareTo(b.effectiveSortDate)
@@ -2286,9 +2414,44 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
   void handleRealtimeMissingRecordUpsert(MissingPaymentRecord record) {
-    final existingIndex = _missingRecords.indexWhere((m) => m.id == record.id);
+    final cleanId = record.id.trim().toLowerCase();
+    final cId = record.collectionId.trim().toLowerCase();
+    final cType = record.collectionType.trim().toLowerCase();
+    final rDate = record.missedDate;
+
+    int existingIndex = -1;
+    if (cleanId.isNotEmpty) {
+      existingIndex = _missingRecords.indexWhere(
+        (m) => m.id.trim().toLowerCase() == cleanId,
+      );
+    }
+    if (existingIndex == -1 && cId.isNotEmpty) {
+      existingIndex = _missingRecords.indexWhere((m) {
+        return m.collectionId.trim().toLowerCase() == cId &&
+            m.collectionType.trim().toLowerCase() == cType &&
+            m.missedDate.year == rDate.year &&
+            m.missedDate.month == rDate.month &&
+            m.missedDate.day == rDate.day;
+      });
+    }
+
     if (existingIndex != -1) {
       _missingRecords[existingIndex] = record;
+      // Purge any stale duplicate entries that share the same ID or composite key
+      for (int i = _missingRecords.length - 1; i >= 0; i--) {
+        if (i == existingIndex) continue;
+        final m = _missingRecords[i];
+        final bool sameId = cleanId.isNotEmpty && m.id.trim().toLowerCase() == cleanId;
+        final bool sameComposite = cId.isNotEmpty &&
+            m.collectionId.trim().toLowerCase() == cId &&
+            m.collectionType.trim().toLowerCase() == cType &&
+            m.missedDate.year == rDate.year &&
+            m.missedDate.month == rDate.month &&
+            m.missedDate.day == rDate.day;
+        if (sameId || sameComposite) {
+          _missingRecords.removeAt(i);
+        }
+      }
     } else {
       _missingRecords.add(record);
     }
@@ -2296,7 +2459,8 @@ class CollectionSheetProvider extends ChangeNotifier {
   }
 
   void handleRealtimeMissingRecordDelete(String id) {
-    _missingRecords.removeWhere((m) => m.id == id);
+    final cleanId = id.trim().toLowerCase();
+    _missingRecords.removeWhere((m) => m.id.trim().toLowerCase() == cleanId);
     notifyListeners();
   }
 
@@ -2304,14 +2468,40 @@ class CollectionSheetProvider extends ChangeNotifier {
   Future<void> refreshMissingRecordsForCollection(String collectionId) async {
     if (!SupabaseService.instance.isInitialized) return;
     try {
+      final cleanColId = collectionId.trim().toLowerCase();
       final remote = await SupabaseService.instance.fetchMissingPaymentRecords(collectionId: collectionId);
+      final remoteIds = <String>{};
+
       for (final r in remote) {
-        final idx = _missingRecords.indexWhere((m) => m.id == r.id);
+        final rCleanId = r.id.trim().toLowerCase();
+        if (rCleanId.isNotEmpty) remoteIds.add(rCleanId);
+
+        int idx = -1;
+        if (rCleanId.isNotEmpty) {
+          idx = _missingRecords.indexWhere((m) => m.id.trim().toLowerCase() == rCleanId);
+        }
+        if (idx == -1) {
+          idx = _missingRecords.indexWhere((m) =>
+              m.collectionId.trim().toLowerCase() == cleanColId &&
+              m.collectionType.trim().toLowerCase() == r.collectionType.trim().toLowerCase() &&
+              m.missedDate.year == r.missedDate.year &&
+              m.missedDate.month == r.missedDate.month &&
+              m.missedDate.day == r.missedDate.day);
+        }
+
         if (idx >= 0) {
           _missingRecords[idx] = r;
         } else {
           _missingRecords.add(r);
         }
+      }
+
+      // Remove records for this collection that no longer exist in remote
+      if (remote.isNotEmpty || remoteIds.isNotEmpty) {
+        _missingRecords.removeWhere((m) =>
+            m.collectionId.trim().toLowerCase() == cleanColId &&
+            m.id.isNotEmpty &&
+            !remoteIds.contains(m.id.trim().toLowerCase()));
       }
       notifyListeners();
     } catch (e) {
@@ -2453,8 +2643,25 @@ class CollectionSheetProvider extends ChangeNotifier {
     }).toList();
   }
 
+  Future<void>? _pendingFetchFuture;
+
   // SYNC WITH SUPABASE TABLES
-  Future<void> fetchFromSupabase() async {
+  Future<void> fetchFromSupabase({bool forceRefresh = false}) async {
+    if (_pendingFetchFuture != null) {
+      return _pendingFetchFuture!;
+    }
+    _pendingFetchFuture = _doFetchFromSupabase(forceRefresh: forceRefresh);
+    try {
+      await _pendingFetchFuture;
+    } finally {
+      _pendingFetchFuture = null;
+    }
+  }
+
+  Future<void> _doFetchFromSupabase({bool forceRefresh = false}) async {
+    if (!forceRefresh && _collectionEntries.isNotEmpty && _payments.isNotEmpty) {
+      return;
+    }
     _isSyncing = true;
     notifyListeners();
 

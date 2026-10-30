@@ -599,7 +599,7 @@ class _TransactionPageState extends State<TransactionPage> {
                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                        children: [
                                          Text('Amount Due Till Last Month:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade700)),
-                                         Text('₹ ${(collectionProvider.getLatestRemainingBalance(_selectedCard!.id) + collectionProvider.getTotalMissingBalanceForCollection(_selectedCard!.id)).toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                         Text('₹ ${collectionProvider.getAmountDueTillLastMonth(entry: _selectedCard!).toStringAsFixed(2)}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
                                        ],
                                      ),
                                     Builder(

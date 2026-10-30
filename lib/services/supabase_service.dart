@@ -3050,7 +3050,7 @@ class SupabaseService {
     }
   }
 
-  /// Update an existing missing payment record by ID
+  /// Update an existing missing payment record by ID or composite key
   Future<bool> updateMissingPaymentRecord(MissingPaymentRecord record) async {
     try {
       final supaClient = client;
@@ -3058,15 +3058,22 @@ class SupabaseService {
 
       final payload = record.toJson();
       try {
-        await supaClient.from('missing_payment_records').update(payload).match({'id': record.id});
+        await supaClient.from('missing_payment_records').upsert(
+          payload,
+          onConflict: 'collection_id,missed_date,collection_type',
+        );
         return true;
       } catch (err) {
         if (err.toString().contains('paid_date')) {
           final fallback = Map<String, dynamic>.from(payload)..remove('paid_date');
-          await supaClient.from('missing_payment_records').update(fallback).match({'id': record.id});
+          await supaClient.from('missing_payment_records').upsert(
+            fallback,
+            onConflict: 'collection_id,missed_date,collection_type',
+          );
           return true;
         }
-        rethrow;
+        await supaClient.from('missing_payment_records').update(payload).match({'id': record.id});
+        return true;
       }
     } catch (e) {
       debugPrint('ℹ️ Note on updateMissingPaymentRecord: $e');
